@@ -1,0 +1,189 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ================= HELPERS =================
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // Get current user doc (pre-transaction state)
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isSuperadmin() {
+      return getUserData().role == 'superadmin';
+    }
+    
+    // Owner check via businessId cross-reference
+    function isBusinessOwner(businessId) {
+      return getUserData().role == 'owner' && getUserData().businessId == businessId;
+    }
+    
+    // Owner check via assignedBranches (no cross-reference needed — more reliable)
+    function isOwnerOfBranch(branchId) {
+      return getUserData().role == 'owner' && branchId in getUserData().assignedBranches;
+    }
+    
+    // Manager check via assignedBranches
+    function isBranchManager(branchId) {
+      return getUserData().role == 'manager' && branchId in getUserData().assignedBranches;
+    }
+
+    // Get businessId from existing branch doc
+    function getBranchBusinessId(branchId) {
+      return get(/databases/$(database)/documents/branches/$(branchId)).data.businessId;
+    }
+
+    // Post-transaction user doc (for batch create operations like registration)
+    function getUserDataAfter() {
+      return getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Combined owner/manager/admin check for branch subcollections
+    // Uses TWO independent owner checks (businessId match OR assignedBranches match)
+    function canManageBranch(branchId) {
+      return isOwnerOfBranch(branchId) 
+        || isBusinessOwner(getBranchBusinessId(branchId))
+        || isBranchManager(branchId) 
+        || isSuperadmin();
+    }
+
+    // ================= RULES =================
+
+    // -------- User profiles --------
+    match /users/{userId} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == userId || 
+        isSuperadmin() ||
+        getUserData().role == 'owner'
+      );
+      allow write: if isSignedIn() && (
+        request.auth.uid == userId || 
+        isSuperadmin() || 
+        getUserData().role == 'owner'
+      );
+    }
+
+    // -------- Business (Tenant) --------
+    match /businesses/{businessId} {
+      allow read: if isSignedIn() && (isBusinessOwner(businessId) || isSuperadmin());
+      allow create: if isSignedIn() && request.auth.uid == request.resource.data.ownerUid;
+      allow update, delete: if isSignedIn() && (isBusinessOwner(businessId) || isSuperadmin());
+    }
+
+    // -------- Branches --------
+    match /branches/{branchId} {
+      allow read: if true; // Public for booking clients
+      allow create: if isSignedIn() && (
+        // Normal: existing owner creates a new branch
+        (getUserData().role == 'owner' && getUserData().businessId == request.resource.data.businessId) ||
+        // Registration batch: user doc created in same batch
+        (getUserDataAfter().role == 'owner' && getUserDataAfter().businessId == request.resource.data.businessId)
+      );
+      allow update, delete: if isSignedIn() && (
+        isOwnerOfBranch(branchId) ||
+        isBusinessOwner(resource.data.businessId) || 
+        isBranchManager(branchId) || 
+        isSuperadmin()
+      );
+    }
+
+    // -------- Staff --------
+    match /branches/{branchId}/staff/{staffId} {
+      allow read: if true;
+      allow create: if isSignedIn() && (
+        canManageBranch(branchId) ||
+        // Registration batch fallback: branch created in same batch
+        (request.resource.data.businessId is string 
+          && getUserDataAfter().role == 'owner' 
+          && getUserDataAfter().businessId == request.resource.data.businessId) ||
+        // Self-registration via invitation code
+        (staffId == 'staff-' + request.auth.uid 
+          && request.resource.data.userUid == request.auth.uid 
+          && request.resource.data.status == 'inactive')
+      );
+      allow update, delete: if isSignedIn() && canManageBranch(branchId);
+
+      // Working hours subcollection
+      match /workingHours/{dayId} {
+        allow read: if true;
+        allow write: if isSignedIn() && canManageBranch(branchId);
+      }
+
+      // Absences subcollection
+      match /absences/{absenceId} {
+        allow read: if true;
+        allow write: if isSignedIn() && canManageBranch(branchId);
+      }
+    }
+
+    // -------- Services --------
+    match /branches/{branchId}/services/{serviceId} {
+      allow read: if true;
+      allow create: if isSignedIn() && (
+        canManageBranch(branchId) ||
+        // Registration batch fallback
+        (request.resource.data.businessId is string 
+          && getUserDataAfter().role == 'owner' 
+          && getUserDataAfter().businessId == request.resource.data.businessId)
+      );
+      allow update, delete: if isSignedIn() && canManageBranch(branchId);
+    }
+
+    // -------- Categories --------
+    match /branches/{branchId}/categories/{categoryId} {
+      allow read: if true;
+      allow create: if isSignedIn() && (
+        canManageBranch(branchId) ||
+        // Registration batch fallback
+        (request.resource.data.businessId is string 
+          && getUserDataAfter().role == 'owner' 
+          && getUserDataAfter().businessId == request.resource.data.businessId)
+      );
+      allow update, delete: if isSignedIn() && canManageBranch(branchId);
+    }
+
+    // -------- Invitations --------
+    match /invitations/{code} {
+      allow read: if true;
+      allow create: if isSignedIn() && (getUserData().role == 'owner' || isSuperadmin());
+      allow update: if true; // Mark as used during registration
+      allow delete: if isSignedIn() && (getUserData().role == 'owner' || isSuperadmin());
+    }
+
+    // -------- Bookings --------
+    match /branches/{branchId}/bookings/{bookingId} {
+      allow create: if true; // Clients can book online without authentication
+      allow read: if isSignedIn() && (
+        canManageBranch(branchId) ||
+        (getUserData().role == 'staff' && resource.data.staffId == getUserData().staffId)
+      );
+      allow update, delete: if isSignedIn() && (
+        canManageBranch(branchId) ||
+        (getUserData().role == 'staff' && resource.data.staffId == getUserData().staffId)
+      );
+    }
+
+    // -------- Financial Analytics (Owner & Superadmin ONLY) --------
+    match /branches/{branchId}/analytics/{analyticsId} {
+      allow read, write: if isSignedIn() && (
+        isOwnerOfBranch(branchId) || 
+        isBusinessOwner(getBranchBusinessId(branchId)) || 
+        isSuperadmin()
+      );
+    }
+
+    // -------- Basic Analytics (Owner, Manager, Superadmin) --------
+    match /branches/{branchId}/analytics_basic/{analyticsId} {
+      allow read, write: if isSignedIn() && canManageBranch(branchId);
+    }
+
+    // -------- Collection Group: Bookings (for superadmin cross-branch queries) --------
+    match /{path=**}/bookings/{bookingId} {
+      allow read: if isSignedIn() && isSuperadmin();
+    }
+  }
+}

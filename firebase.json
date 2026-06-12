@@ -1,0 +1,80 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "hosting": {
+    "public": "web/out",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "trailingSlash": true,
+    "rewrites": [
+      {
+        "source": "/book/*/success",
+        "destination": "/book/glamour-nails-berlin/success/index.html"
+      },
+      {
+        "source": "/book/*/success/",
+        "destination": "/book/glamour-nails-berlin/success/index.html"
+      },
+      {
+        "source": "/book/*/confirm",
+        "destination": "/book/glamour-nails-berlin/confirm/index.html"
+      },
+      {
+        "source": "/book/*/confirm/",
+        "destination": "/book/glamour-nails-berlin/confirm/index.html"
+      },
+      {
+        "source": "/book/*/datetime",
+        "destination": "/book/glamour-nails-berlin/datetime/index.html"
+      },
+      {
+        "source": "/book/*/datetime/",
+        "destination": "/book/glamour-nails-berlin/datetime/index.html"
+      },
+      {
+        "source": "/book/*/staff",
+        "destination": "/book/glamour-nails-berlin/staff/index.html"
+      },
+      {
+        "source": "/book/*/staff/",
+        "destination": "/book/glamour-nails-berlin/staff/index.html"
+      },
+      {
+        "source": "/book/*",
+        "destination": "/book/glamour-nails-berlin/index.html"
+      },
+      {
+        "source": "/book/*/",
+        "destination": "/book/glamour-nails-berlin/index.html"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "**/*.@(js|css)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          }
+        ]
+      },
+      {
+        "source": "**/*.@(jpg|jpeg|gif|png|svg|webp|ico)",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=86400"
+          }
+        ]
+      }
+    ]
+  }
+}

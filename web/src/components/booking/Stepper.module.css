@@ -1,0 +1,143 @@
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-lg) var(--space-md);
+  gap: 0;
+  animation: fadeIn var(--transition-base) ease-out;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.stepButton {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-pill);
+  transition: all var(--transition-base);
+}
+
+.stepButton:hover {
+  background: var(--color-primary-light);
+}
+
+.stepButton:disabled {
+  cursor: default;
+}
+
+.stepButton:disabled:hover {
+  background: none;
+}
+
+.circle {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  transition: all var(--transition-base);
+  flex-shrink: 0;
+}
+
+.circleActive {
+  background: var(--color-primary);
+  color: var(--color-text-inverse);
+}
+
+.circleCompleted {
+  background: var(--color-success);
+  color: var(--color-text-inverse);
+}
+
+.circlePending {
+  background: transparent;
+  border: 2px solid var(--color-border);
+  color: var(--color-text-tertiary);
+}
+
+.checkmark {
+  width: 16px;
+  height: 16px;
+  stroke: white;
+  stroke-width: 2.5;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.label {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color var(--transition-base);
+}
+
+.labelActive {
+  color: var(--color-text-primary);
+}
+
+.labelCompleted {
+  color: var(--color-success-text);
+}
+
+.labelPending {
+  color: var(--color-text-tertiary);
+}
+
+.connector {
+  width: 48px;
+  height: 2px;
+  margin: 0 var(--space-xs);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.connectorLine {
+  width: 100%;
+  height: 100%;
+  background-image: repeating-linear-gradient(
+    to right,
+    var(--color-border) 0,
+    var(--color-border) 6px,
+    transparent 6px,
+    transparent 12px
+  );
+}
+
+.connectorCompleted {
+  background-image: none;
+  background: var(--color-success);
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .stepper {
+    padding: var(--space-md) var(--space-sm);
+  }
+
+  .label {
+    display: none;
+  }
+
+  .connector {
+    width: 32px;
+  }
+
+  .circle {
+    width: 28px;
+    height: 28px;
+    font-size: var(--font-size-xs);
+  }
+}
