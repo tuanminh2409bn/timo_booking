@@ -1,26 +1,28 @@
+/* ===== ACCOUNTS PAGE - MINIMALIST DESIGN ===== */
+
 .container {
-  animation: fadeIn 0.4s ease-out;
+  animation: fadeIn 0.3s ease-out;
   display: flex;
   flex-direction: column;
   gap: 24px;
 }
 
 .pageHeader {
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #E5E7EB;
   padding-bottom: 20px;
 }
 
 .title {
-  font-size: 24px;
-  font-weight: 800;
+  font-size: 22px;
+  font-weight: 700;
   color: #111827;
-  margin: 0 0 6px 0;
-  letter-spacing: -0.5px;
+  margin: 0 0 4px 0;
+  letter-spacing: -0.3px;
 }
 
 .subtitle {
-  font-size: 14px;
-  color: #4b5563;
+  font-size: 13px;
+  color: #6B7280;
   margin: 0;
 }
 
@@ -30,29 +32,34 @@
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 16px;
-  background-color: #ffffff;
-  border: 1px solid #e5e7eb;
+  gap: 12px;
+  background-color: #FFFFFF;
+  border: 1px solid #E5E7EB;
   border-radius: 12px;
-  padding: 16px;
+  padding: 14px 16px;
 }
 
 .searchBox {
   display: flex;
   align-items: center;
   gap: 8px;
-  background-color: #f3f4f6;
-  border: 1px solid #e5e7eb;
+  background-color: #F7F7F7;
+  border: 1px solid #E5E7EB;
   border-radius: 8px;
   padding: 8px 12px;
   flex: 1;
   max-width: 350px;
   min-width: 200px;
+  transition: border-color 0.15s ease;
+}
+
+.searchBox:focus-within {
+  border-color: #1A56DB;
 }
 
 .searchIcon {
   font-size: 14px;
-  color: #9ca3af;
+  color: #9CA3AF;
 }
 
 .searchInput {
@@ -65,40 +72,43 @@
 }
 
 .searchInput::placeholder {
-  color: #9ca3af;
+  color: #9CA3AF;
 }
 
 .filtersGroup {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
 .selectFilter {
   padding: 8px 12px;
   border-radius: 8px;
-  border: 1px solid #e5e7eb;
-  background-color: #ffffff;
-  color: #4b5563;
-  font-size: 13.5px;
+  border: 1px solid #E5E7EB;
+  background-color: #FFFFFF;
+  color: #6B7280;
+  font-size: 13px;
   font-weight: 600;
   outline: none;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
 }
 
 .selectFilter:hover {
-  border-color: #cbd5e1;
+  border-color: #D1D5DB;
   color: #111827;
+}
+
+.selectFilter:focus {
+  border-color: #1A56DB;
 }
 
 /* Table Design */
 .tableWrapper {
-  background-color: #ffffff;
-  border: 1px solid #e5e7eb;
+  background-color: #FFFFFF;
+  border: 1px solid #E5E7EB;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
 }
 
 .accountsTable {
@@ -109,19 +119,19 @@
 }
 
 .accountsTable th {
-  background-color: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
-  padding: 14px 20px;
-  font-weight: 700;
-  color: #4b5563;
-  font-size: 13px;
+  background-color: #FAFAFA;
+  border-bottom: 1px solid #E5E7EB;
+  padding: 12px 20px;
+  font-weight: 600;
+  color: #6B7280;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .accountsTable td {
-  padding: 16px 20px;
-  border-bottom: 1px solid #e5e7eb;
+  padding: 14px 20px;
+  border-bottom: 1px solid #F3F4F6;
   vertical-align: middle;
 }
 
@@ -130,11 +140,11 @@
 }
 
 .accountsTable tbody tr:hover {
-  background-color: #f9fafb;
+  background-color: #FAFAFA;
 }
 
 .currentUserRow {
-  background-color: rgba(59, 130, 246, 0.02);
+  background-color: #FAFBFF;
 }
 
 .userNameContainer {
@@ -143,8 +153,8 @@
 }
 
 .userName {
-  font-size: 14.5px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 600;
   color: #111827;
   display: flex;
   align-items: center;
@@ -152,56 +162,57 @@
 }
 
 .selfTag {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  color: #3b82f6;
-  background-color: #eff6ff;
+  color: #1A56DB;
+  background-color: #EFF6FF;
   padding: 1px 6px;
   border-radius: 4px;
 }
 
 .userEmail {
-  font-size: 12.5px;
-  color: #6b7280;
+  font-size: 12px;
+  color: #9CA3AF;
 }
 
 .userPhone {
-  color: #4b5563;
+  color: #6B7280;
   font-weight: 500;
 }
 
 /* Role Badges */
 .roleBadge {
-  font-size: 12px;
-  font-weight: 700;
-  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
   border-radius: 6px;
   text-transform: uppercase;
   display: inline-block;
+  letter-spacing: 0.3px;
 }
 
 .badgeSuper {
-  color: #7c3aed;
-  background-color: #f5f3ff;
-  border: 1px solid #ddd6fe;
+  color: #7C3AED;
+  background-color: #F5F3FF;
+  border: 1px solid #DDD6FE;
 }
 
 .badgeOwner {
-  color: #2563eb;
-  background-color: #eff6ff;
-  border: 1px solid #bfdbfe;
+  color: #1A56DB;
+  background-color: #EFF6FF;
+  border: 1px solid #BFDBFE;
 }
 
 .badgeManager {
   color: #059669;
-  background-color: #ecfdf5;
-  border: 1px solid #a7f3d0;
+  background-color: #ECFDF5;
+  border: 1px solid #A7F3D0;
 }
 
 .badgeStaff {
-  color: #4b5563;
-  background-color: #f3f4f6;
-  border: 1px solid #e5e7eb;
+  color: #6B7280;
+  background-color: #F3F4F6;
+  border: 1px solid #E5E7EB;
 }
 
 /* Branch Tags */
@@ -213,47 +224,50 @@
 
 .branchSlugTag {
   font-size: 11px;
-  font-family: monospace;
-  background-color: #f3f4f6;
-  border: 1px solid #e5e7eb;
-  color: #4b5563;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  background-color: #F7F7F7;
+  border: 1px solid #E5E7EB;
+  color: #6B7280;
   padding: 2px 6px;
   border-radius: 4px;
 }
 
 .noBranchText {
   font-size: 13px;
-  color: #9ca3af;
+  color: #9CA3AF;
   font-style: italic;
 }
 
 /* Status Badges */
 .statusBadge {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 3px 10px;
   border-radius: 20px;
   display: inline-block;
 }
 
 .statusApproved {
-  color: #10b981;
-  background-color: rgba(16, 185, 129, 0.08);
+  color: #059669;
+  background-color: #F0FDF4;
+  border: 1px solid #D1FAE5;
 }
 
 .statusPending {
-  color: #d97706;
-  background-color: rgba(217, 119, 6, 0.08);
+  color: #D97706;
+  background-color: #FFFBEB;
+  border: 1px solid #FDE68A;
 }
 
 .statusRejected {
-  color: #ef4444;
-  background-color: rgba(239, 68, 68, 0.08);
+  color: #DC2626;
+  background-color: #FEF2F2;
+  border: 1px solid #FECACA;
 }
 
 .statusNone {
-  color: #6b7280;
-  background-color: #f3f4f6;
+  color: #9CA3AF;
+  background-color: #F3F4F6;
 }
 
 /* Actions Cell & Selectors */
@@ -265,20 +279,24 @@
 
 .actionSelect {
   padding: 6px 10px;
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
-  border: 1px solid #d1d5db;
+  border: 1px solid #E5E7EB;
   border-radius: 6px;
   outline: none;
-  background-color: #ffffff;
+  background-color: #FFFFFF;
   color: #374151;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
 }
 
 .actionSelect:hover:not(:disabled) {
-  border-color: #9ca3af;
-  background-color: #f9fafb;
+  border-color: #D1D5DB;
+  background-color: #FAFAFA;
+}
+
+.actionSelect:focus {
+  border-color: #1A56DB;
 }
 
 .actionSelect:disabled {
@@ -290,12 +308,12 @@
 .loadingState, .emptyState {
   text-align: center;
   padding: 60px 20px;
-  color: #6b7280;
+  color: #9CA3AF;
 }
 
 .spinner {
-  border: 3px solid #f3f4f6;
-  border-top: 3px solid #3b82f6;
+  border: 3px solid #F3F4F6;
+  border-top: 3px solid #1A56DB;
   border-radius: 50%;
   width: 24px;
   height: 24px;
@@ -307,7 +325,7 @@
   font-size: 40px;
   display: block;
   margin-bottom: 12px;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 
 /* Denied Screen */
@@ -322,6 +340,7 @@
   font-size: 60px;
   display: block;
   margin-bottom: 20px;
+  opacity: 0.4;
 }
 
 @keyframes spin {
@@ -337,5 +356,14 @@
 @media (max-width: 900px) {
   .tableWrapper {
     overflow-x: auto;
+  }
+
+  .controlsBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .searchBox {
+    max-width: none;
   }
 }
