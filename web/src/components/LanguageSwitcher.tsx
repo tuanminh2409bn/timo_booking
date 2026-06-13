@@ -6,7 +6,13 @@ import styles from './LanguageSwitcher.module.css';
 
 const locales: Locale[] = ['de', 'en', 'vi'];
 
-export default function LanguageSwitcher({ variant = 'light' }: { variant?: 'light' | 'dark' }) {
+export default function LanguageSwitcher({
+  variant = 'light',
+  align = 'right',
+}: {
+  variant?: 'light' | 'dark';
+  align?: 'left' | 'right';
+}) {
   const { locale, setLocale } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -45,7 +51,7 @@ export default function LanguageSwitcher({ variant = 'light' }: { variant?: 'lig
       {open && (
         <>
           <div className={styles.overlay} onClick={() => setOpen(false)} />
-          <div className={styles.dropdown}>
+          <div className={`${styles.dropdown} ${align === 'left' ? styles.dropdownLeft : ''}`}>
             {locales.map((loc) => (
               <button
                 key={loc}

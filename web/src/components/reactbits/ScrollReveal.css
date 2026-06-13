@@ -1,5 +1,7 @@
 .scroll-reveal {
-  display: inline-block;
+  display: block;
+  width: 100%;
+  max-width: 100%;
 }
 .scroll-reveal-word {
   display: inline-block;

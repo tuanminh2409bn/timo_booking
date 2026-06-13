@@ -127,6 +127,8 @@ html {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   scroll-behavior: smooth;
+  overflow-x: hidden;
+  max-width: 100%;
 }
 
 body {
@@ -137,6 +139,7 @@ body {
   background: var(--color-bg);
   min-height: 100vh;
   overflow-x: hidden;
+  max-width: 100%;
 }
 
 a {

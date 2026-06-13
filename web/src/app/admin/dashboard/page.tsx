@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { collection, onSnapshot, doc, updateDoc, collectionGroup } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import Link from 'next/link';
+import { getGermanDateObject, getGermanTodayString } from '@/lib/timeUtils';
 import styles from './page.module.css';
 
 export default function DashboardPage() {
@@ -113,8 +114,12 @@ export default function DashboardPage() {
   if (!user) return null;
 
   // ---------- COMPUTED ----------
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayBookings = realBookings.filter(b => b.appointmentDate === todayStr && b.status !== 'cancelled');
+  const todayStr = getGermanTodayString();
+  const todayBookings = realBookings.filter(b => {
+    if (b.appointmentDate !== todayStr || b.status === 'cancelled') return false;
+    if (user.role === 'staff' && b.staffId !== user.staffId) return false;
+    return true;
+  });
   const activeBookings = realBookings.filter(b => b.status !== 'cancelled');
   const pendingBookings = realBookings.filter(b => b.status === 'pending_approval');
 
@@ -146,10 +151,6 @@ export default function DashboardPage() {
           <div className={styles.statItem}>
             <span className={styles.statNumber}>{totalUsers}</span>
             <span className={styles.statLabel}>{locale === 'vi' ? 'Tài khoản' : 'Accounts'}</span>
-          </div>
-          <div className={styles.statItem}>
-            <span className={styles.statNumber}>€{totalPlatformRevenue.toLocaleString()}</span>
-            <span className={styles.statLabel}>{locale === 'vi' ? 'Doanh thu' : 'Revenue'}</span>
           </div>
         </div>
 
@@ -230,22 +231,26 @@ export default function DashboardPage() {
             </div>
           ) : (
             todayBookings
-              .sort((a, b) => (a.appointmentTime || '').localeCompare(b.appointmentTime || ''))
-              .map((b) => (
+              .sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''))
+              .map((b) => {
+                const serviceName = (b.services || []).length > 0
+                  ? (typeof b.services[0] === 'object' ? (b.services[0].serviceName || b.services[0].name) : b.services[0])
+                  : 'Service';
+                return (
                 <div key={b.id} className={styles.bookingCard}>
                   <div className={styles.bookingTime}>
-                    <span className={styles.bookingTimeText}>{b.appointmentTime || '—'}</span>
-                    <span className={styles.bookingDuration}>{b.totalDuration || 60} {locale === 'vi' ? 'phút' : 'min'}</span>
+                    <span className={styles.bookingTimeText}>{b.startTime || '—'}</span>
+                    <span className={styles.bookingDuration}>{b.totalDurationMinutes || 60} {locale === 'vi' ? 'phút' : 'min'}</span>
                   </div>
                   <div className={styles.bookingInfo}>
                     <span className={styles.bookingService}>
-                      {(b.services || []).map((s: any) => s.name).join(', ') || 'Service'}
+                      {serviceName} {b.services?.length > 1 ? `+${b.services.length - 1}` : ''}
                     </span>
                     <span className={styles.bookingCustomer}>{b.customerName || '—'}</span>
                   </div>
                   <span className={styles.bookingPrice}>{b.totalPrice || 0}€</span>
                 </div>
-              ))
+              )})
           )}
         </div>
       </div>
@@ -283,14 +288,6 @@ export default function DashboardPage() {
           </span>
           <span className={styles.statLabel}>{locale === 'vi' ? 'Chờ duyệt' : 'Pending'}</span>
         </div>
-        {user.role === 'owner' && (
-          <div className={styles.statItem}>
-            <span className={styles.statNumber}>
-              €{realBookings.filter(b => b.status !== 'cancelled').reduce((s, b) => s + (b.totalPrice || 0), 0).toLocaleString()}
-            </span>
-            <span className={styles.statLabel}>{locale === 'vi' ? 'Doanh thu' : 'Revenue'}</span>
-          </div>
-        )}
       </div>
 
       {/* Management menu */}

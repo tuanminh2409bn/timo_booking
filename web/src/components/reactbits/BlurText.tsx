@@ -88,7 +88,7 @@ const BlurText: React.FC<BlurTextProps> = ({
             filter: props.filter as SpringValue<string>,
           }}
         >
-          {elements[index]}{animateBy === 'words' && index < elements.length - 1 && '\u00A0'}
+          {elements[index]}{animateBy === 'words' && index < elements.length - 1 && ' '}
         </animated.span>
       ))}
     </p>

@@ -1,11 +1,11 @@
-/* ===== Dashboard Layout — Minimalist Redesign ===== */
+/* ===== Dashboard Layout — Premium Minimalist ===== */
 
 .dashboardContainer {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
   min-height: 100dvh;
-  background-color: #F7F7F7;
+  background-color: #F5F5F7;
   color: #111827;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
 }
@@ -15,161 +15,104 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  padding: 14px 20px;
   background-color: #FFFFFF;
   flex-shrink: 0;
   position: sticky;
   top: 0;
   z-index: 100;
+  border-bottom: 1px solid rgba(0,0,0,0.04);
 }
 
-.greetingLeft {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
+.greetingLeft { display: flex; align-items: center; gap: 12px; }
 
 .avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background-color: #E8E8E8;
-  color: #374151;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 14px;
-  flex-shrink: 0;
+  width: 40px; height: 40px; border-radius: 50%;
+  background: linear-gradient(135deg, #E8EEFF, #DBEAFE);
+  color: #1A56DB; display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 14px; flex-shrink: 0;
 }
 
-.greetingText {
-  display: flex;
-  flex-direction: column;
-}
+.greetingText { display: flex; flex-direction: column; }
+.greetingLine { font-size: 15px; color: #374151; }
+.greetingLine strong { color: #1A56DB; font-weight: 700; }
+.salonLabel { font-size: 12px; color: #9CA3AF; margin-top: 1px; }
+.greetingRight { display: flex; align-items: center; gap: 8px; }
 
-.greetingLine {
-  font-size: 15px;
-  color: #374151;
-}
-
-.greetingLine strong {
-  color: #1A56DB;
-  font-weight: 700;
-}
-
-.salonLabel {
-  font-size: 12px;
-  color: #9CA3AF;
-  margin-top: 1px;
-}
-
-.greetingRight {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.profileWrapper {
-  position: relative;
-}
-
+.profileWrapper { position: relative; }
 .profileBtn {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  border: 1px solid #E5E7EB;
-  background: #FFFFFF;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: #374151;
-  transition: background-color 0.15s;
+  width: 38px; height: 38px; border-radius: 50%; border: 1px solid #E5E7EB;
+  background: #FFFFFF; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: #374151; transition: all 0.15s;
 }
-
-.profileBtn:hover {
-  background-color: #F3F4F6;
-}
+.profileBtn:hover { background: #F3F4F6; }
 
 .profileDropdown {
-  position: absolute;
-  top: 46px;
-  right: 0;
-  background: #FFFFFF;
-  border-radius: 12px;
-  box-shadow: 0 8px 30px rgba(0,0,0,0.12);
-  border: 1px solid #E5E7EB;
-  min-width: 220px;
-  z-index: 200;
-  overflow: hidden;
+  position: absolute; top: 46px; right: 0; background: #FFFFFF;
+  border-radius: 14px; box-shadow: 0 12px 40px rgba(0,0,0,0.12);
+  border: 1px solid rgba(0,0,0,0.06); min-width: 220px; z-index: 200; overflow: hidden;
 }
-
-.profileDropdownHeader {
-  padding: 14px 16px;
-}
-
-.profileDropdownName {
-  font-size: 14px;
-  font-weight: 600;
-  color: #111827;
-}
-
-.profileDropdownEmail {
-  font-size: 12px;
-  color: #9CA3AF;
-  margin-top: 2px;
-}
-
-.profileDropdownDivider {
-  height: 1px;
-  background: #F3F4F6;
-}
-
+.profileDropdownHeader { padding: 14px 16px; }
+.profileDropdownName { font-size: 14px; font-weight: 600; color: #111827; }
+.profileDropdownEmail { font-size: 12px; color: #9CA3AF; margin-top: 2px; }
+.profileDropdownDivider { height: 1px; background: #F3F4F6; }
 .profileDropdownLogout {
-  width: 100%;
-  padding: 12px 16px;
-  border: none;
-  background: none;
-  text-align: left;
-  font-size: 14px;
-  color: #EF4444;
-  cursor: pointer;
-  transition: background 0.15s;
+  width: 100%; padding: 12px 16px; border: none; background: none;
+  text-align: left; font-size: 14px; color: #EF4444; cursor: pointer; transition: background 0.15s;
 }
-
-.profileDropdownLogout:hover {
-  background-color: #FEF2F2;
-}
-
-.overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 99;
-}
+.profileDropdownLogout:hover { background-color: #FEF2F2; }
+.overlay { position: fixed; inset: 0; z-index: 99; }
 
 /* ===== Main Content ===== */
 .contentBody {
   flex: 1;
   padding: 0 16px 16px;
   overflow-y: auto;
-  padding-bottom: 80px;
+  /* Space for floating bottom bar */
+  padding-bottom: 120px;
 }
 
-/* ===== Bottom Tab Bar ===== */
-.bottomTabBar {
+/* ===== FLOATING BOTTOM TAB BAR ===== */
+.bottomBarWrapper {
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-around;
-  height: 64px;
-  background-color: #FFFFFF;
-  border-top: 1px solid #E5E7EB;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  justify-content: center;
+  padding: 0 16px 16px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
   z-index: 100;
+  pointer-events: none; /* Let clicks pass through the wrapper */
+}
+
+.bottomTabBar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: rgba(17, 24, 39, 0.88);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-radius: 20px;
+  padding: 6px 8px;
+  box-shadow:
+    0 8px 32px rgba(0, 0, 0, 0.18),
+    0 2px 8px rgba(0, 0, 0, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  pointer-events: auto; /* Re-enable clicks on the bar itself */
+  animation: floatUp 0.4s ease-out;
+}
+
+@keyframes floatUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .tabItem {
@@ -177,76 +120,81 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 3px;
   text-decoration: none;
-  color: #9CA3AF;
-  padding: 6px 16px;
-  transition: color 0.15s;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 8px 20px;
+  border-radius: 14px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   -webkit-tap-highlight-color: transparent;
+  position: relative;
+}
+
+.tabItem:hover {
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .tabItemActive {
-  color: #1A56DB;
+  color: #fff;
+  background: rgba(26, 86, 219, 0.9);
+  box-shadow: 0 2px 12px rgba(26, 86, 219, 0.4);
 }
 
-.tabIcon {
-  font-size: 22px;
-  line-height: 1;
+.tabIconWrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  transition: transform 0.2s ease;
+}
+
+.tabItemActive .tabIconWrap {
+  transform: scale(1.05);
 }
 
 .tabLabel {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.2px;
+  white-space: nowrap;
 }
 
 /* ===== Loading Screen ===== */
 .loadingScreen {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background-color: #FFFFFF;
+  min-height: 100vh; display: flex; align-items: center;
+  justify-content: center; background-color: #FFFFFF;
 }
-
 .spinner {
-  width: 32px;
-  height: 32px;
-  border: 3px solid #E5E7EB;
-  border-top-color: #1A56DB;
-  border-radius: 50%;
-  animation: spin 0.7s linear infinite;
+  width: 32px; height: 32px;
+  border: 3px solid #E5E7EB; border-top-color: #1A56DB;
+  border-radius: 50%; animation: spin 0.7s linear infinite;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* ===== Desktop adjustments ===== */
+/* ===== Desktop ===== */
 @media (min-width: 768px) {
-  .greetingHeader {
-    padding: 16px 32px;
-  }
+  .greetingHeader { padding: 14px 32px; }
 
   .contentBody {
     padding: 0 32px 16px;
-    max-width: 960px;
+    padding-bottom: 120px;
+    max-width: 1200px;
     margin: 0 auto;
     width: 100%;
   }
 
-  .bottomTabBar {
-    justify-content: center;
-    gap: 32px;
+  .bottomBarWrapper {
+    padding: 0 0 20px;
   }
 
   .tabItem {
-    padding: 6px 24px;
+    padding: 8px 28px;
   }
 }
 
 @media (min-width: 1200px) {
   .contentBody {
-    max-width: 1100px;
+    max-width: 1400px;
   }
 }

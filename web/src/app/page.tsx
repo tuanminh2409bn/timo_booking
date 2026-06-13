@@ -187,6 +187,7 @@ export default function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
   const [contactSent, setContactSent] = useState(false);
   const [contactSending, setContactSending] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
@@ -196,6 +197,7 @@ export default function LandingPage() {
 
   const scrollTo = useCallback((id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
+    setMobileMenuOpen(false);
   }, []);
 
   const goToBooking = useCallback(() => {
@@ -231,7 +233,7 @@ export default function LandingPage() {
       <nav className={`${styles.nav} ${scrolled ? styles.navScrolled : ''}`}>
         <div className={styles.navInner}>
           <a href="/" className={styles.logo}>
-            Timmo<span className={styles.logoDot} />Booking
+            Timmo<span className={styles.logoDot} /><span className={styles.logoTextSuffix}>Booking</span>
           </a>
 
           <div className={styles.navLinks}>
@@ -251,14 +253,68 @@ export default function LandingPage() {
 
           <div className={styles.navActions}>
             <a href="/admin/login" className={styles.navLogin}>
-              {t.landing.nav.loginAdmin}
+              <span className={styles.navLoginText}>{t.landing.nav.loginAdmin}</span>
+              <span className={styles.navLoginIcon} title={t.landing.nav.loginAdmin}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+              </span>
             </a>
             <LanguageSwitcher variant="light" />
             <a href="/book" className={styles.navCta}>
               {t.landing.hero.ctaClient}
             </a>
           </div>
+
+          <button 
+            className={styles.mobileMenuBtn} 
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            aria-label="Toggle menu"
+          >
+            {mobileMenuOpen ? (
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            ) : (
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+              </svg>
+            )}
+          </button>
         </div>
+
+        {mobileMenuOpen && (
+          <div className={styles.mobileDropdown}>
+            <div className={styles.mobileDropdownInner}>
+              <a href="#features" onClick={(e) => { e.preventDefault(); scrollTo('features'); }} className={styles.mobileNavLink}>
+                {t.landing.nav.features}
+              </a>
+              <a href="#how-it-works" onClick={(e) => { e.preventDefault(); scrollTo('how-it-works'); }} className={styles.mobileNavLink}>
+                {t.landing.nav.howItWorks}
+              </a>
+              <a href="#pricing" onClick={(e) => { e.preventDefault(); scrollTo('pricing'); }} className={styles.mobileNavLink}>
+                {t.landing.nav.pricing}
+              </a>
+              <a href="#contact" onClick={(e) => { e.preventDefault(); scrollTo('contact'); }} className={styles.mobileNavLink}>
+                {t.landing.nav.contact}
+              </a>
+              <div className={styles.mobileDropdownDivider} />
+              <div className={styles.mobileNavLang}>
+                <LanguageSwitcher variant="light" align="left" />
+              </div>
+              <a href="/admin/login" className={styles.mobileNavLink}>
+                {t.landing.nav.loginAdmin}
+              </a>
+              <a href="/book" className={styles.mobileNavCta}>
+                {t.landing.hero.ctaClient}
+              </a>
+            </div>
+          </div>
+        )}
       </nav>
 
       {/* ═══════ HERO SECTION ═══════ */}

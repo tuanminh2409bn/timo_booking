@@ -65,6 +65,11 @@
   animation: dropdownIn 0.2s ease-out;
 }
 
+.dropdownLeft {
+  left: 0;
+  right: auto;
+}
+
 @keyframes dropdownIn {
   from {
     opacity: 0;

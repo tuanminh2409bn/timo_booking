@@ -368,16 +368,13 @@
 /* ========== Modal ========== */
 .modalOverlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(2px);
+  inset: 0;
+  background: rgba(17, 24, 39, 0.4);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 1000;
   animation: fadeIn 0.2s ease-out;
 }
 
@@ -719,5 +716,29 @@
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .categoryHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .categoryHeaderLeft {
+    width: 100%;
+  }
+  .categoryMeta {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    padding-left: 26px; /* align with text (14px chevron + 12px gap) */
+  }
+  .categoryActions {
+    margin-left: auto;
+  }
+  .serviceGrid {
+    grid-template-columns: 1fr;
   }
 }

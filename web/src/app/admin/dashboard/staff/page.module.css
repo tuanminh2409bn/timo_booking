@@ -223,16 +223,13 @@
 /* Modal Styling */
 .modalOverlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.3);
-  backdrop-filter: blur(2px);
+  inset: 0;
+  background: rgba(17, 24, 39, 0.4);
+  backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 1000;
   animation: fadeIn 0.2s ease-out;
 }
 
@@ -411,6 +408,12 @@
   padding: 0 24px;
   border-bottom: 1px solid #E5E7EB;
   background-color: #FFFFFF;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.tabNav::-webkit-scrollbar {
+  display: none;
 }
 
 .tabBtn {
