@@ -50,13 +50,13 @@
   opacity: 0;
 }
 
-/* Request mode — green circle & icon */
+/* Request mode — orange circle & icon */
 .checkCircleRequest {
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: #F0FDF4;
-  border: 3px solid #16A34A;
+  background: #FFF7ED;
+  border: 3px solid #EA580C;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -66,7 +66,7 @@
 .checkIconRequest {
   width: 48px;
   height: 48px;
-  stroke: #16A34A;
+  stroke: #EA580C;
   stroke-width: 2.5;
   fill: none;
   stroke-linecap: round;
@@ -263,4 +263,9 @@
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(16px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+.cancellationRequest {
+  background: #FFF7ED !important;
+  color: #EA580C !important;
 }

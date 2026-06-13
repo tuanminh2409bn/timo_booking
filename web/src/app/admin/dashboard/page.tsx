@@ -246,7 +246,6 @@ export default function DashboardPage() {
                     <span className={styles.bookingService}>
                       {serviceName} {b.services?.length > 1 ? `+${b.services.length - 1}` : ''}
                     </span>
-                    <span className={styles.bookingCustomer}>{b.customerName || '—'}</span>
                   </div>
                   <span className={styles.bookingPrice}>{b.totalPrice || 0}€</span>
                 </div>

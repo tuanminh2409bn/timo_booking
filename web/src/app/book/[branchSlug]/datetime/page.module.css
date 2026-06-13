@@ -287,8 +287,8 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 1.5px dashed #16A34A;
-  background: #F0FDF4;
+  border: 1.5px dashed #EA580C;
+  background: #FFF7ED;
 }
 
 .legendDotBooked {
@@ -332,20 +332,20 @@
 
 /* Request-only slot (tolerant booking) */
 .slotRequest {
-  border: 1px dashed #16A34A;
-  color: #15803D;
-  background: #F0FDF4;
+  border: 1px dashed #EA580C;
+  color: #EA580C;
+  background: #FFF7ED;
 }
 
 .slotRequest:hover:not(:disabled) {
-  border-color: #15803D;
-  background: #DCFCE7;
+  border-color: #C2410C;
+  background: #FFEDD5;
 }
 
 /* Request-only slot selected */
 .slotRequestSelected {
-  background: #16A34A !important;
-  border-color: #16A34A !important;
+  background: #EA580C !important;
+  border-color: #EA580C !important;
   border-style: solid !important;
   color: white !important;
   font-weight: 600;

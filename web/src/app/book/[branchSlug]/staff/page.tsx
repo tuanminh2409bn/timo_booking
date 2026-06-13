@@ -166,11 +166,30 @@ export default function StaffSelectionPage() {
 
   // ── Filter staff who can perform ALL selected main services ──
   const availableStaff = useMemo(() => {
+    const isFirstFiveBlockService = (name: string) => {
+      const n = name.toLowerCase();
+      return (
+        n.includes('neumodellage mit gel') ||
+        n.includes('auffüllen mit gel') ||
+        n.includes('neumodellage mit acryl') ||
+        n.includes('auffüllen mit acryl') ||
+        n.includes('wimpern')
+      );
+    };
+
     if (state.selectedServices.length === 0) return staffList.filter((s) => s.status === 'active');
+    
+    const hasFirstFiveBlock = state.selectedServices.some(s => 
+      isFirstFiveBlockService(s.mainService.name) || 
+      ((s.mainService as any).nameLocalized && Object.values((s.mainService as any).nameLocalized).some(val => isFirstFiveBlockService(val as string)))
+    );
+
     const mainServiceIds = state.selectedServices.map((s) => s.mainService.id);
     return staffList.filter(
       (s) =>
-        s.status === 'active' && mainServiceIds.every((id) => s.serviceIds.includes(id))
+        s.status === 'active' && 
+        (!hasFirstFiveBlock || s.staffType === 'main') &&
+        mainServiceIds.every((id) => (s.serviceIds || []).includes(id))
     );
   }, [state.selectedServices, staffList]);
 

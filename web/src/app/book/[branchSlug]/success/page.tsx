@@ -153,7 +153,7 @@ export default function SuccessPage() {
         </div>
 
         {/* Cancellation policy */}
-        <div className={styles.cancellation}>
+        <div className={isRequestMode ? `${styles.cancellation} ${styles.cancellationRequest}` : styles.cancellation}>
           ✓ {t.booking.success.details.cancellation}
         </div>
 

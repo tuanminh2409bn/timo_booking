@@ -19,12 +19,12 @@ interface FirestoreBooking {
   startTime: string;
   totalPrice: number;
   totalDurationMinutes: number;
-  status: 'pending_approval' | 'confirmed' | 'cancelled';
+  status: 'pending_approval' | 'confirmed' | 'cancelled' | 'needs_owner_action' | 'completed';
   createdAt: string;
 }
 
 type ViewMode = 'list' | 'calendar';
-type FilterStatus = 'all' | 'pending_approval' | 'confirmed' | 'cancelled';
+type FilterStatus = 'all' | 'pending_approval' | 'confirmed' | 'needs_owner_action' | 'completed' | 'cancelled';
 
 // ===== Helpers =====
 
@@ -117,7 +117,13 @@ export default function BookingsManagementPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [weekStart, setWeekStart] = useState(() => getStartOfWeek(getGermanDateObject()));
   const [selectedDate, setSelectedDate] = useState(() => getGermanTodayString());
-  const [popover, setPopover] = useState<{ booking: FirestoreBooking; x: number; y: number } | null>(null);
+  const [popover, setPopover] = useState<{ 
+    booking: FirestoreBooking; 
+    x: number; 
+    y: number; 
+    blockHeight: number;
+  } | null>(null);
+  const [popoverHeight, setPopoverHeight] = useState(320);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.innerWidth >= 769) {
@@ -217,6 +223,8 @@ export default function BookingsManagementPage() {
       case 'pending_approval': return <span className={`${styles.badge} ${styles.badgePending}`}>{t.admin.bookings.statusPending}</span>;
       case 'confirmed': return <span className={`${styles.badge} ${styles.badgeConfirmed}`}>{t.admin.bookings.statusConfirmed}</span>;
       case 'cancelled': return <span className={`${styles.badge} ${styles.badgeCancelled}`}>{t.admin.bookings.statusCancelled}</span>;
+      case 'needs_owner_action': return <span className={`${styles.badge} ${styles.badgeNeedsAction}`}>{t.admin.bookings.statusNeedsAction || 'Cần xử lý'}</span>;
+      case 'completed': return <span className={`${styles.badge} ${styles.badgeCompleted}`}>{t.admin.bookings.statusCompleted || 'Đã hoàn thành'}</span>;
       default: return null;
     }
   }, [t]);
@@ -258,6 +266,68 @@ export default function BookingsManagementPage() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [popover]);
 
+  useEffect(() => {
+    if (popover && popoverRef.current) {
+      setPopoverHeight(popoverRef.current.offsetHeight);
+    }
+  }, [popover]);
+
+  // Cập nhật vị trí popover theo thời gian thực khi cuộn trang hoặc cuộn lịch
+  useEffect(() => {
+    if (!popover) return;
+
+    const updatePosition = () => {
+      const blockEl = document.getElementById(`cal-block-${popover.booking.id}`);
+      const containerEl = document.getElementById('bookings-container');
+      const popoverEl = popoverRef.current;
+      if (!blockEl || !containerEl || !popoverEl) return;
+
+      const rect = blockEl.getBoundingClientRect();
+      const containerRect = containerEl.getBoundingClientRect();
+
+      // Kiểm tra xem blockEl có bị cuộn khuất hoàn toàn khỏi phần calBody không
+      const calBodyEl = blockEl.closest(`.${styles.calBody}`);
+      if (calBodyEl) {
+        const bodyRect = calBodyEl.getBoundingClientRect();
+        if (rect.bottom < bodyRect.top || rect.top > bodyRect.bottom) {
+          // Tự động đóng popover khi bị cuộn khuất để tránh hiển thị lơ lửng ngoài lịch
+          setPopover(null);
+          return;
+        }
+      }
+
+      const x = rect.left - containerRect.left;
+      const y = rect.top - containerRect.top;
+      const blockHeight = rect.height;
+      const currentPopoverHeight = popoverEl.offsetHeight || popoverHeight;
+
+      // Tính toán vị trí top và left
+      const topVal = (y - currentPopoverHeight - 10 >= 10)
+        ? (y - currentPopoverHeight - 10)
+        : (y + blockHeight + 10);
+        
+      const containerWidth = containerEl.offsetWidth || 1000;
+      const leftVal = Math.max(10, Math.min(x + rect.width / 2 - 150, containerWidth - 350));
+
+      // Cập nhật trực tiếp vào style của DOM element để tối ưu hiệu năng không cần re-render React khi scroll
+      popoverEl.style.top = `${topVal}px`;
+      popoverEl.style.left = `${leftVal}px`;
+    };
+
+    // Chạy updatePosition ngay sau khi component mount/cập nhật bằng requestAnimationFrame
+    const animId = requestAnimationFrame(updatePosition);
+
+    // Lắng nghe sự kiện scroll với capture = true để bắt được sự kiện cuộn từ .calBody
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+
+    return () => {
+      cancelAnimationFrame(animId);
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [popover, popoverHeight]);
+
   const goToPrevWeek = () => setWeekStart(prev => addDays(prev, -7));
   const goToNextWeek = () => setWeekStart(prev => addDays(prev, 7));
   const goToToday = () => { setWeekStart(getStartOfWeek(getGermanDateObject())); setSelectedDate(getGermanTodayString()); };
@@ -278,17 +348,34 @@ export default function BookingsManagementPage() {
     let blockClass = styles.calBlock;
     if (booking.status === 'pending_approval') blockClass += ` ${styles.calBlockPending}`;
     if (booking.status === 'cancelled') blockClass += ` ${styles.calBlockCancelled}`;
+    if (booking.status === 'needs_owner_action') blockClass += ` ${styles.calBlockNeedsAction}`;
+    if (booking.status === 'completed') blockClass += ` ${styles.calBlockCompleted}`;
 
     return (
       <div
         key={booking.id}
         className={blockClass}
         style={{ top: `${topOffset}px`, height: `${height}px` }}
-        onClick={(e) => { e.stopPropagation(); setPopover({ booking, x: e.clientX, y: e.clientY }); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          const rect = e.currentTarget.getBoundingClientRect();
+          const containerEl = document.getElementById('bookings-container');
+          const containerRect = containerEl?.getBoundingClientRect();
+          
+          const x = rect.left - (containerRect?.left || 0);
+          const y = rect.top - (containerRect?.top || 0);
+          
+          setPopover({
+            booking,
+            x: x + rect.width / 2,
+            y: y,
+            blockHeight: rect.height
+          });
+        }}
       >
         <div className={styles.calBlockService}>{getServiceName(booking)}</div>
         <div className={styles.calBlockTime}>{booking.startTime}–{endTime}</div>
-        {height > 48 && <div className={styles.calBlockCustomer}>{booking.customerName}</div>}
+        {height > 48 && user?.role !== 'staff' && <div className={styles.calBlockCustomer}>{booking.customerName}</div>}
       </div>
     );
   };
@@ -463,7 +550,7 @@ export default function BookingsManagementPage() {
 
   // ===== MAIN RETURN =====
   return (
-    <div className={styles.container}>
+    <div id="bookings-container" className={styles.container}>
       {/* Top Bar */}
       <div className={styles.topBar}>
         <h1 className={styles.title}>
@@ -499,9 +586,14 @@ export default function BookingsManagementPage() {
       {viewMode === 'list' ? (
         <>
           <div className={styles.filterTabs}>
-            {(['all', 'confirmed', 'pending_approval', 'cancelled'] as FilterStatus[]).map(f => (
+            {(['all', 'confirmed', 'pending_approval', 'needs_owner_action', 'completed', 'cancelled'] as FilterStatus[]).map(f => (
               <button key={f} className={`${styles.filterTab} ${filter === f ? styles.filterTabActive : ''}`} onClick={() => setFilter(f)}>
-                {f === 'all' ? t.admin.bookings.tabAll : f === 'confirmed' ? t.admin.bookings.tabConfirmed : f === 'pending_approval' ? t.admin.bookings.tabPending : t.admin.bookings.tabCancelled}
+                {f === 'all' ? t.admin.bookings.tabAll 
+                  : f === 'confirmed' ? t.admin.bookings.tabConfirmed 
+                  : f === 'pending_approval' ? t.admin.bookings.tabPending 
+                  : f === 'needs_owner_action' ? (t.admin.bookings.tabNeedsAction || 'Cần xử lý')
+                  : f === 'completed' ? (t.admin.bookings.tabCompleted || 'Đã hoàn thành')
+                  : t.admin.bookings.tabCancelled}
                 {' '}({bookingsForRole.filter(b => f === 'all' || b.status === f).length})
               </button>
             ))}
@@ -523,11 +615,11 @@ export default function BookingsManagementPage() {
                       </div>
                       <div className={styles.cardContent}>
                         <h3 className={styles.serviceName}>{getServiceName(booking)}</h3>
-                        <span className={styles.customerName}>{booking.customerName}</span>
-                        {user?.role !== 'staff' ? (
-                          <span className={styles.customerPhone}>{booking.customerPhone}</span>
-                        ) : (
-                          <span className={styles.customerPhone}>{t.admin.bookings.contactManager}</span>
+                        {user?.role !== 'staff' && (
+                          <>
+                            <span className={styles.customerName}>{booking.customerName}</span>
+                            <span className={styles.customerPhone}>{booking.customerPhone}</span>
+                          </>
                         )}
                         {isManagerOrOwner && <span className={styles.staffLabel}>{booking.staffName}</span>}
                       </div>
@@ -536,7 +628,7 @@ export default function BookingsManagementPage() {
                         <span className={styles.priceText}>€{booking.totalPrice}</span>
                         {user?.role !== 'staff' && (
                           <>
-                            {booking.status === 'pending_approval' && (
+                            {(booking.status === 'pending_approval' || booking.status === 'needs_owner_action') && (
                               <div className={styles.cardActions}>
                                 <button className={styles.rejectBtn} onClick={() => handleReject(booking.id)}>{t.admin.bookings.btnReject}</button>
                                 <button className={styles.approveBtn} onClick={() => handleApprove(booking.id)}>{t.admin.bookings.btnApprove}</button>
@@ -563,10 +655,14 @@ export default function BookingsManagementPage() {
 
       {/* Popover */}
       {popover && (
-        <div ref={popoverRef} className={styles.calPopover} style={{
-          top: Math.min(popover.y, (typeof window !== 'undefined' ? window.innerHeight - 320 : 400)),
-          left: Math.min(popover.x, (typeof window !== 'undefined' ? window.innerWidth - 340 : 400)),
-        }}>
+        <div 
+          ref={popoverRef} 
+          className={styles.calPopover} 
+          style={{
+            top: `${(popover.y - popoverHeight - 10 >= 10) ? (popover.y - popoverHeight - 10) : (popover.y + popover.blockHeight + 10)}px`,
+            left: `${Math.max(10, Math.min(popover.x - 150, (typeof document !== 'undefined' ? document.getElementById('bookings-container')?.offsetWidth || 1000 : 1000) - 350))}px`,
+          }}
+        >
           <div className={styles.calPopoverHeader}>
             <h4 className={styles.calPopoverTitle}>{getServiceName(popover.booking)}</h4>
             <button className={styles.calPopoverClose} onClick={() => setPopover(null)}>✕</button>
@@ -599,7 +695,7 @@ export default function BookingsManagementPage() {
           </div>
           {user?.role !== 'staff' && (
             <>
-              {popover.booking.status === 'pending_approval' && (
+              {(popover.booking.status === 'pending_approval' || popover.booking.status === 'needs_owner_action') && (
                 <div className={styles.calPopoverActions}>
                   <button className={styles.rejectBtn} onClick={() => { handleReject(popover.booking.id); setPopover(null); }}>{t.admin.bookings.btnReject}</button>
                   <button className={styles.approveBtn} onClick={() => { handleApprove(popover.booking.id); setPopover(null); }}>{t.admin.bookings.btnApprove}</button>

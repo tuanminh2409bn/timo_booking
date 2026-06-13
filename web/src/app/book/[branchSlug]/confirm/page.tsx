@@ -5,7 +5,7 @@ import { useI18n } from '@/lib/i18n';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
 import { useRouter } from 'next/navigation';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import styles from './page.module.css';
 
@@ -53,14 +53,184 @@ export default function ConfirmPage() {
       const endMins = endMin % 60;
       const endTimeStr = `${endHours.toString().padStart(2, '0')}:${endMins.toString().padStart(2, '0')}`;
 
+      // Helper functions for service checks
+      const isFirstFiveBlockService = (name: string) => {
+        const n = name.toLowerCase();
+        return (
+          n.includes('neumodellage mit gel') ||
+          n.includes('auffüllen mit gel') ||
+          n.includes('neumodellage mit acryl') ||
+          n.includes('auffüllen mit acryl') ||
+          n.includes('wimpern')
+        );
+      };
+
+      const isPedicureService = (name: string) => {
+        const n = name.toLowerCase();
+        return n.includes('pediküre') || n.includes('zehenmodellage');
+      };
+
+      // Fetch all staff members for this branch
+      const staffSnap = await getDocs(collection(db, 'branches', branchSlug, 'staff'));
+      const allStaff = staffSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as any));
+      
+      // Filter active staff who can perform the selected services
+      const mainServiceIds = state.selectedServices.map((s) => s.mainService.id);
+      const eligibleStaff = allStaff.filter(
+        (s) =>
+          s.status === 'active' && mainServiceIds.every((id) => (s.serviceIds || []).includes(id))
+      );
+
+      // Fetch working hours and absences for eligible staff
+      const staffWorkingHours: Record<string, any[]> = {};
+      const staffAbsences: Record<string, any[]> = {};
+
+      for (const staff of eligibleStaff) {
+        const hoursSnap = await getDocs(collection(db, 'branches', branchSlug, 'staff', staff.id, 'workingHours'));
+        staffWorkingHours[staff.id] = hoursSnap.docs.map(d => d.data());
+
+        const absencesSnap = await getDocs(collection(db, 'branches', branchSlug, 'staff', staff.id, 'absences'));
+        staffAbsences[staff.id] = absencesSnap.docs.map(d => d.data());
+      }
+
+      // Fetch active bookings for this date to check conflicts
+      const bookingsSnap = await getDocs(collection(db, 'branches', branchSlug, 'bookings'));
+      const activeBookings = bookingsSnap.docs
+        .map(docSnap => docSnap.data() as any)
+        .filter(b => b.appointmentDate === state.selectedDate && b.status !== 'cancelled');
+
+      // Helper to check if staff is available
+      const isStaffAvailable = (staffId: string, dateStr: string, timeStr: string, durationMin: number) => {
+        const dateObj = new Date(dateStr + 'T00:00:00');
+        const dayOfWeek = (dateObj.getDay() + 6) % 7; // Mon = 0, Sun = 6
+        
+        // 1. Check weekly working hours
+        const hoursList = staffWorkingHours[staffId] || [];
+        const schedule = hoursList.find(h => h.dayOfWeek === dayOfWeek);
+        
+        const [slotH, slotM] = timeStr.split(':').map(Number);
+        const slotStart = slotH * 60 + slotM;
+        const slotEnd = slotStart + durationMin;
+
+        let isWorking = false;
+        let workStart = 9 * 60;
+        let workEnd = (dayOfWeek === 5 ? 16 : 18) * 60; // defaults
+
+        if (schedule) {
+          if (!schedule.isWorking) return false;
+          isWorking = true;
+          const [sh, sm] = schedule.startTime.split(':').map(Number);
+          const [eh, em] = schedule.endTime.split(':').map(Number);
+          workStart = sh * 60 + sm;
+          workEnd = eh * 60 + em;
+        } else {
+          isWorking = dayOfWeek !== 6; // Closed on Sunday by default
+        }
+
+        if (!isWorking || slotStart < workStart || slotEnd > workEnd) {
+          return false;
+        }
+
+        // 2. Check absences
+        const absencesList = staffAbsences[staffId] || [];
+        const isAbsent = absencesList.some(abs => {
+          if (abs.absenceDate !== dateStr) return false;
+          if (abs.isFullDay) return true;
+          
+          if (abs.startTime && abs.endTime) {
+            const [sh, sm] = abs.startTime.split(':').map(Number);
+            const [eh, em] = abs.endTime.split(':').map(Number);
+            const absStart = sh * 60 + sm;
+            const absEnd = eh * 60 + em;
+            return slotStart < absEnd && slotEnd > absStart;
+          }
+          return false;
+        });
+
+        if (isAbsent) return false;
+
+        // 3. Check overlapping bookings
+        const hasOverlap = activeBookings.some(b => {
+          if (b.staffId !== staffId) return false;
+          const [bh, bm] = b.startTime.split(':').map(Number);
+          const bStart = bh * 60 + bm;
+          const bEnd = bStart + (b.totalDurationMinutes || 30);
+          return slotStart < bEnd && slotEnd > bStart;
+        });
+
+        return !hasOverlap;
+      };
+
+      // Check if any selected service belongs to the first 5 blocks
+      const hasFirstFiveBlock = state.selectedServices.some(s => 
+        isFirstFiveBlockService(s.mainService.name) || 
+        ((s.mainService as any).nameLocalized && Object.values((s.mainService as any).nameLocalized).some(val => isFirstFiveBlockService(val as string)))
+      );
+
+      let assignedStaffId = '';
+      let assignedStaffName = '';
+      let finalStatus = state.bookingMode === 'request' ? 'pending_approval' : 'confirmed';
+
+      if (state.selectedStaffType === 'specific') {
+        const specificStaff = state.selectedStaff as any;
+        assignedStaffId = specificStaff.id;
+        assignedStaffName = specificStaff.name;
+        const available = isStaffAvailable(specificStaff.id, state.selectedDate as string, state.selectedTime as string, totals.totalDuration);
+        if (!available || state.bookingMode === 'request') {
+          finalStatus = 'pending_approval';
+        }
+      } else {
+        // Any staff selection logic
+        // 1. Filter out Junior staff if it contains a first-5-block service (Rule 8)
+        let candidates = eligibleStaff;
+        if (hasFirstFiveBlock) {
+          candidates = eligibleStaff.filter(s => s.staffType === 'main');
+        }
+
+        // 2. Sort candidates: Junior first, Main second (Rules 9 & 10)
+        const sortedStaff = [...candidates].sort((a, b) => {
+          const aType = a.staffType || 'main';
+          const bType = b.staffType || 'main';
+          if (aType === 'junior' && bType === 'main') return -1;
+          if (aType === 'main' && bType === 'junior') return 1;
+          return 0;
+        });
+
+        // 3. Find the first available staff
+        let foundStaff = null;
+        for (const staff of sortedStaff) {
+          if (isStaffAvailable(staff.id, state.selectedDate as string, state.selectedTime as string, totals.totalDuration)) {
+            foundStaff = staff;
+            break;
+          }
+        }
+
+        if (foundStaff) {
+          assignedStaffId = foundStaff.id;
+          assignedStaffName = foundStaff.name;
+          if (state.bookingMode === 'request') {
+            finalStatus = 'pending_approval';
+          }
+        } else {
+          // Store fully booked (tolerant mode)
+          if (sortedStaff.length > 0) {
+            assignedStaffId = sortedStaff[0].id;
+            assignedStaffName = sortedStaff[0].name;
+          } else {
+            assignedStaffId = '';
+            assignedStaffName = locale === 'de' ? 'Nicht zugewiesen' : locale === 'vi' ? 'Chưa gán thợ' : 'Unassigned';
+          }
+          finalStatus = 'needs_owner_action';
+        }
+      }
+
       const bookingDoc = {
         id: bookingId,
         branchId: branchSlug,
         businessId: state.branch?.businessId || '',
-        staffId: state.selectedStaff?.id || '',
-        staffName: state.selectedStaffType === 'any' 
-          ? (locale === 'de' ? 'Beliebiger Mitarbeiter' : locale === 'vi' ? 'Bất kỳ ai' : 'Any practitioner') 
-          : (state.selectedStaff?.name || ''),
+        staffId: assignedStaffId,
+        staffName: assignedStaffName,
+        staffSelectionType: state.selectedStaffType, // Save selection type!
         customerId: null,
         customerName: state.customerInfo.name,
         customerPhone: state.customerInfo.phone,
@@ -70,12 +240,13 @@ export default function ConfirmPage() {
           const extras = item.extras.map(e => e.name).join(', ');
           return extras ? `${serviceName} + ${extras}` : serviceName;
         }),
+        serviceIds: state.selectedServices.map(s => s.mainService.id),
         appointmentDate: state.selectedDate,
         startTime: state.selectedTime,
         endTime: endTimeStr,
         totalDurationMinutes: totals.totalDuration,
         totalPrice: totals.totalPrice,
-        status: state.bookingMode === 'request' ? 'pending_approval' : 'confirmed',
+        status: finalStatus,
         source: 'online',
         notes: state.customerInfo.notes || '',
         createdAt: new Date().toISOString(),

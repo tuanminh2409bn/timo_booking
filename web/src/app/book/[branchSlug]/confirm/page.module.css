@@ -257,16 +257,16 @@
   transform: scale(0.98) translateY(0);
 }
 
-/* Request mode button (green) */
+/* Request mode button (orange) */
 .confirmButtonRequest {
-  background: linear-gradient(135deg, #16A34A 0%, #15803D 100%) !important;
+  background: linear-gradient(135deg, #EA580C 0%, #C2410C 100%) !important;
   color: white !important;
-  box-shadow: 0 4px 12px rgba(22, 163, 74, 0.2);
+  box-shadow: 0 4px 12px rgba(234, 88, 12, 0.2);
 }
 
 .confirmButtonRequest:hover:not(:disabled) {
-  background: linear-gradient(135deg, #15803D 0%, #166534 100%) !important;
-  box-shadow: 0 6px 16px rgba(22, 163, 74, 0.3);
+  background: linear-gradient(135deg, #C2410C 0%, #9A3412 100%) !important;
+  box-shadow: 0 6px 16px rgba(234, 88, 12, 0.3);
 }
 
 /* Request note card (premium info block) */
@@ -278,18 +278,18 @@
   width: 100%;
   padding: var(--space-md);
   border-radius: var(--radius-md);
-  background: #F0FDF4;
-  border: 1px solid #DCFCE7;
-  color: #166534;
+  background: #FFF7ED;
+  border: 1px solid #FFEDD5;
+  color: #9A3412;
   font-size: var(--font-size-sm);
   line-height: 1.6;
-  box-shadow: 0 2px 8px rgba(22, 163, 74, 0.03);
+  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.03);
   animation: scaleIn 0.3s ease-out;
 }
 
 .requestNoteIcon {
   flex-shrink: 0;
-  color: #16A34A;
+  color: #EA580C;
   margin-top: 2px;
 }
 

@@ -922,9 +922,9 @@
 }
 
 .slotRequest {
-  border: 1px dashed #16A34A;
-  color: #15803D;
-  background: #F0FDF4;
+  border: 1px dashed #EA580C;
+  color: #EA580C;
+  background: #FFF7ED;
   padding: 11px var(--space-xs);
   font-size: 14px;
   font-weight: 600;
@@ -932,12 +932,12 @@
 }
 
 .slotRequest:hover:not(:disabled) {
-  border-color: #15803D;
-  background: #DCFCE7;
+  border-color: #C2410C;
+  background: #FFEDD5;
 }
 
 .slotRequestSelected {
-  background: #16A34A !important;
+  background: #EA580C !important;
   border: none !important;
   color: white !important;
   padding: 12px var(--space-xs) !important;
@@ -1046,8 +1046,8 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 1.5px dashed #16A34A;
-  background: #F0FDF4;
+  border: 1.5px dashed #EA580C;
+  background: #FFF7ED;
 }
 
 .legendDotBooked {

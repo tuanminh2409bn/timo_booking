@@ -17,7 +17,23 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
+import { getGermanTodayString } from '@/lib/timeUtils';
 import styles from './page.module.css';
+const isFirstFiveBlockService = (name: string) => {
+  const n = name.toLowerCase();
+  return (
+    n.includes('neumodellage mit gel') ||
+    n.includes('auffüllen mit gel') ||
+    n.includes('neumodellage mit acryl') ||
+    n.includes('auffüllen mit acryl') ||
+    n.includes('wimpern')
+  );
+};
+
+const isPedicureService = (name: string) => {
+  const n = name.toLowerCase();
+  return n.includes('pediküre') || n.includes('zehenmodellage');
+};
 
 // ===== Interfaces =====
 
@@ -638,7 +654,320 @@ export default function StaffManagementPage() {
         createdBy: user.uid || '',
         createdAt: new Date().toISOString(),
       };
+
+      // ── Planned Leave Absence Reconciliation (Spec 4 & 5) ──
+      const germanToday = getGermanTodayString();
+      const isPlannedLeave = absenceDate !== germanToday;
+
+      if (isPlannedLeave) {
+        // 1. Fetch all bookings on the absence date
+        const bookingsRef = collection(db, 'branches', branchId, 'bookings');
+        const bookingsSnap = await getDocs(query(bookingsRef, where('appointmentDate', '==', absenceDate)));
+        const bookingsOnDate: any[] = [];
+        bookingsSnap.forEach(d => {
+          const data = d.data();
+          if (data.status !== 'cancelled' && data.status !== 'cancelled_by_salon' && data.status !== 'cancelled_by_customer') {
+            bookingsOnDate.push({ id: d.id, ...data });
+          }
+        });
+
+        // 2. Filter bookings that belong to this staff and overlap with the absence time
+        const overlappingBookings = bookingsOnDate.filter(booking => {
+          if (booking.staffId !== selectedStaff.id) return false;
+          if (absenceFullDay) return true;
+
+          const [bh, bm] = booking.startTime.split(':').map(Number);
+          const bookingStart = bh * 60 + bm;
+          const bookingEnd = bookingStart + (booking.totalDurationMinutes || 30);
+
+          const [ash, asm] = absenceStartTime.split(':').map(Number);
+          const [aeh, aem] = absenceEndTime.split(':').map(Number);
+          const absStart = ash * 60 + asm;
+          const absEnd = aeh * 60 + aem;
+
+          return bookingStart < absEnd && bookingEnd > absStart;
+        });
+
+        if (overlappingBookings.length > 0) {
+          // Fetch other active staff details for reassigning
+          const otherStaff = staffList.filter(s => s.id !== selectedStaff.id && s.status === 'active');
+          const otherStaffDetails: Record<string, { workingHours: any[], absences: any[] }> = {};
+
+          await Promise.all(otherStaff.map(async (staff) => {
+            const hoursSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staff.id, 'workingHours'));
+            const absSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staff.id, 'absences'));
+            otherStaffDetails[staff.id] = {
+              workingHours: hoursSnap.docs.map(d => d.data()),
+              absences: absSnap.docs.map(d => d.data())
+            };
+          }));
+
+          // Helper: Check if staff is available
+          const isStaffAvailable = (staffId: string, dateStr: string, bookingStart: number, bookingEnd: number) => {
+            const dateObj = new Date(dateStr + 'T00:00:00');
+            const dayOfWeek = (dateObj.getDay() + 6) % 7; // Mon = 0, Sun = 6
+
+            const details = otherStaffDetails[staffId];
+            if (!details) return false;
+
+            const schedule = details.workingHours.find(h => h.dayOfWeek === dayOfWeek);
+            let isWorking = false;
+            let workStart = 9 * 60;
+            let workEnd = (dayOfWeek === 5 ? 16 : 18) * 60;
+
+            if (schedule) {
+              if (!schedule.isWorking) return false;
+              isWorking = true;
+              const [sh, sm] = schedule.startTime.split(':').map(Number);
+              const [eh, em] = schedule.endTime.split(':').map(Number);
+              workStart = sh * 60 + sm;
+              workEnd = eh * 60 + em;
+            } else {
+              isWorking = dayOfWeek !== 6;
+            }
+
+            if (!isWorking || bookingStart < workStart || bookingEnd > workEnd) {
+              return false;
+            }
+
+            const isAbsent = details.absences.some(abs => {
+              if (abs.absenceDate !== dateStr) return false;
+              if (abs.isFullDay) return true;
+              if (abs.startTime && abs.endTime) {
+                const [sh, sm] = abs.startTime.split(':').map(Number);
+                const [eh, em] = abs.endTime.split(':').map(Number);
+                const absStart = sh * 60 + sm;
+                const absEnd = eh * 60 + em;
+                return bookingStart < absEnd && bookingEnd > absStart;
+              }
+              return false;
+            });
+
+            if (isAbsent) return false;
+
+            const hasOverlap = bookingsOnDate.some(b => {
+              if (b.staffId !== staffId) return false;
+              const [bh, bm] = b.startTime.split(':').map(Number);
+              const bStart = bh * 60 + bm;
+              const bEnd = bStart + (b.totalDurationMinutes || 30);
+              return bookingStart < bEnd && bookingEnd > bStart;
+            });
+
+            return !hasOverlap;
+          };
+
+          // Helper: Get next available date for specific staff
+          const getNextAvailableDate = async (staffId: string, baseDateStr: string, startTime: string) => {
+            let hoursList: any[] = [];
+            let absencesList: any[] = [];
+
+            try {
+              const hoursSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staffId, 'workingHours'));
+              hoursList = hoursSnap.docs.map(d => d.data());
+              const absencesSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staffId, 'absences'));
+              absencesList = absencesSnap.docs.map(d => d.data());
+            } catch (e) {
+              console.error(e);
+            }
+
+            const baseDate = new Date(baseDateStr + 'T00:00:00');
+            const [sh, sm] = startTime.split(':').map(Number);
+            const slotStart = sh * 60 + sm;
+
+            for (let i = 1; i <= 14; i++) {
+              const checkDate = new Date(baseDate);
+              checkDate.setDate(baseDate.getDate() + i);
+              const checkDateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+              const dayOfWeek = (checkDate.getDay() + 6) % 7;
+
+              const schedule = hoursList.find(h => h.dayOfWeek === dayOfWeek);
+              let isWorking = false;
+              let workStart = 9 * 60;
+              let workEnd = (dayOfWeek === 5 ? 16 : 18) * 60;
+
+              if (schedule) {
+                if (schedule.isWorking) {
+                  isWorking = true;
+                  const [hStart, mStart] = schedule.startTime.split(':').map(Number);
+                  const [hEnd, mEnd] = schedule.endTime.split(':').map(Number);
+                  workStart = hStart * 60 + mStart;
+                  workEnd = hEnd * 60 + mEnd;
+                }
+              } else {
+                isWorking = dayOfWeek !== 6;
+              }
+
+              if (!isWorking || slotStart < workStart || slotStart > workEnd) continue;
+
+              const isAbsent = absencesList.some(abs => {
+                if (abs.absenceDate !== checkDateStr) return false;
+                if (abs.isFullDay) return true;
+                if (abs.startTime && abs.endTime) {
+                  const [ash, asm] = abs.startTime.split(':').map(Number);
+                  const [aeh, aem] = abs.endTime.split(':').map(Number);
+                  return slotStart < aeh * 60 && slotStart >= ash * 60;
+                }
+                return false;
+              });
+
+              if (isAbsent) continue;
+
+              const bookingsSnap = await getDocs(query(collection(db, 'branches', branchId, 'bookings'), where('appointmentDate', '==', checkDateStr)));
+              const dayBookings = bookingsSnap.docs.map(d => d.data());
+              const hasOverlap = dayBookings.some((b: any) => {
+                if (b.staffId !== staffId || b.status === 'cancelled') return false;
+                const [bh, bm] = b.startTime.split(':').map(Number);
+                const bStart = bh * 60 + bm;
+                const bEnd = bStart + (b.totalDurationMinutes || 30);
+                return slotStart >= bStart && slotStart < bEnd;
+              });
+
+              if (!hasOverlap) {
+                return checkDateStr;
+              }
+            }
+
+            const fallbackDate = new Date(baseDate);
+            fallbackDate.setDate(baseDate.getDate() + 1);
+            return `${fallbackDate.getFullYear()}-${String(fallbackDate.getMonth() + 1).padStart(2, '0')}-${String(fallbackDate.getDate()).padStart(2, '0')}`;
+          };
+
+          const batch = writeBatch(db);
+
+          for (const booking of overlappingBookings) {
+            const bookingRef = doc(db, 'branches', branchId, 'bookings', booking.id);
+
+            if (booking.staffSelectionType === 'specific') {
+              // 4. Khách chọn thợ cụ thể -> Hủy lịch & gợi ý ngày mới
+              const suggestedDate = await getNextAvailableDate(selectedStaff.id, booking.appointmentDate, booking.startTime);
+              batch.update(bookingRef, {
+                status: 'cancelled',
+                cancelledAt: new Date().toISOString(),
+                cancelledReason: locale === 'vi' 
+                  ? 'Thợ nghỉ phép theo lịch' 
+                  : locale === 'de' 
+                  ? 'Mitarbeiter im geplanten Urlaub' 
+                  : 'Staff on planned leave',
+                smsConfirmationSent: true,
+                suggestedRebookDate: suggestedDate
+              });
+
+              // Tạo Audit Log cho hệ thống hủy
+              const logId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+              const logRef = doc(db, 'branches', branchId, 'auditLogs', logId);
+              batch.set(logRef, {
+                id: logId,
+                branchId,
+                appointmentId: booking.id,
+                eventType: 'cancelled_by_system',
+                actorUid: user.uid,
+                actorRole: 'system',
+                details: {
+                  reason: 'staff_absence_reconciliation',
+                  staffName: selectedStaff.name,
+                  suggestedRebookDate: suggestedDate,
+                  smsText: locale === 'vi'
+                    ? `Lịch hẹn ${booking.services.join(', ')} lúc ${booking.startTime} ngày ${booking.appointmentDate} đã bị hủy do thợ nghỉ phép. Gợi ý lịch gần nhất có thể đặt lại: ngày ${suggestedDate} lúc ${booking.startTime}.`
+                    : locale === 'de'
+                    ? `Ihr Termin für ${booking.services.join(', ')} am ${booking.appointmentDate} um ${booking.startTime} wurde storniert, da der Mitarbeiter im Urlaub ist. Nächster freier Termin: ${suggestedDate} um ${booking.startTime}.`
+                    : `Your appointment for ${booking.services.join(', ')} on ${booking.appointmentDate} at ${booking.startTime} was cancelled due to staff leave. Nearest suggestion: ${suggestedDate} at ${booking.startTime}.`
+                },
+                createdAt: new Date().toISOString()
+              });
+            } else {
+              // 5. Khách chọn "Bất kỳ ai" -> Tự gán thợ khác phù hợp
+              const [bh, bm] = booking.startTime.split(':').map(Number);
+              const bookingStart = bh * 60 + bm;
+              const bookingEnd = bookingStart + (booking.totalDurationMinutes || 30);
+
+              const candidates = otherStaff.filter(staff => {
+                // Kiểm tra 5 block đầu (Rule 8)
+                const hasFirstFiveBlock = booking.services.some((sName: string) => isFirstFiveBlockService(sName));
+                if (hasFirstFiveBlock && staff.staffType !== 'main') return false;
+
+                // Kiểm tra serviceIds
+                if (booking.serviceIds && booking.serviceIds.length > 0) {
+                  return booking.serviceIds.every((id: string) => (staff.serviceIds || []).includes(id));
+                }
+                return true;
+              });
+
+              // Sắp xếp candidates: junior trước, main sau (Rule 9 & 10)
+              const sortedCandidates = [...candidates].sort((a, b) => {
+                const aType = a.staffType || 'main';
+                const bType = b.staffType || 'main';
+                if (aType === 'junior' && bType === 'main') return -1;
+                if (aType === 'main' && bType === 'junior') return 1;
+                return 0;
+              });
+
+              let newStaff = null;
+              for (const candidate of sortedCandidates) {
+                if (isStaffAvailable(candidate.id, booking.appointmentDate, bookingStart, bookingEnd)) {
+                  newStaff = candidate;
+                  break;
+                }
+              }
+
+              if (newStaff) {
+                // Gán sang thợ mới
+                batch.update(bookingRef, {
+                  staffId: newStaff.id,
+                  staffName: newStaff.name
+                });
+
+                // Audit Log reassign
+                const logId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                const logRef = doc(db, 'branches', branchId, 'auditLogs', logId);
+                batch.set(logRef, {
+                  id: logId,
+                  branchId,
+                  appointmentId: booking.id,
+                  eventType: 'staff_reassigned',
+                  actorUid: user.uid,
+                  actorRole: 'system',
+                  details: {
+                    previousStaffId: selectedStaff.id,
+                    previousStaffName: selectedStaff.name,
+                    newStaffId: newStaff.id,
+                    newStaffName: newStaff.name,
+                    reason: 'staff_absence_reconciliation'
+                  },
+                  createdAt: new Date().toISOString()
+                });
+              } else {
+                // Không tìm được thợ thay thế -> Chuyển sang needs_owner_action
+                batch.update(bookingRef, {
+                  status: 'needs_owner_action'
+                });
+
+                // Audit Log
+                const logId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                const logRef = doc(db, 'branches', branchId, 'auditLogs', logId);
+                batch.set(logRef, {
+                  id: logId,
+                  branchId,
+                  appointmentId: booking.id,
+                  eventType: 'escalated_to_owner',
+                  actorUid: user.uid,
+                  actorRole: 'system',
+                  details: {
+                    reason: 'no_available_staff_during_absence_reconciliation',
+                    absentStaffId: selectedStaff.id,
+                    absentStaffName: selectedStaff.name
+                  },
+                  createdAt: new Date().toISOString()
+                });
+              }
+            }
+          }
+
+          await batch.commit();
+        }
+      }
+
       await setDoc(absRef, absData);
+
       // Refresh
       await loadAbsences(selectedStaff.id);
       // Reset form
