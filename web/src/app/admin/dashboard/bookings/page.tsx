@@ -119,11 +119,7 @@ export default function BookingsManagementPage() {
   const [selectedDate, setSelectedDate] = useState(() => getGermanTodayString());
   const [popover, setPopover] = useState<{ 
     booking: FirestoreBooking; 
-    x: number; 
-    y: number; 
-    blockHeight: number;
   } | null>(null);
-  const [popoverHeight, setPopoverHeight] = useState(320);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.innerWidth >= 769) {
@@ -266,24 +262,16 @@ export default function BookingsManagementPage() {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [popover]);
 
-  useEffect(() => {
-    if (popover && popoverRef.current) {
-      setPopoverHeight(popoverRef.current.offsetHeight);
-    }
-  }, [popover]);
-
   // Cập nhật vị trí popover theo thời gian thực khi cuộn trang hoặc cuộn lịch
   useEffect(() => {
     if (!popover) return;
 
     const updatePosition = () => {
       const blockEl = document.getElementById(`cal-block-${popover.booking.id}`);
-      const containerEl = document.getElementById('bookings-container');
       const popoverEl = popoverRef.current;
-      if (!blockEl || !containerEl || !popoverEl) return;
+      if (!blockEl || !popoverEl) return;
 
       const rect = blockEl.getBoundingClientRect();
-      const containerRect = containerEl.getBoundingClientRect();
 
       // Kiểm tra xem blockEl có bị cuộn khuất hoàn toàn khỏi phần calBody không
       const calBodyEl = blockEl.closest(`.${styles.calBody}`);
@@ -296,28 +284,38 @@ export default function BookingsManagementPage() {
         }
       }
 
-      const x = rect.left - containerRect.left;
-      const y = rect.top - containerRect.top;
       const blockHeight = rect.height;
-      const currentPopoverHeight = popoverEl.offsetHeight || popoverHeight;
+      const currentPopoverHeight = popoverEl.offsetHeight || 320;
+      const currentPopoverWidth = popoverEl.offsetWidth || 300;
 
-      // Tính toán vị trí top và left
-      const topVal = (y - currentPopoverHeight - 10 >= 10)
-        ? (y - currentPopoverHeight - 10)
-        : (y + blockHeight + 10);
-        
-      const containerWidth = containerEl.offsetWidth || 1000;
-      const leftVal = Math.max(10, Math.min(x + rect.width / 2 - 150, containerWidth - 350));
+      // Tính toán vị trí top (so với viewport)
+      // Mặc định hướng lên trên: hiển thị ở phía trên của block
+      let topVal = rect.top - currentPopoverHeight - 10;
+      
+      // Nếu hướng lên trên làm popover vượt quá đỉnh màn hình (topVal < 10),
+      // ta chuyển sang hướng xuống dưới: hiển thị dưới block
+      if (topVal < 10) {
+        topVal = rect.bottom + 10;
+      }
 
-      // Cập nhật trực tiếp vào style của DOM element để tối ưu hiệu năng không cần re-render React khi scroll
+      // Tính toán vị trí left (so với viewport)
+      // Căn giữa popover theo chiều ngang của block lịch hẹn
+      let leftVal = rect.left + rect.width / 2 - currentPopoverWidth / 2;
+
+      // Giới hạn left để popover không bị tràn ra ngoài 2 cạnh màn hình trái/phải
+      const viewportWidth = window.innerWidth;
+      leftVal = Math.max(10, Math.min(leftVal, viewportWidth - currentPopoverWidth - 10));
+
+      // Cập nhật trực tiếp vào style của DOM element
       popoverEl.style.top = `${topVal}px`;
       popoverEl.style.left = `${leftVal}px`;
+      popoverEl.style.opacity = '1'; // Hiện popover sau khi đã định vị xong
     };
 
-    // Chạy updatePosition ngay sau khi component mount/cập nhật bằng requestAnimationFrame
+    // Chạy updatePosition bằng requestAnimationFrame để đảm bảo popoverEl đã được thêm vào DOM và đo được kích thước thực tế
     const animId = requestAnimationFrame(updatePosition);
 
-    // Lắng nghe sự kiện scroll với capture = true để bắt được sự kiện cuộn từ .calBody
+    // Lắng nghe sự kiện scroll với capture = true để bắt được sự kiện cuộn từ .calBody và window
     window.addEventListener('scroll', updatePosition, true);
     window.addEventListener('resize', updatePosition);
 
@@ -326,7 +324,7 @@ export default function BookingsManagementPage() {
       window.removeEventListener('scroll', updatePosition, true);
       window.removeEventListener('resize', updatePosition);
     };
-  }, [popover, popoverHeight]);
+  }, [popover]);
 
   const goToPrevWeek = () => setWeekStart(prev => addDays(prev, -7));
   const goToNextWeek = () => setWeekStart(prev => addDays(prev, 7));
@@ -354,23 +352,12 @@ export default function BookingsManagementPage() {
     return (
       <div
         key={booking.id}
+        id={`cal-block-${booking.id}`}
         className={blockClass}
         style={{ top: `${topOffset}px`, height: `${height}px` }}
         onClick={(e) => {
           e.stopPropagation();
-          const rect = e.currentTarget.getBoundingClientRect();
-          const containerEl = document.getElementById('bookings-container');
-          const containerRect = containerEl?.getBoundingClientRect();
-          
-          const x = rect.left - (containerRect?.left || 0);
-          const y = rect.top - (containerRect?.top || 0);
-          
-          setPopover({
-            booking,
-            x: x + rect.width / 2,
-            y: y,
-            blockHeight: rect.height
-          });
+          setPopover({ booking });
         }}
       >
         <div className={styles.calBlockService}>{getServiceName(booking)}</div>
@@ -658,10 +645,7 @@ export default function BookingsManagementPage() {
         <div 
           ref={popoverRef} 
           className={styles.calPopover} 
-          style={{
-            top: `${(popover.y - popoverHeight - 10 >= 10) ? (popover.y - popoverHeight - 10) : (popover.y + popover.blockHeight + 10)}px`,
-            left: `${Math.max(10, Math.min(popover.x - 150, (typeof document !== 'undefined' ? document.getElementById('bookings-container')?.offsetWidth || 1000 : 1000) - 350))}px`,
-          }}
+          style={{ opacity: 0 }}
         >
           <div className={styles.calPopoverHeader}>
             <h4 className={styles.calPopoverTitle}>{getServiceName(popover.booking)}</h4>

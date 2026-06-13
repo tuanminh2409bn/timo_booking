@@ -405,7 +405,7 @@
 
 /* ===== Popover ===== */
 .calPopover {
-  position: absolute;
+  position: fixed;
   z-index: 200;
   background: #fff;
   border: 1px solid #E5E7EB;
