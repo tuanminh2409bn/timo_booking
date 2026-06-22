@@ -171,11 +171,16 @@ export default function ConfirmPage() {
       let assignedStaffName = '';
       let finalStatus = state.bookingMode === 'request' ? 'pending_approval' : 'confirmed';
 
-      if (state.selectedStaffType === 'specific') {
-        const specificStaff = state.selectedStaff as any;
-        assignedStaffId = specificStaff.id;
-        assignedStaffName = specificStaff.name;
-        const available = isStaffAvailable(specificStaff.id, state.selectedDate as string, state.selectedTime as string, totals.totalDuration);
+      // Spec V1: Use per-service staff selection from selectedServices
+      // For the primary service (first segment), check its staff
+      const primaryService = state.selectedServices[0];
+      const primaryStaffType = primaryService?.selectedStaffType || state.selectedStaffType;
+      const primaryStaff = primaryService?.selectedStaff || state.selectedStaff;
+
+      if (primaryStaffType === 'specific' && primaryStaff) {
+        assignedStaffId = primaryStaff.id;
+        assignedStaffName = primaryStaff.name;
+        const available = isStaffAvailable(primaryStaff.id, state.selectedDate as string, state.selectedTime as string, totals.totalDuration);
         if (!available || state.bookingMode === 'request') {
           finalStatus = 'pending_approval';
         }
@@ -220,7 +225,7 @@ export default function ConfirmPage() {
             assignedStaffId = '';
             assignedStaffName = locale === 'de' ? 'Nicht zugewiesen' : locale === 'vi' ? 'Chưa gán thợ' : 'Unassigned';
           }
-          finalStatus = 'needs_owner_action';
+          finalStatus = 'pending_approval';
         }
       }
 
@@ -230,16 +235,25 @@ export default function ConfirmPage() {
         businessId: state.branch?.businessId || '',
         staffId: assignedStaffId,
         staffName: assignedStaffName,
-        staffSelectionType: state.selectedStaffType, // Save selection type!
+        staffSelectionType: primaryStaffType, // Save selection type!
         customerId: null,
         customerName: state.customerInfo.name,
         customerPhone: state.customerInfo.phone,
         customerEmail: state.customerInfo.email || null,
-        services: state.selectedServices.map(item => {
-          const serviceName = item.mainService.name;
-          const extras = item.extras.map(e => e.name).join(', ');
-          return extras ? `${serviceName} + ${extras}` : serviceName;
-        }),
+        services: state.selectedServices.map(item => ({
+          serviceId: item.mainService.id,
+          categoryId: item.categoryId,
+          serviceName: item.mainService.name,
+          categoryName: item.categoryName,
+          extras: item.extras.map(e => ({
+            serviceId: e.id,
+            name: e.name,
+            durationMinutes: e.durationMinutes,
+            price: e.price,
+          })),
+          durationMinutes: item.mainService.durationMinutes,
+          price: item.mainService.price,
+        })),
         serviceIds: state.selectedServices.map(s => s.mainService.id),
         appointmentDate: state.selectedDate,
         startTime: state.selectedTime,
@@ -305,14 +319,16 @@ export default function ConfirmPage() {
             <strong>{totals.totalDuration} {t.common.minutes}</strong>
           </div>
           
-          {(state.selectedStaff || state.selectedStaffType === 'any') && (
-            <div className={styles.summaryDetailRow}>
-              <span>{t.booking.staff.summary.professional}:</span>
-              <strong>
-                {state.selectedStaffType === 'any' ? t.booking.staff.anyStaff.title : state.selectedStaff?.name}
-              </strong>
-            </div>
-          )}
+          {state.selectedServices.map((item) => (
+            (item.selectedStaff || item.selectedStaffType === 'any') && (
+              <div key={`staff-${item.categoryId}`} className={styles.summaryDetailRow}>
+                <span>{getServiceName(item.mainService.id, item.mainService.name)}:</span>
+                <strong>
+                  {item.selectedStaffType === 'any' ? t.booking.staff.anyStaff.title : item.selectedStaff?.name}
+                </strong>
+              </div>
+            )
+          ))}
 
           {state.selectedDate && (
             <div className={styles.summaryDetailRow}>
@@ -329,12 +345,14 @@ export default function ConfirmPage() {
           )}
         </div>
 
+        {/* Spec V1: Hide total price — no payment required */}
+        {/* 
         <div className={styles.summaryDivider} />
-
         <div className={styles.summaryTotalRow}>
           <span>{t.booking.services.summary.total}:</span>
           <span className={styles.summaryTotalValue}>€{totals.totalPrice}</span>
         </div>
+        */}
       </div>
 
       {/* Client type tabs */}

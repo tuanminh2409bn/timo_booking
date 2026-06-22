@@ -246,6 +246,7 @@ const en = {
         service: '{count} service',
         services: '{count} services',
       },
+      addonNote: 'Add-on services can be booked directly at the store.',
     },
     // Step 2: Staff Selection
     staff: {
@@ -491,6 +492,7 @@ const en = {
       btnReject: 'Reject',
       btnApprove: '✓ Approve',
       btnCancel: 'Cancel Booking',
+      anyStaff: 'Any Staff',
     },
     staff: {
       title: 'Staff & Schedules',
@@ -584,6 +586,9 @@ const en = {
       nameDe: 'German Name',
       multilingualName: 'Multilingual Name',
       currency: 'Currency',
+      syncMultilingual: 'Auto Sync Multilingual',
+      syncConfirm: 'Are you sure you want to scan and auto-fill multilingual names (Vietnamese, English, German) for all existing categories and services that are missing translations?',
+      syncSuccess: 'Multilingual sync completed successfully!',
     },
     myBranches: {
       title: 'My Branches',

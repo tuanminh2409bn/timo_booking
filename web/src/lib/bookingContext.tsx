@@ -10,6 +10,7 @@ import {
   ServiceCategory,
   computeBookingTotals,
   hasConflict,
+  MAX_MAIN_SERVICES,
 } from './types';
 
 // ═══════════════════════════════════════════════════
@@ -25,8 +26,9 @@ type BookingAction =
   | { type: 'TOGGLE_EXTRA'; categoryId: string; extra: Service }
   | { type: 'REMOVE_CATEGORY'; categoryId: string }
   | { type: 'CLEAR_ALL_SERVICES' }
-  // Staff
+  // Staff (per-service in Spec V1)
   | { type: 'SELECT_STAFF'; staff: Staff | null; staffType: 'specific' | 'any' }
+  | { type: 'SELECT_STAFF_FOR_SERVICE'; categoryId: string; staff: Staff | null; staffType: 'specific' | 'any' }
   | { type: 'CLEAR_STAFF' }
   // Date/Time
   | { type: 'SELECT_DATE'; date: string }
@@ -78,6 +80,7 @@ function bookingReducer(state: BookingState, action: BookingAction): BookingStat
     case 'INIT_STATE':
       return {
         ...action.state,
+        branchSlug: state.branchSlug || action.state.branchSlug, // preserve URL-derived slug
         currentStep: state.currentStep,
       };
 
@@ -93,8 +96,8 @@ function bookingReducer(state: BookingState, action: BookingAction): BookingStat
         return state; // conflict — don't add
       }
 
-      // Check max 3 categories
-      if (existingIdx === -1 && state.selectedServices.length >= 3) {
+      // Check max categories (Spec V1: max 2 main services)
+      if (existingIdx === -1 && state.selectedServices.length >= MAX_MAIN_SERVICES) {
         return state; // max reached
       }
 
@@ -103,6 +106,8 @@ function bookingReducer(state: BookingState, action: BookingAction): BookingStat
         categoryName: category.name,
         mainService: service,
         extras: [],
+        selectedStaff: null,              // Spec V1: per-service staff
+        selectedStaffType: 'any',         // Spec V1: default to any
       };
 
       let newServices: SelectedServiceItem[];
@@ -186,6 +191,28 @@ function bookingReducer(state: BookingState, action: BookingAction): BookingStat
         selectedStaff: action.staff,
         selectedStaffType: action.staffType,
       };
+
+    // Spec V1: Per-service staff selection
+    case 'SELECT_STAFF_FOR_SERVICE': {
+      const { categoryId, staff, staffType } = action;
+      const idx = state.selectedServices.findIndex(s => s.categoryId === categoryId);
+      if (idx === -1) return state;
+
+      const newServices = [...state.selectedServices];
+      newServices[idx] = {
+        ...newServices[idx],
+        selectedStaff: staff,
+        selectedStaffType: staffType,
+      };
+
+      return {
+        ...state,
+        selectedServices: newServices,
+        // Clear date/time when staff changes
+        selectedDate: null,
+        selectedTime: null,
+      };
+    }
 
     case 'CLEAR_STAFF':
       return { ...state, selectedStaff: null, selectedStaffType: 'any' };

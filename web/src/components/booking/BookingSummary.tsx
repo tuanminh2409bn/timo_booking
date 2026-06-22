@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { demoBranch } from '@/lib/seedData';
 import styles from './BookingSummary.module.css';
 
@@ -15,8 +15,9 @@ export default function BookingSummary() {
   const { getServiceName } = useServiceTranslation();
   const { state, totals } = useBooking();
   const router = useRouter();
-  const params = useParams();
-  const branchSlug = params.branchSlug as string;
+  // Use branchSlug from booking context (set via window.location) instead of useParams()
+  // because Firebase Hosting serves pre-rendered HTML for all slugs, making useParams() unreliable
+  const branchSlug = state.branchSlug;
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const { selectedServices, selectedStaff, selectedStaffType, selectedDate, selectedTime, currentStep } = state;

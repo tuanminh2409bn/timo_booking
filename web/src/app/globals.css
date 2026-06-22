@@ -131,6 +131,12 @@ html {
   max-width: 100%;
 }
 
+@media (max-width: 768px) {
+  html {
+    font-size: 14px;
+  }
+}
+
 body {
   font-family: var(--font-family);
   font-size: var(--font-size-base);

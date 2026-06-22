@@ -43,11 +43,15 @@ function BookingLayoutInner({ children }: { children: ReactNode }) {
         const branchData = { id: docSnap.id, ...docSnap.data() } as Branch;
         dispatch({ type: 'SET_BRANCH', branch: branchData });
       } else {
-        dispatch({ type: 'SET_BRANCH', branch: demoBranch });
+        // Use demo branch as template but override slug/id with the actual URL slug
+        // to prevent bookings from being saved to the wrong branch
+        const fallbackBranch = { ...demoBranch, id: branchSlug, slug: branchSlug };
+        dispatch({ type: 'SET_BRANCH', branch: fallbackBranch });
       }
     }, (err) => {
       console.error("Error listening to branch:", err);
-      dispatch({ type: 'SET_BRANCH', branch: demoBranch });
+      const fallbackBranch = { ...demoBranch, id: branchSlug, slug: branchSlug };
+      dispatch({ type: 'SET_BRANCH', branch: fallbackBranch });
     });
 
     return () => unsubscribe();

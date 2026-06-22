@@ -228,6 +228,9 @@
   width: 56px;
   min-width: 56px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Day/Staff column - stretches to fill */
@@ -291,6 +294,24 @@
   font-weight: 700;
   color: #1A56DB;
 }
+
+/* Spec V1: Request column avatar */
+.requestAvatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #FEF3C7;
+  border: 2px solid #D97706;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.calHeaderCellRequest {
+  background: rgba(245, 158, 11, 0.04);
+}
+
 .calStaffName {
   font-size: 12px;
   font-weight: 600;
@@ -394,14 +415,34 @@
 .calBlockTime { font-size: 10px; color: #6B7280; margin-top: 1px; }
 .calBlockCustomer { font-size: 10px; color: #9CA3AF; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
+/* Confirmed = Green (matching list card green border) */
+.calBlockConfirmed { background: #ECFDF5; border-left-color: #059669; }
+.calBlockConfirmed .calBlockService { color: #059669; }
+.calBlockConfirmed:hover { box-shadow: 0 4px 12px rgba(5,150,105,0.18); }
+/* Pending = Orange (matching list card orange border) */
 .calBlockPending { background: #FFFBEB; border-left-color: #D97706; }
 .calBlockPending .calBlockService { color: #D97706; }
-.calBlockCancelled { background: #F9FAFB; border-left-color: #D1D5DB; opacity: 0.5; }
+.calBlockPending:hover { box-shadow: 0 4px 12px rgba(217,119,6,0.18); }
+/* Cancelled = Grey (matching list card grey border) */
+.calBlockCancelled { background: #F9FAFB; border-left-color: #9CA3AF; opacity: 0.6; }
 .calBlockCancelled .calBlockService { color: #9CA3AF; text-decoration: line-through; }
-.calBlockNeedsAction { background: #FEE2E2; border-left-color: #EF4444; }
-.calBlockNeedsAction .calBlockService { color: #EF4444; }
-.calBlockCompleted { background: #EFF6FF; border-left-color: #2563EB; opacity: 0.85; }
-.calBlockCompleted .calBlockService { color: #2563EB; }
+.calBlockCancelled:hover { box-shadow: 0 4px 12px rgba(156,163,175,0.18); }
+
+/* ===== Popover Backdrop ===== */
+.popoverBackdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.25);
+  z-index: 199;
+  animation: fadeInBackdrop 0.15s ease-out;
+}
+@keyframes fadeInBackdrop {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 
 /* ===== Popover ===== */
 .calPopover {
@@ -453,3 +494,322 @@
     text-align: center;
   }
 }
+
+/* ===== Staff Selection Dropdowns ===== */
+.staffSelectContainer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.staffSelectLabel {
+  font-size: 12px;
+  color: #6B7280;
+}
+.cardStaffSelect {
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid #E5E7EB;
+  font-size: 12px;
+  font-weight: 500;
+  color: #111827;
+  background: #fff;
+  outline: none;
+  cursor: pointer;
+  max-width: 160px;
+}
+.cardStaffSelect:focus {
+  border-color: #1A56DB;
+}
+.popoverStaffSelect {
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid #E5E7EB;
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+  background: #fff;
+  outline: none;
+  cursor: pointer;
+  max-width: 180px;
+}
+.popoverStaffSelect:focus {
+  border-color: #1A56DB;
+}
+
+/* ===== Redesigned Bookings styles (Mockup-matching) ===== */
+.filtersBar {
+  display: flex;
+  align-items: center;
+  background: #FFFFFF;
+  border: 1px solid #E5E7EB;
+  border-radius: 12px;
+  padding: 2px 8px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+}
+
+.filterHalf {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding: 10px 8px;
+  position: relative;
+}
+
+.filterDivider {
+  width: 1px;
+  height: 24px;
+  background: #E5E7EB;
+}
+
+.filterSelect {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  color: #111827;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  padding-right: 20px;
+}
+
+.filterHalf::after {
+  content: "▼";
+  font-size: 8px;
+  color: #9CA3AF;
+  position: absolute;
+  right: 12px;
+  pointer-events: none;
+}
+
+.statusDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #9CA3AF;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+
+.statusDot_all { background: #9CA3AF; }
+.statusDot_confirmed { background: #059669; }
+.statusDot_pending_approval { background: #D97706; }
+.statusDot_needs_owner_action { background: #EF4444; }
+.statusDot_completed { background: #2563EB; }
+.statusDot_cancelled { background: #9CA3AF; }
+
+.calendarNavCentered {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.datePickerWrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 180px;
+}
+
+.dateLabelText {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+  text-align: center;
+}
+
+.datePickerInputHidden {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.bookingRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.rowTimeContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  min-width: 60px;
+  padding-top: 10px;
+  flex-shrink: 0;
+}
+
+.rowTime {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.rowDuration {
+  font-size: 11px;
+  color: #9CA3AF;
+  margin-top: 1px;
+}
+
+.bookingListItemCard {
+  flex: 1;
+  background: #FFFFFF;
+  border: 1px solid #F3F4F6;
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.01);
+}
+
+.bookingListItemCard:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.cardHeaderRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.cardServiceTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+  margin: 0;
+}
+
+.cardStaffLine {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6B7280;
+}
+
+.cardCustomerLine {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  color: #9CA3AF;
+}
+
+.customerPhoneNumber {
+  font-weight: 600;
+  color: #4B5563;
+}
+
+.customerNameText {
+  color: #6B7280;
+}
+
+.backBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #374151;
+  transition: background 0.15s;
+}
+
+.backBtn:hover {
+  background: #F3F4F6;
+}
+
+.titleCenter {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.toggleViewBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid #E5E7EB;
+  background: #FFFFFF;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.toggleViewBtn:hover {
+  background: #F3F4F6;
+}
+
+.legendContainer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 12px 16px;
+  margin-top: 16px;
+  border-top: 1px solid #F3F4F6;
+}
+
+.legendItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legendDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.legendDotGreen { background: #059669; }
+.legendDotOrange { background: #D97706; }
+.legendDotBlue { background: #1A56DB; }
+.legendDotGrey { background: #9CA3AF; }
+.legendDotRed { background: #EF4444; }
+
+.legendText {
+  font-size: 11px;
+  color: #6B7280;
+  font-weight: 500;
+}
+
+.calStaffSubtitle {
+  font-size: 10px;
+  color: #9CA3AF;
+  text-transform: lowercase;
+  margin-top: -2px;
+}
+
+.cornerLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: #4B5563;
+  text-align: center;
+  padding: 0 4px;
+}
+
+

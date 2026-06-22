@@ -27,7 +27,7 @@ const BlurText: React.FC<BlurTextProps> = ({
   animationTo,
   onAnimationComplete,
 }) => {
-  const elements = animateBy === 'words' ? text.split(' ') : text.split('');
+  const elements = animateBy === 'words' ? text.trim().split(/\s+/) : text.split('');
   const [inView, setInView] = useState(false);
   const ref = useRef<HTMLParagraphElement>(null);
   const animatedCount = useRef(0);
@@ -86,9 +86,10 @@ const BlurText: React.FC<BlurTextProps> = ({
             opacity: props.opacity as SpringValue<number>,
             transform: props.transform as SpringValue<string>,
             filter: props.filter as SpringValue<string>,
+            marginRight: animateBy === 'words' && index < elements.length - 1 ? '0.28em' : undefined,
           }}
         >
-          {elements[index]}{animateBy === 'words' && index < elements.length - 1 && ' '}
+          {elements[index]}
         </animated.span>
       ))}
     </p>

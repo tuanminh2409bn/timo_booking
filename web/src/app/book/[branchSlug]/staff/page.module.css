@@ -518,7 +518,7 @@
 /* 👥 SECTION 2: Staff Selection (Planity Grid style 2.png) */
 .staffGrid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--space-md);
 }
 
@@ -534,6 +534,8 @@
   justify-content: space-between;
   gap: var(--space-md);
   min-height: 64px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .staffCard:hover {
@@ -1061,6 +1063,32 @@
 @media (max-width: 768px) {
   .staffGrid {
     grid-template-columns: 1fr;
+    gap: var(--space-sm);
+  }
+
+  .staffCard {
+    padding: 8px 10px;
+    min-height: 52px;
+    gap: 8px;
+  }
+
+  .staffCardLeft {
+    gap: 8px;
+  }
+
+  .staffAvatarCircle,
+  .anyStaffIcon {
+    width: 32px;
+    height: 32px;
+    font-size: 12px;
+  }
+
+  .anyStaffIcon {
+    font-size: 16px;
+  }
+
+  .staffCardName {
+    font-size: 13px;
   }
 
   .columnsGridWrapper {
@@ -1098,4 +1126,63 @@
     padding: 6px 16px;
     font-size: var(--font-size-xs);
   }
+}
+
+/* ===== Spec V1: Per-Service Staff Selection Block ===== */
+.perServiceStaffBlock {
+  margin-bottom: var(--space-lg);
+  padding-bottom: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.perServiceStaffBlock:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.perServiceStaffLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-md);
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(236, 72, 153, 0.06));
+  border-radius: var(--radius-sm);
+  border-left: 3px solid #7C3AED;
+}
+
+.perServiceStaffServiceName {
+  font-weight: 600;
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.perServiceStaffDuration {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  background: rgba(124, 58, 237, 0.1);
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+/* ===== Spec V1: Add-on Note ===== */
+.addonNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  margin-top: var(--space-sm);
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: #92400e;
+  line-height: 1.4;
+}
+
+.addonNoteIcon {
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
 }

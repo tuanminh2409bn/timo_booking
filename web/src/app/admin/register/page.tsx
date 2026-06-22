@@ -11,6 +11,8 @@ import { createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } f
 import { doc, getDoc, writeBatch } from 'firebase/firestore';
 import styles from './page.module.css';
 import GoogleRegisterModal from '@/components/GoogleRegisterModal';
+import { demoCategories, demoServices } from '@/lib/seedData';
+import { categoryTranslations, serviceTranslations } from '@/lib/i18n/serviceTranslations';
 
 // Slugify helper
 const slugify = (text: string) => {
@@ -118,109 +120,36 @@ export default function RegisterPage() {
       createdAt: new Date().toISOString()
     });
 
-    // Default Categories
-    const catManiId = 'cat-manicure';
-    const catRefMani = doc(db, 'branches', branchSlug, 'categories', catManiId);
-    batch.set(catRefMani, {
-      id: catManiId,
-      branchId: branchSlug,
-      businessId,
-      name: 'Manicure',
-      description: 'Hand care & nail styling',
-      displayOrder: 1,
-      isActive: true
+    // Default Categories từ Timo Nails Berlin (Glamour Nails Berlin)
+    demoCategories.forEach((cat) => {
+      const catRef = doc(db, 'branches', branchSlug, 'categories', cat.id);
+      const viName = categoryTranslations['vi']?.[cat.id]?.name || cat.name;
+      const enName = categoryTranslations['en']?.[cat.id]?.name || cat.name;
+      const deName = categoryTranslations['de']?.[cat.id]?.name || cat.name;
+
+      batch.set(catRef, {
+        ...cat,
+        branchId: branchSlug,
+        businessId,
+        nameLocalized: { vi: viName, en: enName, de: deName }
+      });
     });
 
-    const catPediId = 'cat-pedicure';
-    const catRefPedi = doc(db, 'branches', branchSlug, 'categories', catPediId);
-    batch.set(catRefPedi, {
-      id: catPediId,
-      branchId: branchSlug,
-      businessId,
-      name: 'Pedicure',
-      description: 'Foot care & massage',
-      displayOrder: 2,
-      isActive: true,
-      requiresStaffAutoAssign: true
-    });
+    // Default Services từ Timo Nails Berlin
+    demoServices.forEach((svc) => {
+      const svcRef = doc(db, 'branches', branchSlug, 'services', svc.id);
+      const viName = serviceTranslations['vi']?.[svc.id]?.name || svc.name;
+      const enName = serviceTranslations['en']?.[svc.id]?.name || svc.name;
+      const deName = serviceTranslations['de']?.[svc.id]?.name || svc.name;
 
-    // Default Services
-    const svcClassicManiId = 'svc-classic-manicure';
-    const svcClassicManiRef = doc(db, 'branches', branchSlug, 'services', svcClassicManiId);
-    batch.set(svcClassicManiRef, {
-      id: svcClassicManiId,
-      branchId: branchSlug,
-      businessId,
-      categoryId: catManiId,
-      name: 'Classic Manicure',
-      description: 'Nail shaping, cuticle care, and regular polish',
-      durationMinutes: 30,
-      price: 25,
-      currency: '€',
-      displayOrder: 1,
-      isActive: true,
-      hasAppointments: false,
-      type: 'standard',
-      createdAt: new Date().toISOString()
-    });
-
-    const svcGelNailsId = 'svc-gel-nails';
-    const svcGelNailsRef = doc(db, 'branches', branchSlug, 'services', svcGelNailsId);
-    batch.set(svcGelNailsRef, {
-      id: svcGelNailsId,
-      branchId: branchSlug,
-      businessId,
-      categoryId: catManiId,
-      name: 'Gel Nails',
-      description: 'Full set of acrylic/gel nail extensions',
-      durationMinutes: 60,
-      price: 50,
-      currency: '€',
-      displayOrder: 2,
-      isActive: true,
-      hasAppointments: false,
-      type: 'standard',
-      createdAt: new Date().toISOString()
-    });
-
-    const svcClassicPediId = 'svc-classic-pedicure';
-    const svcClassicPediRef = doc(db, 'branches', branchSlug, 'services', svcClassicPediId);
-    batch.set(svcClassicPediRef, {
-      id: svcClassicPediId,
-      branchId: branchSlug,
-      businessId,
-      categoryId: catPediId,
-      name: 'Classic Pedicure',
-      description: 'Relaxing foot bath, scrub, and massage',
-      durationMinutes: 45,
-      price: 35,
-      currency: '€',
-      displayOrder: 1,
-      isActive: true,
-      hasAppointments: false,
-      type: 'standard',
-      createdAt: new Date().toISOString()
-    });
-
-    // Default Staff member linked to Owner
-    const staffId = `staff-${uid}`;
-    const staffRef = doc(db, 'branches', branchSlug, 'staff', staffId);
-    batch.set(staffRef, {
-      id: staffId,
-      branchId: branchSlug,
-      businessId,
-      userUid: uid,
-      name: nameStr,
-      initials: getInitials(nameStr),
-      role: 'staff',
-      staffType: 'main',
-      serviceIds: [svcClassicManiId, svcGelNailsId, svcClassicPediId],
-      displayOrder: 1,
-      status: 'active',
-      hasAppointments: false,
-      rating: 5.0,
-      languages: ['German', 'Vietnamese'],
-      createdAt: new Date().toISOString()
+      batch.set(svcRef, {
+        ...svc,
+        branchId: branchSlug,
+        businessId,
+        currency: '€',
+        nameLocalized: { vi: viName, en: enName, de: deName },
+        createdAt: new Date().toISOString()
+      });
     });
 
     await batch.commit();

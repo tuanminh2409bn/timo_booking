@@ -7,7 +7,6 @@
   min-height: 100dvh;
   background-color: #F5F5F7;
   color: #111827;
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
 }
 
 /* ===== Greeting Header ===== */
@@ -89,17 +88,14 @@
 .bottomTabBar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
-  background: rgba(17, 24, 39, 0.88);
-  backdrop-filter: blur(24px) saturate(180%);
-  -webkit-backdrop-filter: blur(24px) saturate(180%);
-  border-radius: 20px;
-  padding: 6px 8px;
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.18),
-    0 2px 8px rgba(0, 0, 0, 0.12),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  justify-content: space-around; /* Spaced further apart to stretch the menu */
+  width: 100%;
+  max-width: 100%; /* Matches components above on mobile */
+  background: #FFFFFF;
+  border-radius: 16px; /* Reduced corner rounding to match cards */
+  padding: 6px 16px; /* Reduced vertical thickness */
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.04);
   pointer-events: auto; /* Re-enable clicks on the bar itself */
   animation: floatUp 0.4s ease-out;
 }
@@ -120,24 +116,25 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px; /* Reduced vertical gap */
   text-decoration: none;
-  color: rgba(255, 255, 255, 0.5);
-  padding: 8px 20px;
-  border-radius: 14px;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  color: #9CA3AF;
+  padding: 6px 24px; /* Reduced padding inside tab items */
+  border-radius: 12px;
+  transition: all 0.2s ease;
   -webkit-tap-highlight-color: transparent;
   position: relative;
 }
 
 .tabItem:hover {
-  color: rgba(255, 255, 255, 0.7);
+  color: #6B7280;
 }
 
-.tabItemActive {
-  color: #fff;
-  background: rgba(26, 86, 219, 0.9);
-  box-shadow: 0 2px 12px rgba(26, 86, 219, 0.4);
+.tabItemActive,
+.tabItemActive:hover {
+  color: #0056f5; /* Restored to original blue color */
+  background: transparent;
+  box-shadow: none;
 }
 
 .tabIconWrap {
@@ -154,7 +151,7 @@
 }
 
 .tabLabel {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.2px;
   white-space: nowrap;
@@ -186,6 +183,10 @@
 
   .bottomBarWrapper {
     padding: 0 0 20px;
+  }
+
+  .bottomTabBar {
+    max-width: 480px; /* Constrain bottom bar width on desktop */
   }
 
   .tabItem {

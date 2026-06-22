@@ -238,6 +238,7 @@ const de = {
         service: '{count} Service',
         services: '{count} Services',
       },
+      addonNote: 'Zusatzleistungen können direkt im Salon gebucht werden.',
     },
     staff: {
       title: 'Mitarbeiter wählen',
@@ -464,6 +465,7 @@ const de = {
       btnReject: 'Ablehnen',
       btnApprove: '✓ Bestätigen',
       btnCancel: 'Termin absagen',
+      anyStaff: 'Beliebiger Mitarbeiter',
     },
     staff: {
       title: 'Mitarbeiter & Dienstpläne',
@@ -557,6 +559,9 @@ const de = {
       nameDe: 'Deutscher Name',
       multilingualName: 'Mehrsprachiger Name',
       currency: 'Währung',
+      syncMultilingual: 'Mehrsprachigkeit autom. synchronisieren',
+      syncConfirm: 'Sind Sie sicher, dass Sie mehrsprachige Namen (Vietnamesisch, Englisch, Deutsch) für alle vorhandenen Kategorien und Services, denen Übersetzungen fehlen, automatisch ausfüllen möchten?',
+      syncSuccess: 'Mehrsprachige Synchronisierung erfolgreich abgeschlossen!',
     },
     myBranches: {
       title: 'Meine Filialen',

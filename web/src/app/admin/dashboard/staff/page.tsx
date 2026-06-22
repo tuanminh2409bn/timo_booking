@@ -1,6 +1,30 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { 
+  User, 
+  Clock, 
+  Scissors, 
+  Calendar, 
+  Store, 
+  ShieldAlert, 
+  Mail, 
+  Phone, 
+  Plus, 
+  Trash2, 
+  Check, 
+  X, 
+  ChevronRight, 
+  ArrowLeft, 
+  Settings, 
+  Gem, 
+  Globe, 
+  Palmtree, 
+  Tag, 
+  CalendarDays,
+  Sparkles
+} from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -19,6 +43,9 @@ import {
 import { db } from '@/lib/firebase/config';
 import { getGermanTodayString } from '@/lib/timeUtils';
 import styles from './page.module.css';
+
+// ===== Helper Functions =====
+
 const isFirstFiveBlockService = (name: string) => {
   const n = name.toLowerCase();
   return (
@@ -30,9 +57,47 @@ const isFirstFiveBlockService = (name: string) => {
   );
 };
 
-const isPedicureService = (name: string) => {
-  const n = name.toLowerCase();
-  return n.includes('pediküre') || n.includes('zehenmodellage');
+const getStaffAvatarStyle = (name: string) => {
+  const code = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const index = code % 5;
+  switch (index) {
+    case 0:
+      return { backgroundColor: '#EFF6FF', color: '#1D4ED8' }; // blue
+    case 1:
+      return { backgroundColor: '#FAF5FF', color: '#7C3AED' }; // purple
+    case 2:
+      return { backgroundColor: '#FDF2F8', color: '#DB2777' }; // pink
+    case 3:
+      return { backgroundColor: '#F0FDF4', color: '#059669' }; // green
+    case 4:
+    default:
+      return { backgroundColor: '#FEF3C7', color: '#D97706' }; // orange/yellow
+  }
+};
+
+const getCategoryColorTheme = (id: string) => {
+  switch (id) {
+    case 'cat-gel':
+      return { border: '#1D4ED8', text: '#1D4ED8', circleBg: '#EFF6FF' };
+    case 'cat-auffuellen-gel':
+      return { border: '#7C3AED', text: '#7C3AED', circleBg: '#FAF5FF' };
+    case 'cat-acryl':
+      return { border: '#059669', text: '#059669', circleBg: '#F0FDF4' };
+    case 'cat-auffuellen-acryl':
+      return { border: '#D97706', text: '#D97706', circleBg: '#FEF3C7' };
+    case 'cat-zehen':
+      return { border: '#EC4899', text: '#EC4899', circleBg: '#FDF2F8' };
+    case 'cat-mani':
+      return { border: '#0D9488', text: '#0D9488', circleBg: '#F0FDFA' };
+    case 'cat-pedi':
+      return { border: '#0284C7', text: '#0284C7', circleBg: '#F0F9FF' };
+    case 'cat-wimpern':
+      return { border: '#8B5CF6', text: '#8B5CF6', circleBg: '#F5F3FF' };
+    case 'cat-abloesung':
+      return { border: '#EF4444', text: '#EF4444', circleBg: '#FEF2F2' };
+    default:
+      return { border: '#4B5563', text: '#4B5563', circleBg: '#F3F4F6' };
+  }
 };
 
 // ===== Interfaces =====
@@ -92,10 +157,23 @@ interface AbsenceData {
   createdAt: string;
 }
 
+interface AbsencePeriod {
+  id: string;
+  ids: string[];
+  startDate: string;
+  endDate: string;
+  note: string;
+  isFullDay: boolean;
+  startTime: string | null;
+  endTime: string | null;
+}
+
 interface ServiceData {
   id: string;
   name: string;
   nameLocalized?: { vi?: string; en?: string; de?: string };
+  description?: string;
+  descriptionLocalized?: { vi?: string; en?: string; de?: string };
   durationMinutes: number;
   price: number;
   currency: string;
@@ -103,12 +181,20 @@ interface ServiceData {
   isActive: boolean;
 }
 
+interface CategoryData {
+  id: string;
+  name: string;
+  nameLocalized?: { vi?: string; en?: string; de?: string };
+  description?: string;
+  descriptionLocalized?: { vi?: string; en?: string; de?: string };
+  isActive: boolean;
+  displayOrder: number;
+}
+
 interface Toast {
   message: string;
   type: 'success' | 'error';
 }
-
-type DetailTab = 'profile' | 'hours' | 'services' | 'absences' | 'branches';
 
 const WEEKDAY_LABELS = {
   de: ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'],
@@ -144,13 +230,202 @@ const generateRandomCode = () => {
   return result;
 };
 
+const getDatesInRange = (startStr: string, endStr: string) => {
+  const dates = [];
+  const start = new Date(startStr);
+  const end = new Date(endStr);
+  const temp = new Date(start);
+  while (temp <= end) {
+    dates.push(temp.toISOString().slice(0, 10));
+    temp.setDate(temp.getDate() + 1);
+  }
+  return dates;
+};
+
+const groupConsecutiveAbsences = (list: AbsenceData[]): AbsencePeriod[] => {
+  if (list.length === 0) return [];
+  const sorted = [...list].sort((a, b) => a.absenceDate.localeCompare(b.absenceDate));
+  
+  const periods: AbsencePeriod[] = [];
+  let currentPeriod: AbsencePeriod = {
+    id: sorted[0].id,
+    ids: [sorted[0].id],
+    startDate: sorted[0].absenceDate,
+    endDate: sorted[0].absenceDate,
+    note: sorted[0].note,
+    isFullDay: sorted[0].isFullDay,
+    startTime: sorted[0].startTime,
+    endTime: sorted[0].endTime,
+  };
+  
+  for (let i = 1; i < sorted.length; i++) {
+    const item = sorted[i];
+    const prevDate = new Date(currentPeriod.endDate);
+    const currDate = new Date(item.absenceDate);
+    const diffTime = Math.abs(currDate.getTime() - prevDate.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 1 && item.note === currentPeriod.note && item.isFullDay === currentPeriod.isFullDay) {
+      currentPeriod.endDate = item.absenceDate;
+      currentPeriod.ids.push(item.id);
+    } else {
+      periods.push(currentPeriod);
+      currentPeriod = {
+        id: item.id,
+        ids: [item.id],
+        startDate: item.absenceDate,
+        endDate: item.absenceDate,
+        note: item.note,
+        isFullDay: item.isFullDay,
+        startTime: item.startTime,
+        endTime: item.endTime,
+      };
+    }
+  }
+  periods.push(currentPeriod);
+  return periods;
+};
+
+const formatAbsencePeriodDate = (period: AbsencePeriod, loc: string) => {
+  const start = new Date(period.startDate);
+  const end = new Date(period.endDate);
+  
+  const startDay = String(start.getDate()).padStart(2, '0');
+  const endDay = String(end.getDate()).padStart(2, '0');
+  
+  const month = start.getMonth() + 1;
+  const year = start.getFullYear();
+  
+  let monthStr = '';
+  if (loc === 'vi') {
+    monthStr = `Tháng ${month}, ${year}`;
+  } else if (loc === 'de') {
+    const monthNamesDe = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+    monthStr = `${monthNamesDe[start.getMonth()]} ${year}`;
+  } else {
+    const monthNamesEn = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    monthStr = `${monthNamesEn[start.getMonth()]} ${year}`;
+  }
+  
+  const dayText = period.startDate === period.endDate ? startDay : `${startDay} - ${endDay}`;
+  return { dayText, monthStr };
+};
+
+// ===== Custom SVG Icons =====
+const CategoryIcon = ({ id, className = "w-4 h-4" }: { id: string; className?: string }) => {
+  switch (id) {
+    case 'cat-gel':
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10 2h4v7h-4z" />
+          <path d="M6 9h12a2 2 0 0 1 2 2v8a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-8a2 2 0 0 1 2-2z" />
+          <circle cx="12" cy="15" r="1.5" />
+        </svg>
+      );
+    case 'cat-auffuellen-gel':
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 3L6 15v6h6L21 9z" />
+          <path d="M16 5l3 3" />
+          <path d="M9 12l3 3" />
+        </svg>
+      );
+    case 'cat-acryl':
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 3h12l-1 9H7z" />
+          <path d="M4 12h16a2 2 0 0 1 2 2v5a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3v-5a2 2 0 0 1 2-2z" />
+          <circle cx="12" cy="17" r="1.5" />
+        </svg>
+      );
+    case 'cat-auffuellen-acryl':
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
+          <path d="M7.5 10.5c.828 0 1.5-.672 1.5-1.5s-.672-1.5-1.5-1.5-1.5.672-1.5 1.5.672 1.5 1.5 1.5z" />
+          <path d="M11.5 7.5c.828 0 1.5-.672 1.5-1.5s-.672-1.5-1.5-1.5-1.5.672-1.5 1.5.672 1.5 1.5 1.5z" />
+          <path d="M16.5 10.5c.828 0 1.5-.672 1.5-1.5s-.672-1.5-1.5-1.5-1.5.672-1.5 1.5.672 1.5 1.5 1.5z" />
+          <path d="M6 14h12" />
+        </svg>
+      );
+    case 'cat-zehen':
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" />
+          <path d="M9 7a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
+          <path d="M13 7a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
+          <path d="M17 8a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4z" />
+          <path d="M21 9a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" />
+          <path d="M4 13c1.5 0 3-1 4.5-1s2.5.5 3.5 1.5 2.5 1 4 1 3-1 4-2" />
+          <path d="M3 13v6a2 2 0 0 0 2 2h13a3 3 0 0 0 3-3v-5" />
+        </svg>
+      );
+    case 'cat-mani':
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5" />
+          <path d="M14 10V5a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5" />
+          <path d="M10 10V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v5" />
+          <path d="M6 14V9a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v7" />
+          <path d="M3 16c0 4 3 6 6 6h6c3 0 6-2 6-6V13l-3-2-3 2v-2l-3 1v-2l-3 1-3-1z" />
+        </svg>
+      );
+    case 'cat-pedi':
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M5.5 11.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z" />
+          <path d="M10.5 8.5a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4z" />
+          <path d="M14.5 9.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" />
+          <path d="M18 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2z" />
+          <path d="M3 13.5v5A3.5 3.5 0 0 0 6.5 22h10a3.5 3.5 0 0 0 3.5-3.5v-7" />
+          <path d="M3 13.5c1.5-1 3.5-1.5 5.5-1s4.5 2 6 2 3.5-1.5 5-2.5" />
+        </svg>
+      );
+    case 'cat-wimpern':
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 10a10 10 0 0 0 20 0" />
+          <path d="M6 11l-2 3" />
+          <path d="M10 11.5L9 15" />
+          <path d="M14 11.5l1 3.5" />
+          <path d="M18 11l2 3" />
+        </svg>
+      );
+    case 'cat-abloesung':
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 6L6 18M6 6l12 12" />
+        </svg>
+      );
+    default:
+      return (
+        <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      );
+  }
+};
+
 export default function StaffManagementPage() {
+  const router = useRouter();
   const { user } = useAuth();
   const { t, locale } = useI18n();
+  
+  // Core lists
   const [staffList, setStaffList] = useState<DisplayStaffMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<Toast | null>(null);
 
-  // Invite states
+  // States matching mockup subpage
+  const [activeStaffId, setActiveStaffId] = useState<string | null>(null);
+  const [activeDrawer, setActiveDrawer] = useState<'profile' | 'hours' | 'services' | 'absences' | 'createAbsence' | 'branches' | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'inactive' | 'active'>('all');
+  
+  // Stats
+  const [monthlyBookingsCount, setMonthlyBookingsCount] = useState<number>(0);
+
+  // Invitation invite codes
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteRole, setInviteRole] = useState<'manager' | 'staff'>('staff');
   const [inviteStaffType, setInviteStaffType] = useState<'main' | 'junior'>('main');
@@ -158,56 +433,56 @@ export default function StaffManagementPage() {
   const [generatedCode, setGeneratedCode] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // Pending approvals state
+  // Pending staff requests
   const [pendingStaff, setPendingStaff] = useState<any[]>([]);
 
-  // Detail modal state
+  // Selected staff details
   const [selectedStaff, setSelectedStaff] = useState<DisplayStaffMember | null>(null);
-  const [detailTab, setDetailTab] = useState<DetailTab>('profile');
-  const [saving, setSaving] = useState(false);
 
-  // Manager modal state (simple modal for owner to manage managers)
-  const [selectedManager, setSelectedManager] = useState<DisplayStaffMember | null>(null);
-  const [toast, setToast] = useState<Toast | null>(null);
-
-  // Profile form state
+  // Profile Drawer form state
   const [editName, setEditName] = useState('');
   const [editStaffType, setEditStaffType] = useState<'main' | 'junior'>('main');
   const [editLanguages, setEditLanguages] = useState('');
   const [editTitle, setEditTitle] = useState('');
   const [editStatus, setEditStatus] = useState<'active' | 'inactive'>('active');
 
-  // Working hours state
+  // Working Hours Drawer state
   const [workingHours, setWorkingHours] = useState<WorkingHoursDay[]>([]);
   const [hoursLoading, setHoursLoading] = useState(false);
 
-  // Services state
+  // Services Drawer state
   const [branchServices, setBranchServices] = useState<ServiceData[]>([]);
+  const [categories, setCategories] = useState<CategoryData[]>([]);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
 
-  // Absence state
+  // Absences Drawer state
   const [absences, setAbsences] = useState<AbsenceData[]>([]);
-  const [absenceDate, setAbsenceDate] = useState('');
+  const [absenceStartDate, setAbsenceStartDate] = useState('');
+  const [absenceEndDate, setAbsenceEndDate] = useState('');
   const [absenceFullDay, setAbsenceFullDay] = useState(true);
   const [absenceStartTime, setAbsenceStartTime] = useState('09:00');
   const [absenceEndTime, setAbsenceEndTime] = useState('18:00');
   const [absenceNote, setAbsenceNote] = useState('');
 
-  // Branch assignment state (for managers)
+  // Branch assignment drawer state (for managers)
   const [businessBranches, setBusinessBranches] = useState<BranchData[]>([]);
   const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
 
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const itemsPerPage = 5;
+
   const branchId = user?.assignedBranches?.[0] || 'glamour-nails-berlin';
   const ts = t.admin.staff;
 
-  // Toast helper
+  // Toast Helper
   const showToast = useCallback((message: string, type: 'success' | 'error') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
 
-  // Helper: get localized service name
   const getLocalizedName = (item: { name: string; nameLocalized?: { vi?: string; en?: string; de?: string } }) => {
     if (item.nameLocalized) {
       const localized = item.nameLocalized[locale as 'vi' | 'en' | 'de'];
@@ -216,7 +491,15 @@ export default function StaffManagementPage() {
     return item.name;
   };
 
-  // ===== Sync pending approvals =====
+  const getLocalizedDescription = (item: { description?: string; descriptionLocalized?: { vi?: string; en?: string; de?: string } }) => {
+    if (item.descriptionLocalized) {
+      const localized = item.descriptionLocalized[locale as 'vi' | 'en' | 'de'];
+      if (localized) return localized;
+    }
+    return item.description || '';
+  };
+
+  // Sync Pending Staff Approvals
   useEffect(() => {
     if (!user || user.role !== 'owner') return;
     const brId = user.assignedBranches?.[0];
@@ -245,7 +528,7 @@ export default function StaffManagementPage() {
     return () => unsubscribe();
   }, [user]);
 
-  // ===== Sync staff from Firestore in real-time =====
+  // Sync Staff Members in real-time
   useEffect(() => {
     if (!user) return;
     const staffRef = collection(db, 'branches', branchId, 'staff');
@@ -289,11 +572,38 @@ export default function StaffManagementPage() {
     return () => unsubscribe();
   }, [user, branchId]);
 
-  // ===== Sync branch services (for service assignment tab) =====
+  // Sync Branch Services & Categories
   useEffect(() => {
     if (!user || !branchId) return;
+
+    const catRef = collection(db, 'branches', branchId, 'categories');
+    const unsubscribeCats = onSnapshot(
+      catRef,
+      (snap) => {
+        const list: CategoryData[] = [];
+        snap.forEach((docSnap) => {
+          const d = docSnap.data();
+          list.push({
+            id: docSnap.id,
+            name: d.name || '',
+            nameLocalized: d.nameLocalized,
+            description: d.description || '',
+            descriptionLocalized: d.descriptionLocalized,
+            isActive: d.isActive !== false,
+            displayOrder: d.displayOrder || 0,
+          });
+        });
+        list.sort((a, b) => a.displayOrder - b.displayOrder);
+        setCategories(list);
+        setExpandedCategories(new Set(list.map(c => c.id)));
+      },
+      (err) => {
+        console.error('Error listening to categories:', err);
+      }
+    );
+
     const svcRef = collection(db, 'branches', branchId, 'services');
-    const unsubscribe = onSnapshot(
+    const unsubscribeSvcs = onSnapshot(
       svcRef,
       (snap) => {
         const list: ServiceData[] = [];
@@ -303,6 +613,8 @@ export default function StaffManagementPage() {
             id: docSnap.id,
             name: d.name,
             nameLocalized: d.nameLocalized,
+            description: d.description || '',
+            descriptionLocalized: d.descriptionLocalized,
             durationMinutes: d.durationMinutes,
             price: d.price,
             currency: d.currency || 'EUR',
@@ -316,10 +628,14 @@ export default function StaffManagementPage() {
         console.error('Error listening to services:', err);
       }
     );
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribeCats();
+      unsubscribeSvcs();
+    };
   }, [user, branchId]);
 
-  // ===== Load working hours for selected staff =====
+  // Load Working Hours
   const loadWorkingHours = useCallback(
     async (staffId: string) => {
       setHoursLoading(true);
@@ -346,7 +662,6 @@ export default function StaffManagementPage() {
               isWorking: d.isWorking !== false,
             });
           });
-          // Ensure all 7 days are present
           for (let i = 0; i < 7; i++) {
             if (!days.find((d) => d.dayOfWeek === i)) {
               days.push({
@@ -370,7 +685,7 @@ export default function StaffManagementPage() {
     [branchId]
   );
 
-  // ===== Load absences for selected staff =====
+  // Load Absences
   const loadAbsences = useCallback(
     async (staffId: string) => {
       try {
@@ -397,7 +712,7 @@ export default function StaffManagementPage() {
     [branchId]
   );
 
-  // ===== Load branches for branch assignment (managers) =====
+  // Load Branches (Managers only)
   const loadBranchesForAssignment = useCallback(
     async (staff: DisplayStaffMember) => {
       if (staff.role !== 'manager' || !user?.businessId) {
@@ -407,7 +722,6 @@ export default function StaffManagementPage() {
       }
       setBranchesLoading(true);
       try {
-        // Fetch all branches belonging to this business
         const branchesRef = collection(db, 'branches');
         const q = query(branchesRef, where('businessId', '==', user.businessId));
         const snap = await getDocs(q);
@@ -422,7 +736,6 @@ export default function StaffManagementPage() {
         });
         setBusinessBranches(list);
 
-        // Load current assignedBranches from user profile
         const userUid = staff.userUid;
         if (userUid) {
           const userDocRef = doc(db, 'users', userUid);
@@ -434,7 +747,6 @@ export default function StaffManagementPage() {
             setSelectedBranchIds([]);
           }
         } else {
-          // Fallback: query users by staffId
           const usersRef = collection(db, 'users');
           const uq = query(usersRef, where('staffId', '==', staff.id));
           const uSnap = await getDocs(uq);
@@ -456,39 +768,59 @@ export default function StaffManagementPage() {
     [user]
   );
 
-  // ===== Open staff detail modal =====
+  // Query Monthly Bookings Count
+  const fetchMonthlyBookings = useCallback(
+    async (staffId: string) => {
+      try {
+        const bookingsRef = collection(db, 'branches', branchId, 'bookings');
+        const q = query(bookingsRef, where('staffId', '==', staffId));
+        const snap = await getDocs(q);
+        const currentMonthPrefix = new Date().toISOString().slice(0, 7); // e.g. "2026-06"
+        const count = snap.docs.filter(docSnap => {
+          const data = docSnap.data();
+          const date = data.appointmentDate || '';
+          const status = data.status || '';
+          return date.startsWith(currentMonthPrefix) && !status.includes('cancelled');
+        }).length;
+        setMonthlyBookingsCount(count);
+      } catch (err) {
+        console.error('Error fetching monthly bookings:', err);
+        setMonthlyBookingsCount(0);
+      }
+    },
+    [branchId]
+  );
+
+  // Open Detail Screen
   const handleOpenDetail = useCallback(
     (staff: DisplayStaffMember) => {
       setSelectedStaff(staff);
-      setDetailTab('profile');
-      // Populate profile form
+      setActiveStaffId(staff.id);
+      
+      // Populate fields
       setEditName(staff.name);
       setEditStaffType(staff.staffType);
       setEditLanguages(staff.languages.join(', '));
       setEditTitle(staff.title || '');
       setEditStatus(staff.status);
-      // Populate service selection
       setSelectedServiceIds([...staff.serviceIds]);
-      // Load subcollection data
+      
+      // Sub-collections load
       loadWorkingHours(staff.id);
       loadAbsences(staff.id);
-      // Load branch assignment data for managers
       loadBranchesForAssignment(staff);
-      // Reset absence form
-      setAbsenceDate('');
-      setAbsenceFullDay(true);
-      setAbsenceStartTime('09:00');
-      setAbsenceEndTime('18:00');
-      setAbsenceNote('');
+      fetchMonthlyBookings(staff.id);
     },
-    [loadWorkingHours, loadAbsences, loadBranchesForAssignment]
+    [loadWorkingHours, loadAbsences, loadBranchesForAssignment, fetchMonthlyBookings]
   );
 
   const handleCloseDetail = () => {
     setSelectedStaff(null);
+    setActiveStaffId(null);
+    setActiveDrawer(null);
   };
 
-  // ===== Save Profile =====
+  // Save Profile
   const handleSaveProfile = async () => {
     if (!selectedStaff || !user) return;
     setSaving(true);
@@ -498,20 +830,36 @@ export default function StaffManagementPage() {
         .split(',')
         .map((l) => l.trim())
         .filter(Boolean);
+      
+      const initials = editName
+        .split(' ')
+        .map((w) => w[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2);
+
       await updateDoc(staffDocRef, {
         name: editName,
         staffType: editStaffType,
         languages: langArray,
         title: editTitle,
         status: editStatus,
-        initials: editName
-          .split(' ')
-          .map((w) => w[0])
-          .join('')
-          .toUpperCase()
-          .slice(0, 2),
+        initials,
       });
+      
+      // Update selectedStaff state
+      setSelectedStaff(prev => prev ? {
+        ...prev,
+        name: editName,
+        staffType: editStaffType,
+        languages: langArray,
+        title: editTitle,
+        status: editStatus,
+        initials,
+      } : null);
+
       showToast(ts.saveSuccess, 'success');
+      setActiveDrawer(null);
     } catch (err) {
       console.error('Error saving profile:', err);
       showToast(ts.saveError, 'error');
@@ -520,7 +868,7 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ===== Save Working Hours (batch) =====
+  // Save Working Hours
   const handleSaveWorkingHours = async () => {
     if (!selectedStaff || !user) return;
     setSaving(true);
@@ -548,6 +896,7 @@ export default function StaffManagementPage() {
       }
       await batch.commit();
       showToast(ts.saveSuccess, 'success');
+      setActiveDrawer(null);
     } catch (err) {
       console.error('Error saving working hours:', err);
       showToast(ts.saveError, 'error');
@@ -556,34 +905,30 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ===== Save Service Assignment =====
+  // Save Service Assignment
   const handleSaveServices = async () => {
     if (!selectedStaff || !user) return;
     setSaving(true);
     try {
-      console.log('[DEBUG Save Services]', {
-        staffId: selectedStaff.id,
-        branchId,
-        userUid: user.uid,
-        userRole: user.role,
-        userBusinessId: user.businessId,
-        userAssignedBranches: user.assignedBranches,
-        serviceIds: selectedServiceIds,
-      });
       const staffDocRef = doc(db, 'branches', branchId, 'staff', selectedStaff.id);
       await updateDoc(staffDocRef, {
         serviceIds: selectedServiceIds,
       });
+      
+      // Update selectedStaff state
+      setSelectedStaff(prev => prev ? { ...prev, serviceIds: selectedServiceIds } : null);
+
       showToast(ts.saveSuccess, 'success');
+      setActiveDrawer(null);
     } catch (err: any) {
-      console.error('Error saving services:', err?.code, err?.message, err);
+      console.error('Error saving services:', err);
       showToast(ts.saveError, 'error');
     } finally {
       setSaving(false);
     }
   };
 
-  // ===== Save Branch Assignment (for managers) =====
+  // Save Branch Assignment
   const handleSaveBranchAssignment = async () => {
     if (!selectedStaff || !user) return;
     setSaving(true);
@@ -591,7 +936,6 @@ export default function StaffManagementPage() {
       let targetUid: string | null = selectedStaff.userUid;
 
       if (!targetUid) {
-        // Fallback: find user doc by staffId
         const usersRef = collection(db, 'users');
         const uq = query(usersRef, where('staffId', '==', selectedStaff.id));
         const uSnap = await getDocs(uq);
@@ -610,6 +954,7 @@ export default function StaffManagementPage() {
         assignedBranches: selectedBranchIds,
       });
       showToast(ts.branchAssignmentSaved, 'success');
+      setActiveDrawer(null);
     } catch (err) {
       console.error('Error saving branch assignment:', err);
       showToast(ts.saveError, 'error');
@@ -618,7 +963,7 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ===== Toggle branch selection =====
+  // Toggle Branch selection
   const toggleBranchId = (branchIdToToggle: string) => {
     setSelectedBranchIds((prev) =>
       prev.includes(branchIdToToggle)
@@ -627,353 +972,344 @@ export default function StaffManagementPage() {
     );
   };
 
-  // ===== Add Absence =====
+  // Add Absence (Range support)
   const handleAddAbsence = async () => {
-    if (!selectedStaff || !user || !absenceDate) return;
+    if (!selectedStaff || !user || !absenceStartDate) return;
     setSaving(true);
     try {
-      const absId = `abs-${Date.now()}`;
-      const absRef = doc(
-        db,
-        'branches',
-        branchId,
-        'staff',
-        selectedStaff.id,
-        'absences',
-        absId
-      );
-      const absData: AbsenceData = {
-        id: absId,
-        staffId: selectedStaff.id,
-        branchId,
-        absenceDate,
-        startTime: absenceFullDay ? null : absenceStartTime,
-        endTime: absenceFullDay ? null : absenceEndTime,
-        isFullDay: absenceFullDay,
-        note: absenceNote,
-        createdBy: user.uid || '',
-        createdAt: new Date().toISOString(),
-      };
-
-      // ── Planned Leave Absence Reconciliation (Spec 4 & 5) ──
+      const dates = getDatesInRange(absenceStartDate, absenceEndDate || absenceStartDate);
+      const batch = writeBatch(db);
       const germanToday = getGermanTodayString();
-      const isPlannedLeave = absenceDate !== germanToday;
 
-      if (isPlannedLeave) {
-        // 1. Fetch all bookings on the absence date
-        const bookingsRef = collection(db, 'branches', branchId, 'bookings');
-        const bookingsSnap = await getDocs(query(bookingsRef, where('appointmentDate', '==', absenceDate)));
-        const bookingsOnDate: any[] = [];
-        bookingsSnap.forEach(d => {
-          const data = d.data();
-          if (data.status !== 'cancelled' && data.status !== 'cancelled_by_salon' && data.status !== 'cancelled_by_customer') {
-            bookingsOnDate.push({ id: d.id, ...data });
-          }
-        });
+      for (const date of dates) {
+        const absId = `abs-${date}-${Date.now()}`;
+        const absRef = doc(
+          db,
+          'branches',
+          branchId,
+          'staff',
+          selectedStaff.id,
+          'absences',
+          absId
+        );
+        const absData: AbsenceData = {
+          id: absId,
+          staffId: selectedStaff.id,
+          branchId,
+          absenceDate: date,
+          startTime: absenceFullDay ? null : absenceStartTime,
+          endTime: absenceFullDay ? null : absenceEndTime,
+          isFullDay: absenceFullDay,
+          note: absenceNote,
+          createdBy: user.uid || '',
+          createdAt: new Date().toISOString(),
+        };
 
-        // 2. Filter bookings that belong to this staff and overlap with the absence time
-        const overlappingBookings = bookingsOnDate.filter(booking => {
-          if (booking.staffId !== selectedStaff.id) return false;
-          if (absenceFullDay) return true;
+        batch.set(absRef, absData);
 
-          const [bh, bm] = booking.startTime.split(':').map(Number);
-          const bookingStart = bh * 60 + bm;
-          const bookingEnd = bookingStart + (booking.totalDurationMinutes || 30);
-
-          const [ash, asm] = absenceStartTime.split(':').map(Number);
-          const [aeh, aem] = absenceEndTime.split(':').map(Number);
-          const absStart = ash * 60 + asm;
-          const absEnd = aeh * 60 + aem;
-
-          return bookingStart < absEnd && bookingEnd > absStart;
-        });
-
-        if (overlappingBookings.length > 0) {
-          // Fetch other active staff details for reassigning
-          const otherStaff = staffList.filter(s => s.id !== selectedStaff.id && s.status === 'active');
-          const otherStaffDetails: Record<string, { workingHours: any[], absences: any[] }> = {};
-
-          await Promise.all(otherStaff.map(async (staff) => {
-            const hoursSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staff.id, 'workingHours'));
-            const absSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staff.id, 'absences'));
-            otherStaffDetails[staff.id] = {
-              workingHours: hoursSnap.docs.map(d => d.data()),
-              absences: absSnap.docs.map(d => d.data())
-            };
-          }));
-
-          // Helper: Check if staff is available
-          const isStaffAvailable = (staffId: string, dateStr: string, bookingStart: number, bookingEnd: number) => {
-            const dateObj = new Date(dateStr + 'T00:00:00');
-            const dayOfWeek = (dateObj.getDay() + 6) % 7; // Mon = 0, Sun = 6
-
-            const details = otherStaffDetails[staffId];
-            if (!details) return false;
-
-            const schedule = details.workingHours.find(h => h.dayOfWeek === dayOfWeek);
-            let isWorking = false;
-            let workStart = 9 * 60;
-            let workEnd = (dayOfWeek === 5 ? 16 : 18) * 60;
-
-            if (schedule) {
-              if (!schedule.isWorking) return false;
-              isWorking = true;
-              const [sh, sm] = schedule.startTime.split(':').map(Number);
-              const [eh, em] = schedule.endTime.split(':').map(Number);
-              workStart = sh * 60 + sm;
-              workEnd = eh * 60 + em;
-            } else {
-              isWorking = dayOfWeek !== 6;
+        // Booking reconciliation
+        const isPlannedLeave = date !== germanToday;
+        if (isPlannedLeave) {
+          const bookingsRef = collection(db, 'branches', branchId, 'bookings');
+          const bookingsSnap = await getDocs(query(bookingsRef, where('appointmentDate', '==', date)));
+          const bookingsOnDate: any[] = [];
+          bookingsSnap.forEach(d => {
+            const data = d.data();
+            if (data.status !== 'cancelled' && data.status !== 'cancelled_by_salon' && data.status !== 'cancelled_by_customer') {
+              bookingsOnDate.push({ id: d.id, ...data });
             }
+          });
 
-            if (!isWorking || bookingStart < workStart || bookingEnd > workEnd) {
-              return false;
-            }
+          const overlappingBookings = bookingsOnDate.filter(booking => {
+            if (booking.staffId !== selectedStaff.id) return false;
+            if (absenceFullDay) return true;
 
-            const isAbsent = details.absences.some(abs => {
-              if (abs.absenceDate !== dateStr) return false;
-              if (abs.isFullDay) return true;
-              if (abs.startTime && abs.endTime) {
-                const [sh, sm] = abs.startTime.split(':').map(Number);
-                const [eh, em] = abs.endTime.split(':').map(Number);
-                const absStart = sh * 60 + sm;
-                const absEnd = eh * 60 + em;
-                return bookingStart < absEnd && bookingEnd > absStart;
-              }
-              return false;
-            });
+            const [bh, bm] = booking.startTime.split(':').map(Number);
+            const bookingStart = bh * 60 + bm;
+            const bookingEnd = bookingStart + (booking.totalDurationMinutes || 30);
 
-            if (isAbsent) return false;
+            const [ash, asm] = absenceStartTime.split(':').map(Number);
+            const [aeh, aem] = absenceEndTime.split(':').map(Number);
+            const absStart = ash * 60 + asm;
+            const absEnd = aeh * 60 + aem;
 
-            const hasOverlap = bookingsOnDate.some(b => {
-              if (b.staffId !== staffId) return false;
-              const [bh, bm] = b.startTime.split(':').map(Number);
-              const bStart = bh * 60 + bm;
-              const bEnd = bStart + (b.totalDurationMinutes || 30);
-              return bookingStart < bEnd && bookingEnd > bStart;
-            });
+            return bookingStart < absEnd && bookingEnd > absStart;
+          });
 
-            return !hasOverlap;
-          };
+          if (overlappingBookings.length > 0) {
+            const otherStaff = staffList.filter(s => s.id !== selectedStaff.id && s.status === 'active');
+            const otherStaffDetails: Record<string, { workingHours: any[], absences: any[] }> = {};
 
-          // Helper: Get next available date for specific staff
-          const getNextAvailableDate = async (staffId: string, baseDateStr: string, startTime: string) => {
-            let hoursList: any[] = [];
-            let absencesList: any[] = [];
+            await Promise.all(otherStaff.map(async (staff) => {
+              const hoursSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staff.id, 'workingHours'));
+              const absSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staff.id, 'absences'));
+              otherStaffDetails[staff.id] = {
+                workingHours: hoursSnap.docs.map(d => d.data()),
+                absences: absSnap.docs.map(d => d.data())
+              };
+            }));
 
-            try {
-              const hoursSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staffId, 'workingHours'));
-              hoursList = hoursSnap.docs.map(d => d.data());
-              const absencesSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staffId, 'absences'));
-              absencesList = absencesSnap.docs.map(d => d.data());
-            } catch (e) {
-              console.error(e);
-            }
+            const isStaffAvailable = (staffId: string, dateStr: string, bookingStart: number, bookingEnd: number) => {
+              const dateObj = new Date(dateStr + 'T00:00:00');
+              const dayOfWeek = (dateObj.getDay() + 6) % 7;
 
-            const baseDate = new Date(baseDateStr + 'T00:00:00');
-            const [sh, sm] = startTime.split(':').map(Number);
-            const slotStart = sh * 60 + sm;
+              const details = otherStaffDetails[staffId];
+              if (!details) return false;
 
-            for (let i = 1; i <= 14; i++) {
-              const checkDate = new Date(baseDate);
-              checkDate.setDate(baseDate.getDate() + i);
-              const checkDateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
-              const dayOfWeek = (checkDate.getDay() + 6) % 7;
-
-              const schedule = hoursList.find(h => h.dayOfWeek === dayOfWeek);
+              const schedule = details.workingHours.find(h => h.dayOfWeek === dayOfWeek);
               let isWorking = false;
               let workStart = 9 * 60;
               let workEnd = (dayOfWeek === 5 ? 16 : 18) * 60;
 
               if (schedule) {
-                if (schedule.isWorking) {
-                  isWorking = true;
-                  const [hStart, mStart] = schedule.startTime.split(':').map(Number);
-                  const [hEnd, mEnd] = schedule.endTime.split(':').map(Number);
-                  workStart = hStart * 60 + mStart;
-                  workEnd = hEnd * 60 + mEnd;
-                }
+                if (!schedule.isWorking) return false;
+                isWorking = true;
+                const [sh, sm] = schedule.startTime.split(':').map(Number);
+                const [eh, em] = schedule.endTime.split(':').map(Number);
+                workStart = sh * 60 + sm;
+                workEnd = eh * 60 + em;
               } else {
                 isWorking = dayOfWeek !== 6;
               }
 
-              if (!isWorking || slotStart < workStart || slotStart > workEnd) continue;
+              if (!isWorking || bookingStart < workStart || bookingEnd > workEnd) {
+                return false;
+              }
 
-              const isAbsent = absencesList.some(abs => {
-                if (abs.absenceDate !== checkDateStr) return false;
+              const isAbsent = details.absences.some(abs => {
+                if (abs.absenceDate !== dateStr) return false;
                 if (abs.isFullDay) return true;
                 if (abs.startTime && abs.endTime) {
-                  const [ash, asm] = abs.startTime.split(':').map(Number);
-                  const [aeh, aem] = abs.endTime.split(':').map(Number);
-                  return slotStart < aeh * 60 && slotStart >= ash * 60;
+                  const [sh, sm] = abs.startTime.split(':').map(Number);
+                  const [eh, em] = abs.endTime.split(':').map(Number);
+                  const absStart = sh * 60 + sm;
+                  const absEnd = eh * 60 + em;
+                  return bookingStart < absEnd && bookingEnd > absStart;
                 }
                 return false;
               });
 
-              if (isAbsent) continue;
+              if (isAbsent) return false;
 
-              const bookingsSnap = await getDocs(query(collection(db, 'branches', branchId, 'bookings'), where('appointmentDate', '==', checkDateStr)));
-              const dayBookings = bookingsSnap.docs.map(d => d.data());
-              const hasOverlap = dayBookings.some((b: any) => {
-                if (b.staffId !== staffId || b.status === 'cancelled') return false;
+              const hasOverlap = bookingsOnDate.some(b => {
+                if (b.staffId !== staffId) return false;
                 const [bh, bm] = b.startTime.split(':').map(Number);
                 const bStart = bh * 60 + bm;
                 const bEnd = bStart + (b.totalDurationMinutes || 30);
-                return slotStart >= bStart && slotStart < bEnd;
+                return bookingStart < bEnd && bookingEnd > bStart;
               });
 
-              if (!hasOverlap) {
-                return checkDateStr;
-              }
-            }
+              return !hasOverlap;
+            };
 
-            const fallbackDate = new Date(baseDate);
-            fallbackDate.setDate(baseDate.getDate() + 1);
-            return `${fallbackDate.getFullYear()}-${String(fallbackDate.getMonth() + 1).padStart(2, '0')}-${String(fallbackDate.getDate()).padStart(2, '0')}`;
-          };
+            const getNextAvailableDate = async (staffId: string, baseDateStr: string, startTime: string) => {
+              let hoursList: any[] = [];
+              let absencesList: any[] = [];
 
-          const batch = writeBatch(db);
-
-          for (const booking of overlappingBookings) {
-            const bookingRef = doc(db, 'branches', branchId, 'bookings', booking.id);
-
-            if (booking.staffSelectionType === 'specific') {
-              // 4. Khách chọn thợ cụ thể -> Hủy lịch & gợi ý ngày mới
-              const suggestedDate = await getNextAvailableDate(selectedStaff.id, booking.appointmentDate, booking.startTime);
-              batch.update(bookingRef, {
-                status: 'cancelled',
-                cancelledAt: new Date().toISOString(),
-                cancelledReason: locale === 'vi' 
-                  ? 'Thợ nghỉ phép theo lịch' 
-                  : locale === 'de' 
-                  ? 'Mitarbeiter im geplanten Urlaub' 
-                  : 'Staff on planned leave',
-                smsConfirmationSent: true,
-                suggestedRebookDate: suggestedDate
-              });
-
-              // Tạo Audit Log cho hệ thống hủy
-              const logId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-              const logRef = doc(db, 'branches', branchId, 'auditLogs', logId);
-              batch.set(logRef, {
-                id: logId,
-                branchId,
-                appointmentId: booking.id,
-                eventType: 'cancelled_by_system',
-                actorUid: user.uid,
-                actorRole: 'system',
-                details: {
-                  reason: 'staff_absence_reconciliation',
-                  staffName: selectedStaff.name,
-                  suggestedRebookDate: suggestedDate,
-                  smsText: locale === 'vi'
-                    ? `Lịch hẹn ${booking.services.join(', ')} lúc ${booking.startTime} ngày ${booking.appointmentDate} đã bị hủy do thợ nghỉ phép. Gợi ý lịch gần nhất có thể đặt lại: ngày ${suggestedDate} lúc ${booking.startTime}.`
-                    : locale === 'de'
-                    ? `Ihr Termin für ${booking.services.join(', ')} am ${booking.appointmentDate} um ${booking.startTime} wurde storniert, da der Mitarbeiter im Urlaub ist. Nächster freier Termin: ${suggestedDate} um ${booking.startTime}.`
-                    : `Your appointment for ${booking.services.join(', ')} on ${booking.appointmentDate} at ${booking.startTime} was cancelled due to staff leave. Nearest suggestion: ${suggestedDate} at ${booking.startTime}.`
-                },
-                createdAt: new Date().toISOString()
-              });
-            } else {
-              // 5. Khách chọn "Bất kỳ ai" -> Tự gán thợ khác phù hợp
-              const [bh, bm] = booking.startTime.split(':').map(Number);
-              const bookingStart = bh * 60 + bm;
-              const bookingEnd = bookingStart + (booking.totalDurationMinutes || 30);
-
-              const candidates = otherStaff.filter(staff => {
-                // Kiểm tra 5 block đầu (Rule 8)
-                const hasFirstFiveBlock = booking.services.some((sName: string) => isFirstFiveBlockService(sName));
-                if (hasFirstFiveBlock && staff.staffType !== 'main') return false;
-
-                // Kiểm tra serviceIds
-                if (booking.serviceIds && booking.serviceIds.length > 0) {
-                  return booking.serviceIds.every((id: string) => (staff.serviceIds || []).includes(id));
-                }
-                return true;
-              });
-
-              // Sắp xếp candidates: junior trước, main sau (Rule 9 & 10)
-              const sortedCandidates = [...candidates].sort((a, b) => {
-                const aType = a.staffType || 'main';
-                const bType = b.staffType || 'main';
-                if (aType === 'junior' && bType === 'main') return -1;
-                if (aType === 'main' && bType === 'junior') return 1;
-                return 0;
-              });
-
-              let newStaff = null;
-              for (const candidate of sortedCandidates) {
-                if (isStaffAvailable(candidate.id, booking.appointmentDate, bookingStart, bookingEnd)) {
-                  newStaff = candidate;
-                  break;
-                }
+              try {
+                const hoursSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staffId, 'workingHours'));
+                hoursList = hoursSnap.docs.map(d => d.data());
+                const absencesSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staffId, 'absences'));
+                absencesList = absencesSnap.docs.map(d => d.data());
+              } catch (e) {
+                console.error(e);
               }
 
-              if (newStaff) {
-                // Gán sang thợ mới
-                batch.update(bookingRef, {
-                  staffId: newStaff.id,
-                  staffName: newStaff.name
+              const baseDate = new Date(baseDateStr + 'T00:00:00');
+              const [sh, sm] = startTime.split(':').map(Number);
+              const slotStart = sh * 60 + sm;
+
+              for (let i = 1; i <= 14; i++) {
+                const checkDate = new Date(baseDate);
+                checkDate.setDate(baseDate.getDate() + i);
+                const checkDateStr = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
+                const dayOfWeek = (checkDate.getDay() + 6) % 7;
+
+                const schedule = hoursList.find(h => h.dayOfWeek === dayOfWeek);
+                let isWorking = false;
+                let workStart = 9 * 60;
+                let workEnd = (dayOfWeek === 5 ? 16 : 18) * 60;
+
+                if (schedule) {
+                  if (schedule.isWorking) {
+                    isWorking = true;
+                    const [hStart, mStart] = schedule.startTime.split(':').map(Number);
+                    const [hEnd, mEnd] = schedule.endTime.split(':').map(Number);
+                    workStart = hStart * 60 + mStart;
+                    workEnd = hEnd * 60 + mEnd;
+                  }
+                } else {
+                  isWorking = dayOfWeek !== 6;
+                }
+
+                if (!isWorking || slotStart < workStart || slotStart > workEnd) continue;
+
+                const isAbsent = absencesList.some(abs => {
+                  if (abs.absenceDate !== checkDateStr) return false;
+                  if (abs.isFullDay) return true;
+                  if (abs.startTime && abs.endTime) {
+                    const [ash, asm] = abs.startTime.split(':').map(Number);
+                    const [aeh, aem] = abs.endTime.split(':').map(Number);
+                    return slotStart < aem * 60 && slotStart >= ash * 60;
+                  }
+                  return false;
                 });
 
-                // Audit Log reassign
+                if (isAbsent) continue;
+
+                const bookingsSnap = await getDocs(query(collection(db, 'branches', branchId, 'bookings'), where('appointmentDate', '==', checkDateStr)));
+                const dayBookings = bookingsSnap.docs.map(d => d.data());
+                const hasOverlap = dayBookings.some((b: any) => {
+                  if (b.staffId !== staffId || b.status === 'cancelled') return false;
+                  const [bh, bm] = b.startTime.split(':').map(Number);
+                  const bStart = bh * 60 + bm;
+                  const bEnd = bStart + (b.totalDurationMinutes || 30);
+                  return slotStart >= bStart && slotStart < bEnd;
+                });
+
+                if (!hasOverlap) {
+                  return checkDateStr;
+                }
+              }
+
+              const fallbackDate = new Date(baseDate);
+              fallbackDate.setDate(baseDate.getDate() + 1);
+              return `${fallbackDate.getFullYear()}-${String(fallbackDate.getMonth() + 1).padStart(2, '0')}-${String(fallbackDate.getDate()).padStart(2, '0')}`;
+            };
+
+            for (const booking of overlappingBookings) {
+              const bookingRef = doc(db, 'branches', branchId, 'bookings', booking.id);
+
+              if (booking.staffSelectionType === 'specific') {
+                const suggestedDate = await getNextAvailableDate(selectedStaff.id, booking.appointmentDate, booking.startTime);
+                batch.update(bookingRef, {
+                  status: 'cancelled',
+                  cancelledAt: new Date().toISOString(),
+                  cancelledReason: locale === 'vi' 
+                    ? 'Thợ nghỉ phép theo lịch' 
+                    : locale === 'de' 
+                    ? 'Mitarbeiter im geplanten Urlaub' 
+                    : 'Staff on planned leave',
+                  smsConfirmationSent: true,
+                  suggestedRebookDate: suggestedDate
+                });
+
                 const logId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
                 const logRef = doc(db, 'branches', branchId, 'auditLogs', logId);
                 batch.set(logRef, {
                   id: logId,
                   branchId,
                   appointmentId: booking.id,
-                  eventType: 'staff_reassigned',
+                  eventType: 'cancelled_by_system',
                   actorUid: user.uid,
                   actorRole: 'system',
                   details: {
-                    previousStaffId: selectedStaff.id,
-                    previousStaffName: selectedStaff.name,
-                    newStaffId: newStaff.id,
-                    newStaffName: newStaff.name,
-                    reason: 'staff_absence_reconciliation'
+                    reason: 'staff_absence_reconciliation',
+                    staffName: selectedStaff.name,
+                    suggestedRebookDate: suggestedDate,
+                    smsText: locale === 'vi'
+                      ? `Lịch hẹn ${booking.services.join(', ')} lúc ${booking.startTime} ngày ${booking.appointmentDate} đã bị hủy do thợ nghỉ phép. Gợi ý lịch gần nhất có thể đặt lại: ngày ${suggestedDate} lúc ${booking.startTime}.`
+                      : locale === 'de'
+                      ? `Ihr Termin für ${booking.services.join(', ')} am ${booking.appointmentDate} um ${booking.startTime} wurde storniert, da der Mitarbeiter im Urlaub ist. Nächster freier Termin: ${suggestedDate} um ${booking.startTime}.`
+                      : `Your appointment for ${booking.services.join(', ')} on ${booking.appointmentDate} at ${booking.startTime} was cancelled due to staff leave. Nearest suggestion: ${suggestedDate} at ${booking.startTime}.`
                   },
                   createdAt: new Date().toISOString()
                 });
               } else {
-                // Không tìm được thợ thay thế -> Chuyển sang needs_owner_action
-                batch.update(bookingRef, {
-                  status: 'needs_owner_action'
+                const [bh, bm] = booking.startTime.split(':').map(Number);
+                const bookingStart = bh * 60 + bm;
+                const bookingEnd = bookingStart + (booking.totalDurationMinutes || 30);
+
+                const candidates = otherStaff.filter(staff => {
+                  const hasFirstFiveBlock = booking.services.some((sName: string) => isFirstFiveBlockService(sName));
+                  if (hasFirstFiveBlock && staff.staffType !== 'main') return false;
+
+                  if (booking.serviceIds && booking.serviceIds.length > 0) {
+                    return booking.serviceIds.every((id: string) => (staff.serviceIds || []).includes(id));
+                  }
+                  return true;
                 });
 
-                // Audit Log
-                const logId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                const logRef = doc(db, 'branches', branchId, 'auditLogs', logId);
-                batch.set(logRef, {
-                  id: logId,
-                  branchId,
-                  appointmentId: booking.id,
-                  eventType: 'escalated_to_owner',
-                  actorUid: user.uid,
-                  actorRole: 'system',
-                  details: {
-                    reason: 'no_available_staff_during_absence_reconciliation',
-                    absentStaffId: selectedStaff.id,
-                    absentStaffName: selectedStaff.name
-                  },
-                  createdAt: new Date().toISOString()
+                const sortedCandidates = [...candidates].sort((a, b) => {
+                  const aType = a.staffType || 'main';
+                  const bType = b.staffType || 'main';
+                  if (aType === 'junior' && bType === 'main') return -1;
+                  if (aType === 'main' && bType === 'junior') return 1;
+                  return 0;
                 });
+
+                let newStaff = null;
+                for (const candidate of sortedCandidates) {
+                  if (isStaffAvailable(candidate.id, booking.appointmentDate, bookingStart, bookingEnd)) {
+                    newStaff = candidate;
+                    break;
+                  }
+                }
+
+                if (newStaff) {
+                  batch.update(bookingRef, {
+                    staffId: newStaff.id,
+                    staffName: newStaff.name
+                  });
+
+                  const logId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                  const logRef = doc(db, 'branches', branchId, 'auditLogs', logId);
+                  batch.set(logRef, {
+                    id: logId,
+                    branchId,
+                    appointmentId: booking.id,
+                    eventType: 'staff_reassigned',
+                    actorUid: user.uid,
+                    actorRole: 'system',
+                    details: {
+                      previousStaffId: selectedStaff.id,
+                      previousStaffName: selectedStaff.name,
+                      newStaffId: newStaff.id,
+                      newStaffName: newStaff.name,
+                      reason: 'staff_absence_reconciliation'
+                    },
+                    createdAt: new Date().toISOString()
+                  });
+                } else {
+                  batch.update(bookingRef, {
+                    status: 'pending_approval'
+                  });
+
+                  const logId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                  const logRef = doc(db, 'branches', branchId, 'auditLogs', logId);
+                  batch.set(logRef, {
+                    id: logId,
+                    branchId,
+                    appointmentId: booking.id,
+                    eventType: 'escalated_to_owner',
+                    actorUid: user.uid,
+                    actorRole: 'system',
+                    details: {
+                      reason: 'no_available_staff_during_absence_reconciliation',
+                      absentStaffId: selectedStaff.id,
+                      absentStaffName: selectedStaff.name
+                    },
+                    createdAt: new Date().toISOString()
+                  });
+                }
               }
             }
           }
-
-          await batch.commit();
         }
       }
 
-      await setDoc(absRef, absData);
+      await batch.commit();
 
       // Refresh
       await loadAbsences(selectedStaff.id);
-      // Reset form
-      setAbsenceDate('');
+      
+      // Reset form fields
+      setAbsenceStartDate('');
+      setAbsenceEndDate('');
       setAbsenceNote('');
       setAbsenceFullDay(true);
+      setActiveDrawer(null);
+      
       showToast(ts.saveSuccess, 'success');
     } catch (err) {
       console.error('Error adding absence:', err);
@@ -983,20 +1319,24 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ===== Delete Absence =====
-  const handleDeleteAbsence = async (absenceId: string) => {
+  // Delete Absence Period (Atomic batch delete for multi-day periods)
+  const handleDeleteAbsences = async (absenceIds: string[]) => {
     if (!selectedStaff || !confirm(ts.confirmDeleteAbsence)) return;
     try {
-      const absRef = doc(
-        db,
-        'branches',
-        branchId,
-        'staff',
-        selectedStaff.id,
-        'absences',
-        absenceId
-      );
-      await deleteDoc(absRef);
+      const batch = writeBatch(db);
+      for (const id of absenceIds) {
+        const absRef = doc(
+          db,
+          'branches',
+          branchId,
+          'staff',
+          selectedStaff.id,
+          'absences',
+          id
+        );
+        batch.delete(absRef);
+      }
+      await batch.commit();
       await loadAbsences(selectedStaff.id);
       showToast(ts.saveSuccess, 'success');
     } catch (err) {
@@ -1005,7 +1345,7 @@ export default function StaffManagementPage() {
     }
   };
 
-  // ===== Working Hours Helpers =====
+  // Working Hours Helper
   const updateWorkingHour = (
     dayOfWeek: number,
     field: keyof WorkingHoursDay,
@@ -1018,7 +1358,7 @@ export default function StaffManagementPage() {
     );
   };
 
-  // ===== Toggle service selection =====
+  // Toggle service selection
   const toggleServiceId = (serviceId: string) => {
     setSelectedServiceIds((prev) =>
       prev.includes(serviceId)
@@ -1027,7 +1367,7 @@ export default function StaffManagementPage() {
     );
   };
 
-  // ===== Existing handlers =====
+  // Deactivate/Activate staff status
   const handleToggleStatus = async (
     id: string,
     currentStatus: 'active' | 'inactive'
@@ -1042,6 +1382,7 @@ export default function StaffManagementPage() {
     }
   };
 
+  // Approve Pending Staff Request
   const handleApproveStaff = async (pendingUser: any) => {
     if (!user) return;
     try {
@@ -1050,26 +1391,16 @@ export default function StaffManagementPage() {
       const staffId = pendingUser.staffId || `staff-${pendingUser.uid}`;
       const staffRef = doc(db, 'branches', branchId, 'staff', staffId);
       await updateDoc(staffRef, { status: 'active' });
-      alert(
-        locale === 'vi'
-          ? 'Đã phê duyệt nhân viên!'
-          : 'Staff member approved!'
-      );
+      alert(locale === 'vi' ? 'Đã phê duyệt nhân viên!' : 'Staff member approved!');
     } catch (e) {
       console.error('Error approving staff:', e);
     }
   };
 
+  // Reject Pending Staff Request
   const handleRejectStaff = async (pendingUser: any) => {
     if (!user) return;
-    if (
-      !confirm(
-        locale === 'vi'
-          ? 'Bạn có chắc muốn từ chối đăng ký này?'
-          : 'Are you sure you want to reject this registration?'
-      )
-    )
-      return;
+    if (!confirm(locale === 'vi' ? 'Bạn có chắc muốn từ chối đăng ký này?' : 'Are you sure you want to reject this registration?')) return;
     try {
       const userRef = doc(db, 'users', pendingUser.uid);
       await updateDoc(userRef, { approvalStatus: 'rejected' });
@@ -1081,6 +1412,7 @@ export default function StaffManagementPage() {
     }
   };
 
+  // Generate Invite Link
   const handleGenerateInvite = async () => {
     if (!user?.assignedBranches?.[0]) return;
     const targetBranch = inviteBranchId || branchId;
@@ -1109,887 +1441,1106 @@ export default function StaffManagementPage() {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const currentWeekdayLabels =
-    WEEKDAY_LABELS[locale as keyof typeof WEEKDAY_LABELS] || WEEKDAY_LABELS.en;
+  const currentWeekdayLabels = WEEKDAY_LABELS[locale as keyof typeof WEEKDAY_LABELS] || WEEKDAY_LABELS.en;
+
+  // Filtered staff list
+  const filteredStaff = staffList.filter((staff) => {
+    if (statusFilter === 'inactive') return staff.status === 'inactive';
+    if (statusFilter === 'active') return staff.status === 'active';
+    return true; // 'all'
+  });
+
+  // Pagination index math
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentStaffPage = filteredStaff.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(filteredStaff.length / itemsPerPage) || 1;
+
+  // Reset page index on filter change
+  const handleSetFilter = (filter: 'all' | 'inactive' | 'active') => {
+    setStatusFilter(filter);
+    setCurrentPage(1);
+  };
 
   return (
     <div className={styles.container}>
-      <div className={styles.pageHeader}>
-        <div className={styles.titleGroup}>
-          <h1 className={styles.title}>{t.admin.staff.title}</h1>
-          <p className={styles.subtitle}>{t.admin.staff.subtitle}</p>
-        </div>
-        {user?.role === 'owner' && (
-          <button
-            className={styles.inviteBtn}
-            onClick={() => {
-              setGeneratedCode('');
-              setInviteBranchId(branchId);
-              setShowInviteModal(true);
-            }}
-          >
-            ➕{' '}
-            {locale === 'vi'
-              ? 'Tạo mã mời nhân viên'
-              : locale === 'de'
-              ? 'Einladungscode erstellen'
-              : 'Invite Staff'}
-          </button>
-        )}
-      </div>
+      {/* ========================================================= */}
+      {/* SCREEN 1: STAFF LIST                                      */}
+      {/* ========================================================= */}
+      {activeStaffId === null && (
+        <>
+          {/* Header section matching mockup */}
+          <div className={styles.pageHeader}>
+            <button 
+              type="button" 
+              className={styles.backButtonIcon}
+              onClick={() => router.push('/admin/dashboard')}
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <h1 className={styles.titleCenter}>
+              {locale === 'vi' ? 'Nhân viên' : locale === 'de' ? 'Mitarbeiter' : 'Staff'}
+            </h1>
+            <button
+              type="button"
+              className={styles.addButtonIcon}
+              onClick={() => {
+                setGeneratedCode('');
+                setInviteBranchId(branchId);
+                setShowInviteModal(true);
+              }}
+            >
+              <Plus className="w-5 h-5" />
+            </button>
+          </div>
 
-      {/* Pending approvals section */}
-      {pendingStaff.length > 0 && (
-        <div
-          style={{
-            backgroundColor: '#fffbeb',
-            border: '1px solid #fef3c7',
-            borderRadius: '12px',
-            padding: '24px',
-            marginBottom: '24px',
-          }}
-        >
-          <h2
-            style={{
-              fontSize: '16px',
-              fontWeight: 700,
-              color: '#92400e',
-              margin: '0 0 16px 0',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            <span>⚠️</span>{' '}
-            {locale === 'vi'
-              ? 'Yêu cầu duyệt nhân sự mới'
-              : 'Pending Staff Approvals'}{' '}
-            ({pendingStaff.length})
-          </h2>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-            }}
-          >
-            {pendingStaff.map((pending) => (
-              <div
-                key={pending.uid}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  backgroundColor: '#ffffff',
-                  border: '1px solid #f3f4f6',
-                  borderRadius: '8px',
-                  padding: '16px',
-                  boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      fontSize: '15px',
-                      fontWeight: 600,
-                      color: '#111827',
-                    }}
-                  >
-                    {pending.name}
+          {/* Pending approvals section */}
+          {pendingStaff.length > 0 && (
+            <div className={styles.pendingSection}>
+              <h2 className={styles.pendingSectionTitle}>
+                <span>⚠️</span>{' '}
+                {locale === 'vi' ? 'Yêu cầu duyệt nhân sự mới' : 'Pending Staff Approvals'} ({pendingStaff.length})
+              </h2>
+              <div className={styles.pendingList}>
+                {pendingStaff.map((pending) => (
+                  <div key={pending.uid} className={styles.pendingCard}>
+                    <div>
+                      <div className={styles.pendingName}>{pending.name}</div>
+                      <div className={styles.pendingMeta}>
+                        ✉️ {pending.email} | 📞 {pending.phone || 'N/A'}
+                      </div>
+                    </div>
+                    <div className={styles.pendingActions}>
+                      <button onClick={() => handleApproveStaff(pending)} className={styles.approveBtn}>
+                        {locale === 'vi' ? 'Duyệt' : 'Approve'}
+                      </button>
+                      <button onClick={() => handleRejectStaff(pending)} className={styles.rejectBtn}>
+                        {locale === 'vi' ? 'Từ chối' : 'Reject'}
+                      </button>
+                    </div>
                   </div>
-                  <div
-                    style={{
-                      fontSize: '13px',
-                      color: '#4b5563',
-                      marginTop: '2px',
-                    }}
-                  >
-                    ✉️ {pending.email} | 📞 {pending.phone || 'N/A'}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    onClick={() => handleApproveStaff(pending)}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: '6px',
-                      border: 'none',
-                      backgroundColor: '#10b981',
-                      color: '#ffffff',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {locale === 'vi' ? 'Duyệt' : 'Approve'}
-                  </button>
-                  <button
-                    onClick={() => handleRejectStaff(pending)}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: '6px',
-                      border: '1px solid #d1d5db',
-                      backgroundColor: '#ffffff',
-                      color: '#374151',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {locale === 'vi' ? 'Từ chối' : 'Reject'}
-                  </button>
-                </div>
+                ))}
               </div>
-            ))}
+            </div>
+          )}
+
+          {/* Filter tabs matching mockup */}
+          <div className={styles.filterTabsRow}>
+            <button
+              className={`${styles.filterTab} ${statusFilter === 'all' ? styles.filterTabActive : ''}`}
+              onClick={() => handleSetFilter('all')}
+            >
+              {locale === 'vi' ? 'Tất cả' : locale === 'de' ? 'Alle' : 'All'}
+            </button>
+            <button
+              className={`${styles.filterTab} ${statusFilter === 'inactive' ? styles.filterTabActive : ''}`}
+              onClick={() => handleSetFilter('inactive')}
+            >
+              {locale === 'vi' ? 'Đã nghỉ' : locale === 'de' ? 'Inaktiv' : 'Inactive'}
+            </button>
+            <button
+              className={`${styles.filterTab} ${statusFilter === 'active' ? styles.filterTabActive : ''}`}
+              onClick={() => handleSetFilter('active')}
+            >
+              {locale === 'vi' ? 'Hoạt động' : locale === 'de' ? 'Aktiv' : 'Active'}
+            </button>
+          </div>
+
+          {/* Staff members list cards */}
+          <div className={styles.staffGridCol}>
+            {loading ? (
+              <div className={styles.loadingBox}>
+                <p>{ts.loading}</p>
+              </div>
+            ) : currentStaffPage.length === 0 ? (
+              <div className={styles.emptyBox}>
+                <p>{ts.empty}</p>
+              </div>
+            ) : (
+              currentStaffPage.map((staff) => {
+                const avatarStyle = getStaffAvatarStyle(staff.name);
+                return (
+                  <div
+                    key={staff.id}
+                    className={styles.staffItemCard}
+                    onClick={() => handleOpenDetail(staff)}
+                  >
+                    <div 
+                      className={styles.staffAvatarCircle} 
+                      style={avatarStyle}
+                    >
+                      {staff.initials}
+                    </div>
+                    <div className={styles.staffMainInfo}>
+                      <h3 className={styles.staffNameText}>{staff.name}</h3>
+                      <span className={styles.staffTitleLabel}>
+                        {staff.title || (staff.role === 'manager' 
+                          ? (locale === 'vi' ? 'Quản lý' : 'Manager') 
+                          : (locale === 'vi' ? 'Thợ nail' : 'Nail Tech'))}
+                      </span>
+                    </div>
+
+                    <div className={styles.staffStatusContainer}>
+                      <span
+                        className={`${styles.staffStatusPill} ${
+                          staff.status === 'active' ? styles.statusGreen : styles.statusGray
+                        }`}
+                      >
+                        <span className={styles.statusDot} />
+                        {staff.status === 'active'
+                          ? (locale === 'vi' ? 'Hoạt động' : locale === 'de' ? 'Aktiv' : 'Active')
+                          : (locale === 'vi' ? 'Đã nghỉ' : locale === 'de' ? 'Inaktiv' : 'Inactive')}
+                      </span>
+                      <ChevronRight className={styles.cardChevron} />
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Pagination control matching mockup */}
+          {filteredStaff.length > itemsPerPage && (
+            <div className={styles.paginationRow}>
+              <button
+                type="button"
+                className={styles.pageArrow}
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+              >
+                ‹
+              </button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  className={`${styles.pageNumberBtn} ${currentPage === p ? styles.pageNumberActive : ''}`}
+                  onClick={() => setCurrentPage(p)}
+                >
+                  {p}
+                </button>
+              ))}
+              <button
+                type="button"
+                className={styles.pageArrow}
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+              >
+                ›
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ========================================================= */}
+      {/* SCREEN 2: STAFF DETAIL PAGE                               */}
+      {/* ========================================================= */}
+      {activeStaffId !== null && selectedStaff && (
+        <div className={styles.subPageWrapper}>
+          {/* Header */}
+          <div className={styles.pageHeader}>
+            <button 
+              type="button" 
+              className={styles.backButtonIcon}
+              onClick={handleCloseDetail}
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <h1 className={styles.titleCenter}>
+              {locale === 'vi' ? 'Chi tiết nhân viên' : locale === 'de' ? 'Mitarbeiterdetails' : 'Staff Details'}
+            </h1>
+            <button
+              type="button"
+              className={styles.addButtonIcon}
+              onClick={() => setActiveDrawer('profile')}
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Profile Card Header */}
+          <div className={styles.detailProfileHeader}>
+            <div 
+              className={styles.detailLargeAvatar} 
+              style={getStaffAvatarStyle(selectedStaff.name)}
+            >
+              {selectedStaff.initials}
+            </div>
+            <div className={styles.detailProfileInfo}>
+              <h2 className={styles.detailNameText}>{selectedStaff.name}</h2>
+              <p className={styles.detailTitleText}>
+                {selectedStaff.title || (selectedStaff.role === 'manager' 
+                  ? (locale === 'vi' ? 'Quản lý' : 'Manager') 
+                  : (locale === 'vi' ? 'Thợ nail' : 'Nail Tech'))}
+              </p>
+            </div>
+            <span
+              className={`${styles.staffStatusPill} ${
+                selectedStaff.status === 'active' ? styles.statusGreen : styles.statusGray
+              }`}
+            >
+              <span className={styles.statusDot} />
+              {selectedStaff.status === 'active'
+                ? (locale === 'vi' ? 'Hoạt động' : locale === 'de' ? 'Aktiv' : 'Active')
+                : (locale === 'vi' ? 'Đã nghỉ' : locale === 'de' ? 'Inaktiv' : 'Inactive')}
+            </span>
+          </div>
+
+          {/* Stats Row */}
+          <div className={styles.statsCardGrid}>
+            <div className={`${styles.statCard} ${styles.statBlueBorder}`}>
+              <div className={`${styles.statIconCircle} ${styles.bgBlueCircle}`}>
+                <CalendarDays className="w-5 h-5 text-blue-600" />
+              </div>
+              <div className={styles.statContent}>
+                <span className={styles.statLabel}>
+                  {locale === 'vi' ? 'Book tháng' : locale === 'de' ? 'Monats-Buchungen' : 'Monthly Books'}
+                </span>
+                <span className={`${styles.statNumber} text-blue-600`}>
+                  {monthlyBookingsCount}
+                </span>
+              </div>
+            </div>
+
+            <div className={`${styles.statCard} ${styles.statPurpleBorder}`}>
+              <div className={`${styles.statIconCircle} ${styles.bgPurpleCircle}`}>
+                <Sparkles className="w-5 h-5 text-purple-600" />
+              </div>
+              <div className={styles.statContent}>
+                <span className={styles.statLabel}>
+                  {locale === 'vi' ? 'Dịch vụ' : locale === 'de' ? 'Dienste' : 'Services'}
+                </span>
+                <span className={`${styles.statNumber} text-purple-600`}>
+                  {selectedStaff.serviceIds.length}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Detail Menu List */}
+          <div className={styles.detailMenuBox}>
+            {/* 1. Hồ sơ */}
+            <div 
+              className={styles.detailMenuItem}
+              onClick={() => setActiveDrawer('profile')}
+            >
+              <div className={`${styles.menuIconBox} ${styles.bgBlueIcon}`}>
+                <User className="w-5 h-5 text-blue-500" />
+              </div>
+              <div className={styles.menuTextContent}>
+                <span className={styles.menuTitleText}>{ts.profileTab}</span>
+                <span className={styles.menuDescText}>
+                  {locale === 'vi' ? 'Xem và cập nhật thông tin' : locale === 'de' ? 'Profil bearbeiten' : 'View and update info'}
+                </span>
+              </div>
+              <ChevronRight className={styles.menuChevron} />
+            </div>
+
+            {/* 2. Giờ làm */}
+            <div 
+              className={styles.detailMenuItem}
+              onClick={() => setActiveDrawer('hours')}
+            >
+              <div className={`${styles.menuIconBox} ${styles.bgPurpleIcon}`}>
+                <Clock className="w-5 h-5 text-purple-500" />
+              </div>
+              <div className={styles.menuTextContent}>
+                <span className={styles.menuTitleText}>{locale === 'vi' ? 'Giờ làm' : ts.workingHoursTab}</span>
+                <span className={styles.menuDescText}>
+                  {locale === 'vi' ? 'Lịch làm việc' : locale === 'de' ? 'Arbeitszeitplan' : 'Working schedule'}
+                </span>
+              </div>
+              <ChevronRight className={styles.menuChevron} />
+            </div>
+
+            {/* 3. Dịch vụ */}
+            <div 
+              className={styles.detailMenuItem}
+              onClick={() => setActiveDrawer('services')}
+            >
+              <div className={`${styles.menuIconBox} ${styles.bgOrangeIcon}`}>
+                <Scissors className="w-5 h-5 text-orange-500" />
+              </div>
+              <div className={styles.menuTextContent}>
+                <span className={styles.menuTitleText}>{locale === 'vi' ? 'Dịch vụ' : ts.servicesTab}</span>
+                <span className={styles.menuDescText}>
+                  {locale === 'vi' ? 'Các dịch vụ chuyên môn' : locale === 'de' ? 'Spezialitäten' : 'Specialties'}
+                </span>
+              </div>
+              <ChevronRight className={styles.menuChevron} />
+            </div>
+
+            {/* 4. Nghỉ phép */}
+            <div 
+              className={styles.detailMenuItem}
+              onClick={() => setActiveDrawer('absences')}
+            >
+              <div className={`${styles.menuIconBox} ${styles.bgGreenIcon}`}>
+                <Calendar className="w-5 h-5 text-green-500" />
+              </div>
+              <div className={styles.menuTextContent}>
+                <span className={styles.menuTitleText}>{locale === 'vi' ? 'Nghỉ phép' : ts.absencesTab}</span>
+                <span className={styles.menuDescText}>
+                  {locale === 'vi' ? 'Lịch sử và số dư phép' : locale === 'de' ? 'Urlaubsverlauf' : 'Absence history'}
+                </span>
+              </div>
+              <ChevronRight className={styles.menuChevron} />
+            </div>
+
+            {/* 5. Xin nghỉ phép */}
+            <div 
+              className={styles.detailMenuItem}
+              onClick={() => setActiveDrawer('createAbsence')}
+            >
+              <div className={`${styles.menuIconBox} ${styles.bgTealIcon}`}>
+                <Palmtree className="w-5 h-5 text-teal-500" />
+              </div>
+              <div className={styles.menuTextContent}>
+                <span className={styles.menuTitleText}>{locale === 'vi' ? 'Xin nghỉ phép' : ts.addAbsence}</span>
+                <span className={styles.menuDescText}>
+                  {locale === 'vi' ? 'Tạo đơn xin nghỉ phép' : locale === 'de' ? 'Urlaubsantrag stellen' : 'Request time off'}
+                </span>
+              </div>
+              <ChevronRight className={styles.menuChevron} />
+            </div>
+
+            {/* 6. Chi nhánh (Managers only) */}
+            {selectedStaff.role === 'manager' && (
+              <div 
+                className={styles.detailMenuItem}
+                onClick={() => setActiveDrawer('branches')}
+              >
+                <div className={`${styles.menuIconBox} ${styles.bgBlueIcon}`}>
+                  <Store className="w-5 h-5 text-blue-500" />
+                </div>
+                <div className={styles.menuTextContent}>
+                  <span className={styles.menuTitleText}>{locale === 'vi' ? 'Chi nhánh' : ts.branchAssignmentTab}</span>
+                  <span className={styles.menuDescText}>
+                    {locale === 'vi' ? 'Chi nhánh được phân công' : locale === 'de' ? 'Filialzuordnung' : 'Branch assignment'}
+                  </span>
+                </div>
+                <ChevronRight className={styles.menuChevron} />
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* ===== MANAGERS SECTION (Owner Only) ===== */}
-      {user?.role === 'owner' && (() => {
-        const managerList = staffList.filter(s => s.role === 'manager');
-        if (managerList.length === 0) return null;
-        return (
-          <div style={{
-            marginBottom: '32px',
-            backgroundColor: '#eff6ff',
-            border: '1px solid #dbeafe',
-            borderRadius: '14px',
-            padding: '24px',
-          }}>
-            <h2 style={{
-              fontSize: '16px',
-              fontWeight: 700,
-              color: '#1e40af',
-              margin: '0 0 16px 0',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-            }}>
-              <span>👔</span>
-              {locale === 'vi' ? 'Quản lý tiệm' : locale === 'de' ? 'Filialmanager' : 'Branch Managers'}
-              <span style={{
-                fontSize: '12px',
-                fontWeight: 600,
-                backgroundColor: '#3b82f6',
-                color: 'white',
-                padding: '2px 8px',
-                borderRadius: '10px',
-                marginLeft: '4px',
-              }}>{managerList.length}</span>
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {managerList.map((mgr) => (
-                <div
-                  key={mgr.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    backgroundColor: '#ffffff',
-                    border: '1px solid #e2e8f0',
-                    borderRadius: '10px',
-                    padding: '16px 20px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                  }}
-                  onClick={() => setSelectedManager(mgr)}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLElement).style.borderColor = '#93c5fd';
-                    (e.currentTarget as HTMLElement).style.boxShadow = '0 2px 8px rgba(59,130,246,0.1)';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLElement).style.borderColor = '#e2e8f0';
-                    (e.currentTarget as HTMLElement).style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                    <div style={{
-                      width: '42px',
-                      height: '42px',
-                      borderRadius: '50%',
-                      background: 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: 'white',
-                      fontSize: '14px',
-                      fontWeight: 700,
-                      flexShrink: 0,
-                    }}>{mgr.initials}</div>
-                    <div>
-                      <div style={{ fontSize: '15px', fontWeight: 600, color: '#111827' }}>
-                        {mgr.name}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <span>👔 {locale === 'vi' ? 'Quản lý' : 'Manager'}</span>
-                        <span>·</span>
-                        <span>{mgr.languages.map((l) => getLanguageLabel(l, locale)).join(', ')}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                    <span style={{
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      backgroundColor: mgr.status === 'active' ? '#dcfce7' : '#fee2e2',
-                      color: mgr.status === 'active' ? '#166534' : '#991b1b',
-                    }}>
-                      {mgr.status === 'active'
-                        ? (locale === 'vi' ? 'Đang hoạt động' : 'Active')
-                        : (locale === 'vi' ? 'Ngừng hoạt động' : 'Inactive')}
-                    </span>
-                    <button
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        border: '1px solid #d1d5db',
-                        backgroundColor: '#ffffff',
-                        color: '#374151',
-                        fontSize: '12px',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleStatus(mgr.id, mgr.status);
-                      }}
-                    >
-                      {mgr.status === 'active'
-                        ? (locale === 'vi' ? 'Vô hiệu hóa' : 'Deactivate')
-                        : (locale === 'vi' ? 'Kích hoạt' : 'Activate')}
-                    </button>
-                    <span style={{ fontSize: '16px', color: '#9ca3af' }}>›</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
+      {/* ========================================================= */}
+      {/* DRAWERS: BOTTOM SHEETS                                    */}
+      {/* ========================================================= */}
+      {activeDrawer !== null && selectedStaff && (
+        <div className={styles.drawerOverlay} onClick={() => setActiveDrawer(null)}>
+          <div 
+            className={styles.bottomSheetContainer} 
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Sheet Handle */}
+            <div className={styles.sheetHandleLine} />
 
-      {/* ===== STAFF GRID (Thợ only) ===== */}
-      {(() => {
-        const staffOnlyList = staffList.filter(s => s.role !== 'manager');
-        return (
-          <>
-            {user?.role === 'owner' && staffOnlyList.length > 0 && (
-              <h2 style={{
-                fontSize: '16px',
-                fontWeight: 700,
-                color: '#374151',
-                margin: '0 0 16px 0',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-              }}>
-                <span>💅</span>
-                {locale === 'vi' ? 'Thợ làm việc' : locale === 'de' ? 'Mitarbeiter' : 'Staff Members'}
-                <span style={{
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  backgroundColor: '#111827',
-                  color: 'white',
-                  padding: '2px 8px',
-                  borderRadius: '10px',
-                  marginLeft: '4px',
-                }}>{staffOnlyList.length}</span>
-              </h2>
-            )}
-            <div className={styles.staffGrid}>
-              {loading ? (
-                <div className={styles.noBookings} style={{ gridColumn: '1 / -1' }}>
-                  <p>{t.admin.staff.loading}</p>
-                </div>
-              ) : staffOnlyList.length === 0 ? (
-                <div className={styles.noBookings} style={{ gridColumn: '1 / -1' }}>
-                  <p>{t.admin.staff.empty}</p>
-                </div>
-              ) : (
-                staffOnlyList.map((staff) => (
-                  <div
-                    key={staff.id}
-                    className={`${styles.staffCard} ${styles.staffCardClickable}`}
-                    onClick={() => handleOpenDetail(staff)}
+            {/* 1. DRAWER: PROFILE EDIT */}
+            {activeDrawer === 'profile' && (
+              <div className={styles.drawerContentBox}>
+                <div className={styles.drawerHeaderRow}>
+                  <div className={styles.drawerHeaderTitleGroup}>
+                    <h2 className={styles.drawerCenterTitle}>
+                      {locale === 'vi' ? 'Chỉnh sửa hồ sơ' : 'Edit Profile'}
+                    </h2>
+                    <p className={styles.drawerCenterSubtitle}>
+                      {locale === 'vi' ? 'Cập nhật thông tin cơ bản của nhân viên' : 'Update basic employee information'}
+                    </p>
+                  </div>
+                  <button 
+                    type="button" 
+                    className={styles.drawerCloseIconBtn} 
+                    onClick={() => setActiveDrawer(null)}
                   >
-                    <div className={styles.cardHeader}>
-                      <div className={styles.avatarCircle}>{staff.initials}</div>
-                      <div className={styles.titleSection}>
-                        <h3 className={styles.staffName}>{staff.name}</h3>
-                        <span className={styles.roleLabel}>
-                          {staff.staffType === 'main'
-                            ? t.admin.staff.roleSenior
-                            : t.admin.staff.roleJunior}
-                        </span>
-                      </div>
-                      <span
-                        className={`${styles.statusPill} ${
-                          staff.status === 'active'
-                            ? styles.statusActive
-                            : styles.statusInactive
-                        }`}
-                      >
-                        {staff.status === 'active'
-                          ? t.admin.staff.statusActive
-                          : t.admin.staff.statusInactive}
-                      </span>
-                    </div>
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
 
-                    <div className={styles.cardBody}>
-                      <div className={styles.detailRow}>
-                        <span className={styles.label}>{t.admin.staff.labelRating}:</span>
-                        <span className={styles.value}>⭐ {staff.rating.toFixed(1)} / 5.0</span>
-                      </div>
-                      <div className={styles.detailRow}>
-                        <span className={styles.label}>{t.admin.staff.labelLanguages}:</span>
-                        <span className={styles.value}>
-                          {staff.languages.map((lang) => getLanguageLabel(lang, locale)).join(', ')}
-                        </span>
-                      </div>
-                      <div className={styles.detailRow}>
-                        <span className={styles.label}>{t.admin.staff.labelWorkDays}:</span>
-                        <span className={styles.value}>
-                          {staff.workDays.map((dayIdx) => currentWeekdayLabels[dayIdx]).join(', ')}
-                        </span>
-                      </div>
-                      <div className={styles.detailRow}>
-                        <span className={styles.label}>{t.admin.staff.labelWorkHours}:</span>
-                        <span className={styles.value}>⏰ {staff.workHours}</span>
-                      </div>
-                    </div>
+                {/* Profile short card inside sheet */}
+                <div className={styles.sheetMiniProfile}>
+                  <div 
+                    className={styles.miniAvatar} 
+                    style={getStaffAvatarStyle(selectedStaff.name)}
+                  >
+                    {selectedStaff.initials}
+                  </div>
+                  <div className={styles.miniProfileText}>
+                    <span className={styles.miniName}>{selectedStaff.name}</span>
+                    <span className={styles.miniTitle}>
+                      {selectedStaff.title || (selectedStaff.role === 'manager' ? 'Quản lý' : 'Thợ nail')}
+                    </span>
+                  </div>
+                </div>
 
-                    <div className={styles.cardActions}>
-                      <button
-                        className={`${styles.actionBtn} ${
-                          staff.status === 'active' ? styles.btnInactive : styles.btnActive
-                        }`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleToggleStatus(staff.id, staff.status);
-                        }}
-                      >
-                        {staff.status === 'active'
-                          ? t.admin.staff.btnDeactivate
-                          : t.admin.staff.btnActivate}
-                      </button>
+                <div className={styles.drawerBodyScroll}>
+                  {/* Name field */}
+                  <div className={styles.formFieldBlock}>
+                    <label className={styles.formLabelText}>{ts.staffName}</label>
+                    <div className={styles.inputBoxWithPrefix}>
+                      <div className={`${styles.iconPrefixWrapper} ${styles.bgBlueCircle}`}>
+                        <User className="w-4 h-4 text-blue-600" />
+                      </div>
+                      <input
+                        type="text"
+                        className={styles.formInputField}
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        disabled={saving}
+                      />
+                      {editName && (
+                        <button 
+                          type="button" 
+                          className={styles.clearInputBtn}
+                          onClick={() => setEditName('')}
+                        >
+                          ✕
+                        </button>
+                      )}
                     </div>
                   </div>
-                ))
-              )}
-            </div>
-          </>
-        );
-      })()}
 
-      {/* ===== STAFF DETAIL MODAL ===== */}
-      {selectedStaff && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.detailModalContent}>
-            {/* Header */}
-            <div className={styles.detailModalHeader}>
-              <div className={styles.avatarCircle}>
-                {selectedStaff.initials}
-              </div>
-              <div className={styles.detailHeaderInfo}>
-                <h2 className={styles.detailHeaderName}>
-                  {ts.editStaff}
-                </h2>
-                <span className={styles.detailHeaderRole}>
-                  {selectedStaff.name} ·{' '}
-                  {selectedStaff.staffType === 'main'
-                    ? ts.mainStaff
-                    : ts.juniorStaff}
-                </span>
-              </div>
-              <button
-                type="button"
-                className={styles.modalClose}
-                onClick={handleCloseDetail}
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Tab Navigation */}
-            <div className={styles.tabNav}>
-              <button
-                className={`${styles.tabBtn} ${
-                  detailTab === 'profile' ? styles.tabBtnActive : ''
-                }`}
-                onClick={() => setDetailTab('profile')}
-              >
-                📋 {ts.profileTab}
-              </button>
-              <button
-                className={`${styles.tabBtn} ${
-                  detailTab === 'hours' ? styles.tabBtnActive : ''
-                }`}
-                onClick={() => setDetailTab('hours')}
-              >
-                🕐 {ts.workingHoursTab}
-              </button>
-              <button
-                className={`${styles.tabBtn} ${
-                  detailTab === 'services' ? styles.tabBtnActive : ''
-                }`}
-                onClick={() => setDetailTab('services')}
-              >
-                💅 {ts.servicesTab}
-              </button>
-              <button
-                className={`${styles.tabBtn} ${
-                  detailTab === 'absences' ? styles.tabBtnActive : ''
-                }`}
-                onClick={() => setDetailTab('absences')}
-              >
-                📅 {ts.absencesTab}
-              </button>
-              {selectedStaff.role === 'manager' && (
-                <button
-                  className={`${styles.tabBtn} ${
-                    detailTab === 'branches' ? styles.tabBtnActive : ''
-                  }`}
-                  onClick={() => setDetailTab('branches')}
-                >
-                  🏢 {ts.branchAssignmentTab}
-                </button>
-              )}
-            </div>
-
-            {/* Tab Body */}
-            <div className={styles.tabBody}>
-              {/* ===== TAB 1: PROFILE ===== */}
-              {detailTab === 'profile' && (
-                <>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>{ts.staffName}</label>
-                    <input
-                      className={styles.formInput}
-                      value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
-                    />
-                  </div>
-
-                  <div className={styles.formRow}>
-                    <div className={styles.formGroup}>
-                      <label className={styles.formLabel}>
-                        {ts.staffType}
-                      </label>
+                  {/* Practitioner Type field */}
+                  <div className={styles.formFieldBlock}>
+                    <label className={styles.formLabelText}>{ts.staffType}</label>
+                    <div className={styles.inputBoxWithPrefix}>
+                      <div className={`${styles.iconPrefixWrapper} ${styles.bgBlueCircle}`}>
+                        <Gem className="w-4 h-4 text-blue-600" />
+                      </div>
                       <select
-                        className={styles.formSelect}
+                        className={styles.formSelectField}
                         value={editStaffType}
-                        onChange={(e) =>
-                          setEditStaffType(
-                            e.target.value as 'main' | 'junior'
-                          )
-                        }
+                        onChange={(e) => setEditStaffType(e.target.value as 'main' | 'junior')}
+                        disabled={saving}
                       >
                         <option value="main">{ts.mainStaff}</option>
                         <option value="junior">{ts.juniorStaff}</option>
                       </select>
                     </div>
-                    <div className={styles.formGroup}>
-                      <label className={styles.formLabel}>
-                        {ts.staffTitle}
-                      </label>
+                  </div>
+
+                  {/* Title field */}
+                  <div className={styles.formFieldBlock}>
+                    <label className={styles.formLabelText}>{ts.staffTitle}</label>
+                    <div className={styles.inputBoxWithPrefix}>
+                      <div className={`${styles.iconPrefixWrapper} ${styles.bgPurpleCircle}`}>
+                        <Tag className="w-4 h-4 text-purple-600" />
+                      </div>
                       <input
-                        className={styles.formInput}
+                        type="text"
+                        className={styles.formInputField}
+                        placeholder="e.g. Nail Technician"
                         value={editTitle}
                         onChange={(e) => setEditTitle(e.target.value)}
-                        placeholder="e.g. Nail Technician"
+                        disabled={saving}
                       />
                     </div>
                   </div>
 
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>
-                      {ts.languages}
-                    </label>
-                    <input
-                      className={styles.formInput}
-                      value={editLanguages}
-                      onChange={(e) => setEditLanguages(e.target.value)}
-                      placeholder="German, Vietnamese, English"
-                    />
-                    <p className={styles.formHint}>{ts.languagesHint}</p>
+                  {/* Languages field */}
+                  <div className={styles.formFieldBlock}>
+                    <label className={styles.formLabelText}>{ts.languages}</label>
+                    <div className={styles.inputBoxWithPrefix}>
+                      <div className={`${styles.iconPrefixWrapper} ${styles.bgOrangeCircle}`}>
+                        <Globe className="w-4 h-4 text-orange-600" />
+                      </div>
+                      <input
+                        type="text"
+                        className={styles.formInputField}
+                        placeholder="German, Vietnamese"
+                        value={editLanguages}
+                        onChange={(e) => setEditLanguages(e.target.value)}
+                        disabled={saving}
+                      />
+                    </div>
+                    <p className={styles.formLabelHint}>{ts.languagesHint}</p>
                   </div>
 
-                  <div className={styles.toggleRow}>
-                    <span className={styles.toggleLabel}>
+                  {/* Status Toggle switch */}
+                  <div className={styles.sheetToggleContainer}>
+                    <span className={styles.toggleLabelBold}>
                       {ts.activeStatus}:{' '}
-                      {editStatus === 'active'
-                        ? t.admin.staff.statusActive
-                        : t.admin.staff.statusInactive}
+                      {editStatus === 'active' ? t.admin.staff.statusActive : t.admin.staff.statusInactive}
                     </span>
-                    <label className={styles.toggleSwitch}>
+                    <label className={styles.toggleSwitchBtn}>
                       <input
                         type="checkbox"
                         checked={editStatus === 'active'}
-                        onChange={(e) =>
-                          setEditStatus(
-                            e.target.checked ? 'active' : 'inactive'
-                          )
-                        }
+                        onChange={(e) => setEditStatus(e.target.checked ? 'active' : 'inactive')}
+                        disabled={saving}
                       />
-                      <span className={styles.toggleTrack} />
+                      <span className={styles.toggleTrackLine} />
                     </label>
                   </div>
+                </div>
 
-                  <button
-                    className={styles.saveBtn}
+                {/* Footer Buttons */}
+                <div className={styles.sheetButtonsContainer}>
+                  <button 
+                    type="button" 
+                    className={styles.submitBlueBtn}
                     onClick={handleSaveProfile}
                     disabled={saving}
                   >
-                    {saving ? t.common.loading : t.common.save}
+                    {saving ? t.common.loading : (locale === 'vi' ? 'Lưu thay đổi' : t.common.save)}
                   </button>
-                </>
-              )}
+                  <button 
+                    type="button" 
+                    className={styles.cancelWhiteBtn}
+                    onClick={() => setActiveDrawer(null)}
+                    disabled={saving}
+                  >
+                    {locale === 'vi' ? 'Hủy' : t.common.cancel}
+                  </button>
+                </div>
+              </div>
+            )}
 
-              {/* ===== TAB 2: WORKING HOURS ===== */}
-              {detailTab === 'hours' && (
-                <>
+            {/* 2. DRAWER: WORKING HOURS */}
+            {activeDrawer === 'hours' && (
+              <div className={styles.drawerContentBox}>
+                <div className={styles.drawerHeaderRow}>
+                  <h2 className={styles.drawerCenterTitle}>
+                    {locale === 'vi' ? 'Giờ làm' : ts.workingHoursTab}
+                  </h2>
+                  <button 
+                    type="button" 
+                    className={styles.drawerCloseIconBtn} 
+                    onClick={() => setActiveDrawer(null)}
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className={styles.drawerBodyScroll}>
                   {hoursLoading ? (
-                    <p>{t.common.loading}</p>
+                    <p className="text-center py-6">{t.common.loading}</p>
                   ) : (
-                    <div className={styles.scheduleGrid}>
+                    <div className={styles.hoursScheduleGrid}>
                       {workingHours.map((day) => (
                         <div
                           key={day.dayOfWeek}
-                          className={`${styles.scheduleRow} ${
-                            !day.isWorking ? styles.scheduleRowOff : ''
-                          }`}
+                          className={`${styles.dayScheduleRow} ${!day.isWorking ? styles.dayRowOff : ''}`}
                         >
-                          <span className={styles.scheduleDayName}>
+                          <span className={styles.dayNameLabel}>
                             {(ts.dayNames as readonly string[])[day.dayOfWeek]}
                           </span>
-                          <div className={styles.scheduleToggle}>
-                            <button
-                              type="button"
-                              className={`${styles.scheduleToggleBtn} ${
-                                day.isWorking
-                                  ? styles.scheduleToggleBtnOn
-                                  : styles.scheduleToggleBtnOff
-                              }`}
-                              onClick={() =>
-                                updateWorkingHour(
-                                  day.dayOfWeek,
-                                  'isWorking',
-                                  !day.isWorking
-                                )
-                              }
-                              title={
-                                day.isWorking ? ts.working : ts.dayOff
-                              }
-                            />
+
+                          <div className={styles.dayToggleBox}>
+                            <label className={styles.toggleSwitchBtn}>
+                              <input
+                                type="checkbox"
+                                checked={day.isWorking}
+                                onChange={(e) => updateWorkingHour(day.dayOfWeek, 'isWorking', e.target.checked)}
+                              />
+                              <span className={styles.toggleTrackLine} />
+                            </label>
                           </div>
+
                           {day.isWorking ? (
-                            <>
+                            <div className={styles.timeInputsWrapper}>
                               <input
                                 type="time"
-                                className={styles.scheduleTimeInput}
+                                className={styles.timeSelectField}
                                 value={day.startTime}
-                                onChange={(e) =>
-                                  updateWorkingHour(
-                                    day.dayOfWeek,
-                                    'startTime',
-                                    e.target.value
-                                  )
-                                }
+                                onChange={(e) => updateWorkingHour(day.dayOfWeek, 'startTime', e.target.value)}
                               />
+                              <span className={styles.timeDivider}>-</span>
                               <input
                                 type="time"
-                                className={styles.scheduleTimeInput}
+                                className={styles.timeSelectField}
                                 value={day.endTime}
-                                onChange={(e) =>
-                                  updateWorkingHour(
-                                    day.dayOfWeek,
-                                    'endTime',
-                                    e.target.value
-                                  )
-                                }
+                                onChange={(e) => updateWorkingHour(day.dayOfWeek, 'endTime', e.target.value)}
                               />
-                            </>
+                            </div>
                           ) : (
-                            <span className={styles.scheduleDayOff}>
-                              {ts.dayOff}
-                            </span>
+                            <span className={styles.dayOffText}>{ts.dayOff}</span>
                           )}
                         </div>
                       ))}
                     </div>
                   )}
+                </div>
+
+                {/* Footer Save */}
+                <div className={styles.sheetButtonsContainer}>
                   <button
-                    className={styles.saveBtn}
+                    type="button"
+                    className={styles.submitBlueBtn}
                     onClick={handleSaveWorkingHours}
                     disabled={saving || hoursLoading}
                   >
-                    {saving ? t.common.loading : t.common.save}
+                    {saving ? t.common.loading : (locale === 'vi' ? 'Lưu' : t.common.save)}
                   </button>
-                </>
-              )}
+                </div>
+              </div>
+            )}
 
-              {/* ===== TAB 3: SERVICE ASSIGNMENT ===== */}
-              {detailTab === 'services' && (
-                <>
-                  <p className={styles.serviceChecklistHint}>
-                    {ts.selectServices}
-                  </p>
+            {/* 3. DRAWER: SERVICES ACCORDION ASSIGNMENT */}
+            {activeDrawer === 'services' && (
+              <div className={styles.drawerContentBox}>
+                {/* Header employee summary */}
+                <div className={styles.drawerMiniHeaderWithClose}>
+                  <div className={styles.sheetMiniProfile}>
+                    <div 
+                      className={styles.miniAvatar} 
+                      style={getStaffAvatarStyle(selectedStaff.name)}
+                    >
+                      {selectedStaff.initials}
+                    </div>
+                    <div className={styles.miniProfileText}>
+                      <span className={styles.miniName}>{selectedStaff.name}</span>
+                      <span className={styles.miniTitle}>
+                        {selectedStaff.title || (selectedStaff.role === 'manager' ? 'Quản lý' : 'Thợ nail')}
+                      </span>
+                    </div>
+                  </div>
+                  <button 
+                    type="button" 
+                    className={styles.drawerCloseIconBtn} 
+                    onClick={() => setActiveDrawer(null)}
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Subtitle instructions and Select All option */}
+                <div className={styles.drawerHeaderSubInfo}>
+                  <div className={styles.drawerTitleTextGroup}>
+                    <h2 className={styles.sheetSectionTitle}>
+                      {locale === 'vi' ? 'Dịch vụ có thể làm' : 'Services Can Do'}
+                    </h2>
+                    <p className={styles.sheetSectionSubtitle}>
+                      {locale === 'vi' ? 'Chọn dịch vụ mà thợ có thể thực hiện' : 'Select services practitioner can perform'}
+                    </p>
+                  </div>
+                  {(() => {
+                    const activeServices = branchServices.filter((s) => s.isActive);
+                    const allSelected = activeServices.length > 0 && activeServices.every((s) => selectedServiceIds.includes(s.id));
+                    return (
+                      <button
+                        type="button"
+                        className={styles.selectAllTextBtn}
+                        onClick={() => {
+                          if (allSelected) {
+                            setSelectedServiceIds([]);
+                          } else {
+                            setSelectedServiceIds(activeServices.map((s) => s.id));
+                          }
+                        }}
+                      >
+                        {locale === 'vi' ? 'Chọn tất cả' : 'Select all'}
+                      </button>
+                    );
+                  })()}
+                </div>
+
+                <div className={styles.drawerBodyScroll}>
                   {branchServices.length === 0 ? (
-                    <div className={styles.emptyAbsences}>
-                      {ts.noServicesAvailable}
+                    <div className={styles.emptyDrawerBox}>
+                      <p>{ts.noServicesAvailable}</p>
                     </div>
                   ) : (
-                    <div className={styles.serviceChecklist}>
-                      {/* Select All checkbox */}
-                      {(() => {
-                        const activeServices = branchServices.filter((s) => s.isActive);
-                        const allSelected = activeServices.length > 0 && activeServices.every((s) => selectedServiceIds.includes(s.id));
-                        const someSelected = activeServices.some((s) => selectedServiceIds.includes(s.id)) && !allSelected;
+                    <div className={styles.accordionServicesWrapper}>
+                      {categories.filter(c => c.isActive).map((cat) => {
+                        const catServices = branchServices.filter(s => s.isActive && s.categoryId === cat.id);
+                        if (catServices.length === 0) return null;
+
+                        const isExpanded = expandedCategories.has(cat.id);
+                        const catSelectedCount = catServices.filter(s => selectedServiceIds.includes(s.id)).length;
+                        const theme = getCategoryColorTheme(cat.id);
+
                         return (
-                          <div
-                            className={`${styles.serviceCheckItem} ${styles.selectAllItem} ${allSelected ? styles.serviceCheckItemActive : ''}`}
-                            onClick={() => {
-                              if (allSelected) {
-                                setSelectedServiceIds([]);
-                              } else {
-                                setSelectedServiceIds(activeServices.map((s) => s.id));
-                              }
-                            }}
+                          <div 
+                            key={cat.id} 
+                            className={styles.categoryAccordionSection}
+                            style={{ borderLeftColor: theme.border }}
                           >
+                            {/* Category Header Card matching mockup layout */}
                             <div
-                              className={`${styles.serviceCheckbox} ${allSelected ? styles.serviceCheckboxChecked : ''} ${someSelected ? styles.serviceCheckboxPartial : ''}`}
+                              className={styles.accordionHeaderCard}
+                              onClick={() => {
+                                setExpandedCategories((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(cat.id)) next.delete(cat.id);
+                                  else next.add(cat.id);
+                                  return next;
+                                });
+                              }}
                             >
-                              {allSelected ? '✓' : someSelected ? '−' : ''}
+                              <div className={styles.catLeftInfoBox}>
+                                <div 
+                                  className={styles.catIconSquareCircle}
+                                  style={{ backgroundColor: theme.circleBg, color: theme.text }}
+                                >
+                                  <CategoryIcon id={cat.id} className="w-5 h-5" />
+                                </div>
+                                <div className={styles.catNameSubGroup}>
+                                  <span className={styles.catNameBoldText}>{getLocalizedName(cat)}</span>
+                                  <span className={styles.catCountLabelText}>{catServices.length} {locale === 'vi' ? 'dịch vụ' : 'services'}</span>
+                                </div>
+                              </div>
+                              <div className={styles.catRightArrowGroup}>
+                                <span className={styles.selectedFractionLabel}>
+                                  {catSelectedCount}/{catServices.length}
+                                </span>
+                                <span className={`${styles.accordionChevron} ${isExpanded ? styles.chevronRotated : ''}`}>
+                                  ▾
+                                </span>
+                              </div>
                             </div>
-                            <span className={styles.serviceCheckName} style={{ fontWeight: 600 }}>
-                              {locale === 'vi' ? 'Chọn tất cả dịch vụ' : locale === 'de' ? 'Alle Dienste auswählen' : 'Select all services'}
-                            </span>
-                            <span className={styles.serviceCheckMeta}>
-                              {selectedServiceIds.length}/{activeServices.length}
-                            </span>
+
+                            {/* Service list items */}
+                            {isExpanded && (
+                              <div className={styles.accordionServicesBodyList}>
+                                {catServices.map((svc) => {
+                                  const isSelected = selectedServiceIds.includes(svc.id);
+                                  return (
+                                    <div
+                                      key={svc.id}
+                                      className={`${styles.serviceCheckRowItem} ${isSelected ? styles.rowSelectedActive : ''}`}
+                                      onClick={() => toggleServiceId(svc.id)}
+                                    >
+                                      <div className={`${styles.customCheckboxPill} ${isSelected ? styles.customCheckActive : ''}`}>
+                                        {isSelected && '✓'}
+                                      </div>
+                                      <span className={styles.serviceNameLeftText}>{getLocalizedName(svc)}</span>
+                                      <span className={styles.serviceDurationRightText}>
+                                        {svc.durationMinutes === 15 || svc.durationMinutes === 20 || svc.durationMinutes === 30 || svc.durationMinutes === 40 || svc.durationMinutes === 45 || svc.durationMinutes === 60 || svc.durationMinutes === 75 || svc.durationMinutes === 90 || svc.durationMinutes === 120
+                                          ? `${svc.durationMinutes} ${locale === 'vi' ? 'phút' : 'min'}`
+                                          : `+${svc.durationMinutes} ${locale === 'vi' ? 'phút' : 'min'}`}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         );
-                      })()}
-                      {branchServices
-                        .filter((s) => s.isActive)
-                        .map((svc) => {
-                          const isSelected = selectedServiceIds.includes(
-                            svc.id
-                          );
-                          return (
-                            <div
-                              key={svc.id}
-                              className={`${styles.serviceCheckItem} ${
-                                isSelected
-                                  ? styles.serviceCheckItemActive
-                                  : ''
-                              }`}
-                              onClick={() => toggleServiceId(svc.id)}
-                            >
-                              <div
-                                className={`${styles.serviceCheckbox} ${
-                                  isSelected
-                                    ? styles.serviceCheckboxChecked
-                                    : ''
-                                }`}
-                              >
-                                {isSelected && '✓'}
-                              </div>
-                              <span className={styles.serviceCheckName}>
-                                {getLocalizedName(svc)}
-                              </span>
-                              <span className={styles.serviceCheckMeta}>
-                                {svc.durationMinutes}min · {svc.price}{' '}
-                                {svc.currency}
-                              </span>
-                            </div>
-                          );
-                        })}
-                    </div>
-                  )}
-                  <button
-                    className={styles.saveBtn}
-                    onClick={handleSaveServices}
-                    disabled={saving}
-                  >
-                    {saving ? t.common.loading : t.common.save}
-                  </button>
-                </>
-              )}
-
-              {/* ===== TAB 4: ABSENCES ===== */}
-              {detailTab === 'absences' && (
-                <div className={styles.absenceSection}>
-                  {/* Add Absence Form */}
-                  <div className={styles.absenceAddForm}>
-                    <h4 className={styles.absenceAddTitle}>
-                      ➕ {ts.addAbsence}
-                    </h4>
-                    <div className={styles.absenceFormRow}>
-                      <div className={styles.formGroup}>
-                        <label className={styles.formLabel}>
-                          {ts.absenceDate}
-                        </label>
-                        <input
-                          type="date"
-                          className={styles.formInput}
-                          value={absenceDate}
-                          onChange={(e) => setAbsenceDate(e.target.value)}
-                        />
-                      </div>
-                      <div className={styles.formGroup}>
-                        <div className={styles.toggleRow}>
-                          <span className={styles.toggleLabel}>
-                            {ts.fullDay}
-                          </span>
-                          <label className={styles.toggleSwitch}>
-                            <input
-                              type="checkbox"
-                              checked={absenceFullDay}
-                              onChange={(e) =>
-                                setAbsenceFullDay(e.target.checked)
-                              }
-                            />
-                            <span className={styles.toggleTrack} />
-                          </label>
-                        </div>
-                      </div>
-                    </div>
-                    {!absenceFullDay && (
-                      <div className={styles.absenceFormRow}>
-                        <div className={styles.formGroup}>
-                          <label className={styles.formLabel}>
-                            {ts.startTime}
-                          </label>
-                          <input
-                            type="time"
-                            className={styles.formInput}
-                            value={absenceStartTime}
-                            onChange={(e) =>
-                              setAbsenceStartTime(e.target.value)
-                            }
-                          />
-                        </div>
-                        <div className={styles.formGroup}>
-                          <label className={styles.formLabel}>
-                            {ts.endTime}
-                          </label>
-                          <input
-                            type="time"
-                            className={styles.formInput}
-                            value={absenceEndTime}
-                            onChange={(e) =>
-                              setAbsenceEndTime(e.target.value)
-                            }
-                          />
-                        </div>
-                      </div>
-                    )}
-                    <div className={styles.formGroup}>
-                      <label className={styles.formLabel}>
-                        {ts.absenceNote}
-                      </label>
-                      <input
-                        className={styles.formInput}
-                        value={absenceNote}
-                        onChange={(e) => setAbsenceNote(e.target.value)}
-                        placeholder={
-                          locale === 'vi'
-                            ? 'VD: Nghỉ ốm, nghỉ phép...'
-                            : locale === 'de'
-                            ? 'z.B. Krank, Urlaub...'
-                            : 'e.g. Sick leave, vacation...'
-                        }
-                      />
-                    </div>
-                    <button
-                      className={styles.absenceAddBtn}
-                      onClick={handleAddAbsence}
-                      disabled={saving || !absenceDate}
-                    >
-                      {saving ? t.common.loading : ts.addAbsence}
-                    </button>
-                  </div>
-
-                  {/* Absences List */}
-                  {absences.length === 0 ? (
-                    <div className={styles.emptyAbsences}>
-                      {ts.noAbsences}
-                    </div>
-                  ) : (
-                    <div className={styles.absenceList}>
-                      {absences.map((abs) => (
-                        <div key={abs.id} className={styles.absenceItem}>
-                          <div className={styles.absenceItemInfo}>
-                            <span className={styles.absenceItemDate}>
-                              📅 {abs.absenceDate}
-                            </span>
-                            <span className={styles.absenceItemDetail}>
-                              {abs.isFullDay
-                                ? ts.fullDay
-                                : `${abs.startTime} - ${abs.endTime}`}
-                              {abs.note && ` · ${abs.note}`}
-                            </span>
-                          </div>
-                          <button
-                            className={styles.absenceDeleteBtn}
-                            onClick={() => handleDeleteAbsence(abs.id)}
-                          >
-                            {ts.deleteAbsence}
-                          </button>
-                        </div>
-                      ))}
+                      })}
                     </div>
                   )}
                 </div>
-              )}
 
-              {/* ===== TAB 5: BRANCH ASSIGNMENT (managers only) ===== */}
-              {detailTab === 'branches' && selectedStaff.role === 'manager' && (
-                <>
-                  <p className={styles.serviceChecklistHint}>
-                    {ts.selectBranches}
-                  </p>
-                  {branchesLoading ? (
-                    <p>{t.common.loading}</p>
-                  ) : businessBranches.length === 0 ? (
-                    <div className={styles.emptyAbsences}>
-                      {ts.noBranchesAvailable}
+                {/* Footer Save & Cancel */}
+                <div className={styles.accordionFooterBar}>
+                  <div className={styles.footerCountSummary}>
+                    <span className={styles.footerSelectedCountTitle}>
+                      {selectedServiceIds.length} {locale === 'vi' ? 'dịch vụ đã chọn' : 'services selected'}
+                    </span>
+                    <span className={styles.footerSelectedCountSubtitle}>
+                      {locale === 'vi' ? 'Có thể thay đổi sau' : 'Can change later'}
+                    </span>
+                  </div>
+                  <div className={styles.footerActionButtonsRow}>
+                    <button 
+                      type="button" 
+                      className={styles.accordionCancelBtn}
+                      onClick={() => setActiveDrawer(null)}
+                    >
+                      {locale === 'vi' ? 'Hủy' : 'Cancel'}
+                    </button>
+                    <button 
+                      type="button" 
+                      className={styles.accordionSaveBtn}
+                      onClick={handleSaveServices}
+                      disabled={saving}
+                    >
+                      {saving ? t.common.loading : (locale === 'vi' ? 'Lưu' : 'Save')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 4. DRAWER: ABSENCES HISTORY */}
+            {activeDrawer === 'absences' && (
+              <div className={styles.drawerContentBox}>
+                <div className={styles.drawerHeaderRow}>
+                  <div className={styles.headerLeftIconTitle}>
+                    <div className={styles.pinkCircleMedical}>
+                      <Palmtree className="w-5 h-5 text-pink-600" />
+                    </div>
+                    <h2 className={styles.drawerCenterTitle}>
+                      {locale === 'vi' ? 'Lịch sử nghỉ phép' : ts.absencesTab}
+                    </h2>
+                  </div>
+                  <button 
+                    type="button" 
+                    className={styles.drawerCloseIconBtn} 
+                    onClick={() => setActiveDrawer(null)}
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className={styles.drawerBodyScroll}>
+                  {absences.length === 0 ? (
+                    <div className={styles.emptyDrawerBox}>
+                      <p>{ts.noAbsences}</p>
                     </div>
                   ) : (
-                    <div className={styles.branchChecklist}>
+                    <div className={styles.absencesHistoryList}>
+                      {groupConsecutiveAbsences(absences).map((period) => {
+                        const { dayText, monthStr } = formatAbsencePeriodDate(period, locale);
+                        return (
+                          <div key={period.id} className={styles.absenceItemPeriodCard}>
+                            <div className={styles.absenceCardLeftBox}>
+                              <div className={styles.pinkIconCircleCalendar}>
+                                <CalendarDays className="w-4 h-4 text-pink-600" />
+                              </div>
+                              <div className={styles.absenceCardDatesGroup}>
+                                <span className={styles.absenceCardDayText}>{dayText}</span>
+                                <span className={styles.absenceCardMonthText}>{monthStr}</span>
+                              </div>
+                            </div>
+
+                            <div className={styles.absenceCardMiddleDetails}>
+                              <div className={styles.badgesAbsenceRow}>
+                                <span className={styles.badgePinkAbsence}>
+                                  {locale === 'vi' ? 'Nghỉ phép' : 'On leave'}
+                                </span>
+                                <span className={styles.badgeDaysDuration}>
+                                  <Clock className="w-3 h-3 text-gray-500 mr-1" />
+                                  {period.ids.length} {locale === 'vi' ? 'ngày' : 'days'}
+                                </span>
+                              </div>
+                              {period.note && (
+                                <p className={styles.absenceCardReasonText}>
+                                  {locale === 'vi' ? 'Lý do' : 'Reason'}: {period.note}
+                                </p>
+                              )}
+                            </div>
+
+                            <button 
+                              type="button" 
+                              className={styles.trashDeleteIconButton}
+                              onClick={() => handleDeleteAbsences(period.ids)}
+                            >
+                              <Trash2 className="w-4 h-4 text-gray-600" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer close */}
+                <div className={styles.sheetButtonsContainer}>
+                  <button 
+                    type="button" 
+                    className={styles.closeGrayBtn}
+                    onClick={() => setActiveDrawer(null)}
+                  >
+                    {locale === 'vi' ? 'Đóng' : 'Close'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 5. DRAWER: CREATE ABSENCE REQUEST */}
+            {activeDrawer === 'createAbsence' && (
+              <div className={styles.drawerContentBox}>
+                <div className={styles.drawerHeaderRow}>
+                  <div className={styles.headerLeftIconTitle}>
+                    <div className={styles.pinkCircleMedical}>
+                      <Calendar className="w-5 h-5 text-pink-600" />
+                    </div>
+                    <div className={styles.drawerHeaderTitleGroup}>
+                      <h2 className={styles.drawerCenterTitle}>
+                        {locale === 'vi' ? 'Tạo đơn nghỉ' : 'Request Time Off'}
+                      </h2>
+                      <p className={styles.drawerCenterSubtitle}>
+                        {locale === 'vi' ? 'Tạo đơn nghỉ phép cho nhân viên' : 'Submit leave request for practitioner'}
+                      </p>
+                    </div>
+                  </div>
+                  <button 
+                    type="button" 
+                    className={styles.drawerCloseIconBtn} 
+                    onClick={() => setActiveDrawer(null)}
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Employee Card Info inside Sheet */}
+                <div className={styles.sheetMiniProfile} style={{ marginBottom: '20px' }}>
+                  <div 
+                    className={styles.miniAvatar} 
+                    style={getStaffAvatarStyle(selectedStaff.name)}
+                  >
+                    {selectedStaff.initials}
+                  </div>
+                  <div className={styles.miniProfileText}>
+                    <span className={styles.miniName}>{selectedStaff.name}</span>
+                    <span className={styles.miniTitle}>
+                      {selectedStaff.title || (selectedStaff.role === 'manager' ? 'Quản lý' : 'Thợ nail')}
+                    </span>
+                  </div>
+                </div>
+
+                <div className={styles.drawerBodyScroll}>
+                  {/* From Date - To Date Row */}
+                  <div className={styles.datesInputRowGrid}>
+                    <div className={styles.formFieldBlock}>
+                      <label className={styles.formLabelText}>
+                        {locale === 'vi' ? 'Từ ngày' : 'From Date'}
+                      </label>
+                      <div className={styles.inputBoxWithPrefix}>
+                        <input
+                          type="date"
+                          className={styles.formInputField}
+                          value={absenceStartDate}
+                          onChange={(e) => setAbsenceStartDate(e.target.value)}
+                          disabled={saving}
+                        />
+                        <Calendar className="w-4 h-4 text-gray-400 absolute right-3 pointer-events-none" />
+                      </div>
+                    </div>
+
+                    <div className={styles.formFieldBlock}>
+                      <label className={styles.formLabelText}>
+                        {locale === 'vi' ? 'Đến ngày' : 'To Date'}
+                      </label>
+                      <div className={styles.inputBoxWithPrefix}>
+                        <input
+                          type="date"
+                          className={styles.formInputField}
+                          value={absenceEndDate}
+                          onChange={(e) => setAbsenceEndDate(e.target.value)}
+                          disabled={saving}
+                        />
+                        <Calendar className="w-4 h-4 text-gray-400 absolute right-3 pointer-events-none" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Full Day Toggle switch */}
+                  <div className={styles.sheetToggleContainer} style={{ margin: '14px 0' }}>
+                    <span className={styles.toggleLabelBold}>{ts.fullDay}</span>
+                    <label className={styles.toggleSwitchBtn}>
+                      <input
+                        type="checkbox"
+                        checked={absenceFullDay}
+                        onChange={(e) => setAbsenceFullDay(e.target.checked)}
+                        disabled={saving}
+                      />
+                      <span className={styles.toggleTrackLine} />
+                    </label>
+                  </div>
+
+                  {/* Partial Time Inputs */}
+                  {!absenceFullDay && (
+                    <div className={styles.datesInputRowGrid} style={{ marginBottom: '14px' }}>
+                      <div className={styles.formFieldBlock}>
+                        <label className={styles.formLabelText}>{ts.startTime}</label>
+                        <input
+                          type="time"
+                          className={styles.formInputField}
+                          value={absenceStartTime}
+                          onChange={(e) => setAbsenceStartTime(e.target.value)}
+                          disabled={saving}
+                        />
+                      </div>
+                      <div className={styles.formFieldBlock}>
+                        <label className={styles.formLabelText}>{ts.endTime}</label>
+                        <input
+                          type="time"
+                          className={styles.formInputField}
+                          value={absenceEndTime}
+                          onChange={(e) => setAbsenceEndTime(e.target.value)}
+                          disabled={saving}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Leave Reason Note */}
+                  <div className={styles.formFieldBlock}>
+                    <label className={styles.formLabelText}>{ts.absenceNote}</label>
+                    <input
+                      type="text"
+                      className={styles.formInputField}
+                      value={absenceNote}
+                      onChange={(e) => setAbsenceNote(e.target.value)}
+                      placeholder={locale === 'vi' ? 'Du lịch gia đình, nghỉ ốm...' : 'e.g. Vacation, sick leave...'}
+                      disabled={saving}
+                    />
+                  </div>
+                </div>
+
+                {/* Footer Action Buttons */}
+                <div className={styles.sheetButtonsContainer}>
+                  <button
+                    type="button"
+                    className={styles.submitBlueBtn}
+                    onClick={handleAddAbsence}
+                    disabled={saving || !absenceStartDate}
+                  >
+                    {saving ? t.common.loading : (locale === 'vi' ? 'Tạo đơn' : 'Request')}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.cancelWhiteBtn}
+                    onClick={() => setActiveDrawer(null)}
+                    disabled={saving}
+                  >
+                    {locale === 'vi' ? 'Hủy' : 'Cancel'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 6. DRAWER: BRANCH ASSIGNMENT (MANAGERS ONLY) */}
+            {activeDrawer === 'branches' && selectedStaff.role === 'manager' && (
+              <div className={styles.drawerContentBox}>
+                <div className={styles.drawerHeaderRow}>
+                  <div className={styles.drawerHeaderTitleGroup}>
+                    <h2 className={styles.drawerCenterTitle}>
+                      {locale === 'vi' ? 'Chi nhánh quản lý' : ts.branchAssignmentTab}
+                    </h2>
+                    <p className={styles.drawerCenterSubtitle}>
+                      {locale === 'vi' ? 'Chọn các chi nhánh quản lý được phép truy cập' : ts.selectBranches}
+                    </p>
+                  </div>
+                  <button 
+                    type="button" 
+                    className={styles.drawerCloseIconBtn} 
+                    onClick={() => setActiveDrawer(null)}
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className={styles.drawerBodyScroll}>
+                  {branchesLoading ? (
+                    <p className="text-center py-6">{t.common.loading}</p>
+                  ) : businessBranches.length === 0 ? (
+                    <div className={styles.emptyDrawerBox}>
+                      <p>{ts.noBranchesAvailable}</p>
+                    </div>
+                  ) : (
+                    <div className={styles.branchCheckListBlock}>
                       {businessBranches.map((branch) => {
                         const isSelected = selectedBranchIds.includes(branch.id);
                         return (
                           <div
                             key={branch.id}
-                            className={`${styles.branchCheckItem} ${
-                              isSelected
-                                ? styles.branchCheckItemActive
-                                : ''
-                            }`}
+                            className={`${styles.branchCheckRowItem} ${isSelected ? styles.rowSelectedActive : ''}`}
                             onClick={() => toggleBranchId(branch.id)}
                           >
-                            <div
-                              className={`${styles.serviceCheckbox} ${
-                                isSelected
-                                  ? styles.serviceCheckboxChecked
-                                  : ''
-                              }`}
-                            >
+                            <div className={`${styles.customCheckboxPill} ${isSelected ? styles.customCheckActive : ''}`}>
                               {isSelected && '✓'}
                             </div>
-                            <div className={styles.branchCheckInfo}>
-                              <span className={styles.branchCheckName}>
-                                {branch.name}
-                              </span>
+                            <div className={styles.branchNameAddressCol}>
+                              <span className={styles.branchCheckNameText}>{branch.name}</span>
                               {branch.address && (
-                                <span className={styles.branchCheckAddress}>
-                                  {branch.address}
-                                </span>
+                                <span className={styles.branchCheckAddressText}>{branch.address}</span>
                               )}
                             </div>
                           </div>
@@ -1997,31 +2548,42 @@ export default function StaffManagementPage() {
                       })}
                     </div>
                   )}
+                </div>
+
+                {/* Footer buttons */}
+                <div className={styles.sheetButtonsContainer}>
                   <button
-                    className={styles.saveBtn}
+                    type="button"
+                    className={styles.submitBlueBtn}
                     onClick={handleSaveBranchAssignment}
                     disabled={saving || branchesLoading}
                   >
-                    {saving ? t.common.loading : t.common.save}
+                    {saving ? t.common.loading : (locale === 'vi' ? 'Lưu' : 'Save')}
                   </button>
-                </>
-              )}
-            </div>
+                  <button
+                    type="button"
+                    className={styles.cancelWhiteBtn}
+                    onClick={() => setActiveDrawer(null)}
+                    disabled={saving}
+                  >
+                    {locale === 'vi' ? 'Hủy' : 'Cancel'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
 
-      {/* Invitations Modal */}
+      {/* ========================================================= */}
+      {/* INVITATION GENERATION MODAL                               */}
+      {/* ========================================================= */}
       {showInviteModal && (
-        <div className={styles.modalOverlay}>
-          <div className={styles.modalContent}>
+        <div className={styles.modalOverlay} onClick={() => setShowInviteModal(false)}>
+          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2 className={styles.modalTitle}>
-                {locale === 'vi'
-                  ? 'Tạo mã mời nhân viên'
-                  : locale === 'de'
-                  ? 'Einladungscode erstellen'
-                  : 'Generate Staff Invitation'}
+                {locale === 'vi' ? 'Tạo mã mời nhân viên' : 'Generate Staff Invitation'}
               </h2>
               <button
                 type="button"
@@ -2034,114 +2596,83 @@ export default function StaffManagementPage() {
 
             {!generatedCode ? (
               <div className={styles.modalBody}>
-                {/* Branch selector - show when owner has multiple branches */}
+                {/* Branch Selection */}
                 {(user?.assignedBranches?.length || 0) > 1 && (
-                  <div className={styles.modalFormGroup}>
-                    <label className={styles.modalLabel}>
-                      {locale === 'vi'
-                        ? '🏪 Chọn tiệm'
-                        : locale === 'de'
-                        ? '🏪 Filiale wählen'
-                        : '🏪 Select Branch'}
-                    </label>
-                    <select
-                      className={styles.modalSelect}
-                      value={inviteBranchId}
-                      onChange={(e) => setInviteBranchId(e.target.value)}
-                    >
-                      {(user?.assignedBranches || []).map((bid) => (
-                        <option key={bid} value={bid}>{bid}</option>
-                      ))}
-                    </select>
+                  <div className={styles.formFieldBlock} style={{ marginBottom: '16px' }}>
+                    <label className={styles.formLabelText}>{locale === 'vi' ? 'Chọn tiệm' : 'Select Branch'}</label>
+                    <div className={styles.inputBoxWithPrefix}>
+                      <div className={`${styles.iconPrefixWrapper} ${styles.bgOrangeCircle}`}>
+                        <Store className="w-4 h-4 text-orange-600" />
+                      </div>
+                      <select
+                        className={styles.formSelectField}
+                        value={inviteBranchId}
+                        onChange={(e) => setInviteBranchId(e.target.value)}
+                      >
+                        {(user?.assignedBranches || []).map((bid) => (
+                          <option key={bid} value={bid}>{bid}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 )}
 
-                {/* Show current branch info when only 1 branch */}
+                {/* Show current branch info */}
                 {(user?.assignedBranches?.length || 0) <= 1 && (
-                  <div style={{
-                    padding: '10px 14px',
-                    backgroundColor: '#f0fdf4',
-                    borderRadius: '8px',
-                    marginBottom: '16px',
-                    fontSize: '13px',
-                    color: '#166534',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                  }}>
-                    <span>🏪</span>
+                  <div className={styles.branchHighlightBox}>
+                    <Store className="w-4 h-4 text-[#166534]" />
                     <span>{locale === 'vi' ? 'Tiệm:' : 'Branch:'} <strong>{branchId}</strong></span>
                   </div>
                 )}
 
-                <div className={styles.modalFormGroup}>
-                  <label className={styles.modalLabel}>
-                    {locale === 'vi'
-                      ? 'Quyền hạn'
-                      : locale === 'de'
-                      ? 'Rolle'
-                      : 'System Role'}
-                  </label>
-                  <select
-                    className={styles.modalSelect}
-                    value={inviteRole}
-                    onChange={(e) =>
-                      setInviteRole(e.target.value as any)
-                    }
-                  >
-                    <option value="staff">
-                      {locale === 'vi'
-                        ? 'Nhân viên (Staff)'
-                        : locale === 'de'
-                        ? 'Mitarbeiter'
-                        : 'Staff Member'}
-                    </option>
-                    <option value="manager">
-                      {locale === 'vi'
-                        ? 'Quản lý (Manager)'
-                        : locale === 'de'
-                        ? 'Manager'
-                        : 'Manager'}
-                    </option>
-                  </select>
-                </div>
-
-                {inviteRole === 'staff' && (
-                  <div className={styles.modalFormGroup}>
-                    <label className={styles.modalLabel}>
-                      {locale === 'vi'
-                        ? 'Phân loại thợ'
-                        : locale === 'de'
-                        ? 'Mitarbeiter-Typ'
-                        : 'Staff Practitioner Type'}
-                    </label>
+                {/* Role */}
+                <div className={styles.formFieldBlock} style={{ marginBottom: '16px' }}>
+                  <label className={styles.formLabelText}>{locale === 'vi' ? 'Quyền hạn' : 'System Role'}</label>
+                  <div className={styles.inputBoxWithPrefix}>
+                    <div className={`${styles.iconPrefixWrapper} ${styles.bgPurpleCircle}`}>
+                      <ShieldAlert className="w-4 h-4 text-purple-600" />
+                    </div>
                     <select
-                      className={styles.modalSelect}
-                      value={inviteStaffType}
-                      onChange={(e) =>
-                        setInviteStaffType(e.target.value as any)
-                      }
+                      className={styles.formSelectField}
+                      value={inviteRole}
+                      onChange={(e) => setInviteRole(e.target.value as any)}
                     >
-                      <option value="main">
-                        {t.admin.staff.roleSenior}
+                      <option value="staff">
+                        {locale === 'vi' ? 'Nhân viên (Staff)' : 'Staff Member'}
                       </option>
-                      <option value="junior">
-                        {t.admin.staff.roleJunior}
+                      <option value="manager">
+                        {locale === 'vi' ? 'Quản lý (Manager)' : 'Manager'}
                       </option>
                     </select>
+                  </div>
+                </div>
+
+                {/* Practitioner type */}
+                {inviteRole === 'staff' && (
+                  <div className={styles.formFieldBlock} style={{ marginBottom: '20px' }}>
+                    <label className={styles.formLabelText}>{locale === 'vi' ? 'Phân loại thợ' : 'Staff Practitioner Type'}</label>
+                    <div className={styles.inputBoxWithPrefix}>
+                      <div className={`${styles.iconPrefixWrapper} ${styles.bgBlueCircle}`}>
+                        <Gem className="w-4 h-4 text-blue-600" />
+                      </div>
+                      <select
+                        className={styles.formSelectField}
+                        value={inviteStaffType}
+                        onChange={(e) => setInviteStaffType(e.target.value as any)}
+                      >
+                        <option value="main">{t.admin.staff.roleSenior}</option>
+                        <option value="junior">{t.admin.staff.roleJunior}</option>
+                      </select>
+                    </div>
                   </div>
                 )}
 
                 <button
                   type="button"
-                  className={styles.copyBtn}
+                  className={styles.submitBlueBtn}
                   onClick={handleGenerateInvite}
                 >
-                  {locale === 'vi'
-                    ? 'Tạo mã mời'
-                    : locale === 'de'
-                    ? 'Code generieren'
-                    : 'Generate Invitation Code'}
+                  {locale === 'vi' ? 'Tạo mã mời' : 'Generate Invitation Code'}
                 </button>
               </div>
             ) : (
@@ -2151,36 +2682,13 @@ export default function StaffManagementPage() {
                   <div className={styles.inviteInstructions}>
                     {locale === 'vi'
                       ? `Mã mời dành cho vai trò: ${
-                          inviteRole === 'manager'
-                            ? 'Quản lý'
-                            : inviteStaffType === 'main'
-                            ? 'Thợ chính'
-                            : 'Thợ phụ'
-                        }`
-                      : locale === 'de'
-                      ? `Einladungscode für: ${
-                          inviteRole === 'manager'
-                            ? 'Manager'
-                            : inviteStaffType === 'main'
-                            ? 'Hauptkraft (Senior)'
-                            : 'Hilfskraft (Junior)'
+                          inviteRole === 'manager' ? 'Quản lý' : inviteStaffType === 'main' ? 'Thợ chính' : 'Thợ phụ'
                         }`
                       : `Invitation code configured for: ${
-                          inviteRole === 'manager'
-                            ? 'Manager'
-                            : inviteStaffType === 'main'
-                            ? 'Senior Practitioner'
-                            : 'Junior Practitioner'
+                          inviteRole === 'manager' ? 'Manager' : inviteStaffType === 'main' ? 'Senior Practitioner' : 'Junior Practitioner'
                         }`}
                   </div>
-                  <div style={{
-                    fontSize: '12px',
-                    color: '#6b7280',
-                    marginTop: '4px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}>
+                  <div className={styles.branchSubHighlight}>
                     <span>🏪</span>
                     <span>{locale === 'vi' ? 'Tiệm:' : 'Branch:'} <strong>{inviteBranchId || branchId}</strong></span>
                   </div>
@@ -2188,22 +2696,11 @@ export default function StaffManagementPage() {
 
                 <button
                   type="button"
-                  className={`${styles.copyBtn} ${
-                    copied ? styles.copyBtnSuccess : ''
-                  }`}
+                  className={`${styles.submitBlueBtn} ${copied ? styles.copyBtnSuccess : ''}`}
                   onClick={handleCopyCode}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                 >
-                  {copied
-                    ? locale === 'vi'
-                      ? 'Đã sao chép! ✓'
-                      : locale === 'de'
-                      ? 'Kopiert! ✓'
-                      : 'Copied! ✓'
-                    : locale === 'vi'
-                    ? 'Sao chép mã mời'
-                    : locale === 'de'
-                    ? 'Code kopieren'
-                    : 'Copy Invitation Code'}
+                  {copied ? (locale === 'vi' ? 'Đã sao chép! ✓' : 'Copied! ✓') : (locale === 'vi' ? 'Sao chép mã mời' : 'Copy Invitation Code')}
                 </button>
               </div>
             )}
@@ -2211,193 +2708,9 @@ export default function StaffManagementPage() {
         </div>
       )}
 
-      {/* ===== MANAGER DETAIL MODAL (Owner Only - Simple) ===== */}
-      {selectedManager && (
-        <div className={styles.modalOverlay}>
-          <div style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '16px',
-            width: '90%',
-            maxWidth: '480px',
-            maxHeight: '80vh',
-            overflow: 'auto',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
-          }}>
-            {/* Header */}
-            <div style={{
-              padding: '24px 24px 20px',
-              borderBottom: '1px solid #e5e7eb',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '16px',
-            }}>
-              <div style={{
-                width: '52px',
-                height: '52px',
-                borderRadius: '50%',
-                background: 'linear-gradient(135deg, #3b82f6 0%, #1e40af 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'white',
-                fontSize: '18px',
-                fontWeight: 700,
-                flexShrink: 0,
-              }}>{selectedManager.initials}</div>
-              <div style={{ flex: 1 }}>
-                <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#111827' }}>
-                  {selectedManager.name}
-                </h2>
-                <span style={{ fontSize: '13px', color: '#6b7280' }}>
-                  👔 {locale === 'vi' ? 'Quản lý' : locale === 'de' ? 'Manager' : 'Manager'}
-                </span>
-              </div>
-              <button
-                type="button"
-                className={styles.modalClose}
-                onClick={() => setSelectedManager(null)}
-              >✕</button>
-            </div>
-
-            {/* Body */}
-            <div style={{ padding: '24px' }}>
-              {/* Status */}
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '16px',
-                backgroundColor: selectedManager.status === 'active' ? '#f0fdf4' : '#fef2f2',
-                borderRadius: '10px',
-                marginBottom: '20px',
-              }}>
-                <div>
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '4px' }}>
-                    {locale === 'vi' ? 'Trạng thái tài khoản' : 'Account Status'}
-                  </div>
-                  <div style={{
-                    fontSize: '15px',
-                    fontWeight: 700,
-                    color: selectedManager.status === 'active' ? '#166534' : '#991b1b',
-                  }}>
-                    {selectedManager.status === 'active'
-                      ? (locale === 'vi' ? '✅ Đang hoạt động' : '✅ Active')
-                      : (locale === 'vi' ? '❌ Đã vô hiệu hóa' : '❌ Deactivated')}
-                  </div>
-                </div>
-                <button
-                  style={{
-                    padding: '8px 16px',
-                    borderRadius: '8px',
-                    border: 'none',
-                    backgroundColor: selectedManager.status === 'active' ? '#ef4444' : '#22c55e',
-                    color: 'white',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                  onClick={async () => {
-                    await handleToggleStatus(selectedManager.id, selectedManager.status);
-                    setSelectedManager({
-                      ...selectedManager,
-                      status: selectedManager.status === 'active' ? 'inactive' : 'active',
-                    });
-                  }}
-                >
-                  {selectedManager.status === 'active'
-                    ? (locale === 'vi' ? 'Vô hiệu hóa' : 'Deactivate')
-                    : (locale === 'vi' ? 'Kích hoạt' : 'Activate')}
-                </button>
-              </div>
-
-              {/* Info */}
-              <div style={{
-                backgroundColor: '#f9fafb',
-                borderRadius: '10px',
-                padding: '16px',
-                marginBottom: '20px',
-              }}>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '12px' }}>
-                  {locale === 'vi' ? 'Thông tin' : 'Information'}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
-                    <span style={{ color: '#6b7280' }}>{locale === 'vi' ? 'Ngôn ngữ' : 'Languages'}</span>
-                    <span style={{ color: '#111827', fontWeight: 500 }}>
-                      {selectedManager.languages.map((l) => getLanguageLabel(l, locale)).join(', ')}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
-                    <span style={{ color: '#6b7280' }}>{locale === 'vi' ? 'Chi nhánh quản lý' : 'Branch'}</span>
-                    <span style={{ color: '#111827', fontWeight: 500 }}>
-                      {branchId}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '14px' }}>
-                    <span style={{ color: '#6b7280' }}>{locale === 'vi' ? 'Đánh giá' : 'Rating'}</span>
-                    <span style={{ color: '#111827', fontWeight: 500 }}>
-                      ⭐ {selectedManager.rating.toFixed(1)} / 5.0
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Permissions summary */}
-              <div style={{
-                backgroundColor: '#eff6ff',
-                borderRadius: '10px',
-                padding: '16px',
-                border: '1px solid #dbeafe',
-              }}>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: '#1e40af', marginBottom: '10px' }}>
-                  {locale === 'vi' ? '🔑 Quyền quản lý' : '🔑 Permissions'}
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', color: '#374151' }}>
-                  <div>✅ {locale === 'vi' ? 'Quản lý lịch hẹn' : 'Manage bookings'}</div>
-                  <div>✅ {locale === 'vi' ? 'Quản lý thợ (chỉ xem thợ)' : 'Manage staff (staff only)'}</div>
-                  <div>✅ {locale === 'vi' ? 'Quản lý dịch vụ' : 'Manage services'}</div>
-                  <div>❌ {locale === 'vi' ? 'Quản lý chi nhánh' : 'Manage branches'}</div>
-                  <div>❌ {locale === 'vi' ? 'Xem tài khoản quản lý khác' : 'View other managers'}</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div style={{
-              padding: '16px 24px',
-              borderTop: '1px solid #e5e7eb',
-              display: 'flex',
-              justifyContent: 'flex-end',
-            }}>
-              <button
-                style={{
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  border: '1px solid #d1d5db',
-                  backgroundColor: '#ffffff',
-                  color: '#374151',
-                  fontSize: '14px',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-                onClick={() => setSelectedManager(null)}
-              >
-                {locale === 'vi' ? 'Đóng' : 'Close'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Toast notification */}
+      {/* Toast popup */}
       {toast && (
-        <div
-          className={`${styles.toast} ${
-            toast.type === 'success'
-              ? styles.toastSuccess
-              : styles.toastError
-          }`}
-        >
+        <div className={`${styles.toast} ${toast.type === 'success' ? styles.toastSuccess : styles.toastError}`}>
           {toast.message}
         </div>
       )}

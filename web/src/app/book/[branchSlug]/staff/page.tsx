@@ -5,7 +5,7 @@ import { useI18n } from '@/lib/i18n';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
 import { demoCategories, demoServices, demoStaff, generateDemoTimeSlots } from '@/lib/seedData';
-import { hasConflict, shouldSkipStaffSelection } from '@/lib/types';
+import { hasConflict, shouldSkipStaffSelection, MAX_MAIN_SERVICES } from '@/lib/types';
 import type { Staff, Service, ServiceCategory } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { collection, getDocs, onSnapshot } from 'firebase/firestore';
@@ -250,7 +250,7 @@ export default function StaffSelectionPage() {
       if (hasConflict(state.selectedServices, category.conflictGroup)) {
         return 'conflict';
       }
-      if (state.selectedServices.length >= 3) {
+      if (state.selectedServices.length >= MAX_MAIN_SERVICES) {
         return 'max';
       }
       return null;
@@ -285,7 +285,16 @@ export default function StaffSelectionPage() {
     });
   };
 
-  // ── Staff Selection Logic ──
+  // Spec V1: Per-service staff selection handlers
+  const handleSelectAnyForService = (categoryId: string) => {
+    dispatch({ type: 'SELECT_STAFF_FOR_SERVICE', categoryId, staff: null, staffType: 'any' });
+  };
+
+  const handleSelectStaffForService = (categoryId: string, staff: Staff) => {
+    dispatch({ type: 'SELECT_STAFF_FOR_SERVICE', categoryId, staff, staffType: 'specific' });
+  };
+
+  // Legacy global handlers (kept for backward compat)
   const handleSelectAny = () => {
     dispatch({ type: 'SELECT_STAFF', staff: null, staffType: 'any' });
   };
@@ -298,51 +307,111 @@ export default function StaffSelectionPage() {
   const isStaffSelected = (staffId: string) =>
     state.selectedStaffType === 'specific' && state.selectedStaff?.id === staffId;
 
-  // ── 7-Day Time Table Logic ──
-  const getSlotsForDate = useCallback((dateStr: string, selectedStaffId?: string) => {
-    const slots = [];
+  // Helper to check if a staff has any overlapping booking
+  const checkStaffOverlap = useCallback((staffId: string, dateStr: string, slotStartMins: number, durationMins: number): boolean => {
+    const slotEndMins = slotStartMins + durationMins;
+    
+    return realBookings.some(booking => {
+      if (booking.appointmentDate !== dateStr) return false;
+      if (booking.status === 'cancelled') return false;
+      if (booking.staffId !== staffId) return false;
+      
+      const [startH, startM] = booking.startTime.split(':').map(Number);
+      const duration = booking.totalDurationMinutes || 30;
+      const startVal = startH * 60 + startM;
+      const endVal = startVal + duration;
+      
+      // Overlap formula: slotStart < bookingEnd && slotEnd > bookingStart
+      return slotStartMins < endVal && slotEndMins > startVal;
+    });
+  }, [realBookings]);
+
+  // ── 7-Day Time Table Logic (Spec V1: 2-segment availability) ──
+  const getSlotsForDate = useCallback((dateStr: string) => {
+    type SlotItem = { time: string; available: boolean; status: 'available' | 'held' | 'booked' | 'request_only' };
+    const slots: SlotItem[] = [];
     const dateObj = new Date(dateStr + 'T00:00:00');
     const dayOfWeek = (dateObj.getDay() + 6) % 7; // Convert to Mon=0 (0-6)
     
-    if (dayOfWeek === 6) return []; // Sunday is closed
+    if (dayOfWeek === 6) return [] as SlotItem[]; // Sunday is closed
     const endHour = dayOfWeek === 5 ? 16 : 18; // Saturday closes at 16:00
+
+    // Spec V1: Each service segment has its own duration & staff
+    const segments = state.selectedServices.map(item => ({
+      duration: item.mainService.durationMinutes || 30,
+      staffId: item.selectedStaffType === 'specific' ? item.selectedStaff?.id : undefined,
+      staffType: item.selectedStaffType,
+      serviceId: item.mainService.id,
+    }));
+
+    // Fallback: If no services selected, use total duration with legacy staff
+    const totalDuration = totals.totalDuration || 30;
 
     for (let hour = 9; hour < endHour; hour++) {
       for (const min of [0, 30]) {
         const time = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
-        
-        // Find if this slot overlaps with any active bookings on Firestore for the selected staff
-        const isOverlap = realBookings.some(booking => {
-          if (booking.appointmentDate !== dateStr) return false;
-          if (booking.status === 'cancelled') return false;
-          
-          // If a specific staff is selected, check if this booking belongs to them
-          if (selectedStaffId && booking.staffId !== selectedStaffId) {
-            return false;
-          }
-          
-          // Check time overlap
-          const [slotH, slotM] = time.split(':').map(Number);
-          const [startH, startM] = booking.startTime.split(':').map(Number);
-          
-          // Default duration to 30 mins if not present
-          const duration = booking.totalDurationMinutes || 30;
-          const slotVal = slotH * 60 + slotM;
-          const startVal = startH * 60 + startM;
-          const endVal = startVal + duration;
-          
-          return slotVal >= startVal && slotVal < endVal;
-        });
+        const slotStartMins = hour * 60 + min;
 
-        slots.push({
-          time,
-          available: true,
-          status: (isOverlap ? 'request_only' : 'available') as 'available' | 'held' | 'booked' | 'request_only',
-        });
+        // Check if the entire booking (all segments) fits within working hours
+        const totalEnd = slotStartMins + totalDuration;
+        if (totalEnd > endHour * 60) {
+          // Slot would overflow working hours, skip
+          continue;
+        }
+
+        let slotStatus: 'available' | 'held' | 'booked' | 'request_only' = 'available';
+        let isHidden = false;
+
+        if (segments.length === 0) {
+          // No services selected yet, show all slots as available
+          slotStatus = 'available';
+        } else {
+          // Spec V1: Check each segment sequentially
+          let currentOffset = slotStartMins;
+
+          for (const seg of segments) {
+            if (isHidden) break;
+
+            if (seg.staffId) {
+              // Specific staff: must be free for this segment
+              const overlap = checkStaffOverlap(seg.staffId, dateStr, currentOffset, seg.duration);
+              if (overlap) {
+                // Spec V1: Specific staff busy = hide slot entirely (no request allowed)
+                isHidden = true;
+              }
+            } else {
+              // Any staff: check if at least one eligible staff is free
+              const eligibleStaff = staffList.filter(
+                (s) => s.status === 'active' && (s.serviceIds || []).includes(seg.serviceId)
+              );
+
+              if (eligibleStaff.length === 0) {
+                isHidden = true;
+              } else {
+                const allBusy = eligibleStaff.every(staff =>
+                  checkStaffOverlap(staff.id, dateStr, currentOffset, seg.duration)
+                );
+                if (allBusy) {
+                  slotStatus = 'request_only';
+                }
+              }
+            }
+
+            currentOffset += seg.duration;
+          }
+        }
+
+        if (!isHidden) {
+          slots.push({
+            time,
+            available: true,
+            status: slotStatus,
+          });
+        }
       }
     }
     return slots;
-  }, [realBookings]);
+  }, [totals.totalDuration, state.selectedServices, staffList, checkStaffOverlap]);
 
   const columnsList = useMemo(() => {
     const list = [];
@@ -360,9 +429,8 @@ export default function StaffSelectionPage() {
         month: 'short'
       });
 
-      // Fetch availability slots using our real-bookings engine
-      const staffId = state.selectedStaffType === 'specific' ? state.selectedStaff?.id : undefined;
-      const rawSlots = getSlotsForDate(isoStr, staffId);
+      // Spec V1: per-service staff is now inside selectedServices, no longer global
+      const rawSlots = getSlotsForDate(isoStr);
       
       const filtered = rawSlots.filter((slot) => {
         if (timeFilter === 'all') return true;
@@ -382,7 +450,7 @@ export default function StaffSelectionPage() {
       });
     }
     return list;
-  }, [weekStartDate, locale, state.selectedStaff, state.selectedStaffType, timeFilter, getSlotsForDate]);
+  }, [weekStartDate, locale, state.selectedServices, timeFilter, getSlotsForDate]);
 
   const handlePrevWeek = () => {
     setWeekStartDate((prev) => {
@@ -561,7 +629,7 @@ export default function StaffSelectionPage() {
                   const extraServices = category.services.filter((s) => s.isAddon);
 
                   const selectedLabel = locale === 'de' ? '✓ Ausgewählt' : locale === 'vi' ? '✓ Đang chọn' : '✓ Selected';
-                  const maxBadgeLabel = locale === 'de' ? 'Max 3 Kategorien' : locale === 'vi' ? 'Tối đa 3 nhóm' : 'Max 3 categories';
+                  const maxBadgeLabel = locale === 'de' ? `Max ${MAX_MAIN_SERVICES} Kategorien` : locale === 'vi' ? `Tối đa ${MAX_MAIN_SERVICES} nhóm` : `Max ${MAX_MAIN_SERVICES} categories`;
                   const conflictLabel = locale === 'de' 
                     ? `⚠ Konflikt mit ${getConflictGroupLabel(category)}` 
                     : locale === 'vi' 
@@ -693,6 +761,14 @@ export default function StaffSelectionPage() {
                               </div>
                             );
                           })}
+
+                          {/* Spec V1: Add-on note */}
+                          {extraServices.length > 0 && (
+                            <div className={styles.addonNote}>
+                              <span className={styles.addonNoteIcon}>ℹ️</span>
+                              <span>{t.booking.services.addonNote}</span>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -704,59 +780,84 @@ export default function StaffSelectionPage() {
         </div>
       </section>
 
-      {/* 👤 SECTION 2: Staff Selection (Planity Style 2.png) */}
-      {!skipStaffSelection && (
+      {/* 👤 SECTION 2: Per-Service Staff Selection (Spec V1) */}
+      {!skipStaffSelection && state.selectedServices.length > 0 && (
         <section className={styles.sectionCard}>
-          <h2 className={styles.sectionTitle}>{locale === 'de' ? 'Mitarbeiter auswählen' : locale === 'vi' ? 'Chọn nhân viên' : 'Choose with whom?'}</h2>
+          <h2 className={styles.sectionTitle}>
+            {locale === 'de' ? '2. Mitarbeiter auswählen' : locale === 'vi' ? '2. Chọn nhân viên' : '2. Choose your professional'}
+          </h2>
           
-          <div className={styles.staffGrid}>
-            {/* Sans préférence / Bất kỳ ai */}
-            <div
-              className={`${styles.staffCard} ${isAnySelected ? styles.staffCardSelected : ''}`}
-              onClick={handleSelectAny}
-            >
-              <div className={styles.staffCardLeft}>
-                <div className={styles.staffCardInfo}>
-                  <div className={styles.staffCardName}>{localLabels.noPreference}</div>
-                </div>
-              </div>
-              <div className={styles.radioWrapper}>
-                <div className={`${styles.radioCircle} ${isAnySelected ? styles.radioCircleChecked : ''}`}>
-                  {isAnySelected && <div className={styles.radioInnerDot} />}
-                </div>
-              </div>
-            </div>
+          {state.selectedServices.map((item) => {
+            const serviceStaffList = staffList.filter(
+              (s) => s.status === 'active' && (s.serviceIds || []).includes(item.mainService.id)
+            );
+            const isItemAnySelected = item.selectedStaffType === 'any' && !item.selectedStaff;
+            const isItemStaffSelected = (staffId: string) =>
+              item.selectedStaffType === 'specific' && item.selectedStaff?.id === staffId;
 
-            {/* Individual available staff */}
-            {availableStaff.map((staff) => {
-              const selected = isStaffSelected(staff.id);
-              return (
-                <div
-                  key={staff.id}
-                  className={`${styles.staffCard} ${selected ? styles.staffCardSelected : ''}`}
-                  onClick={() => handleSelectStaff(staff)}
-                >
-                  <div className={styles.staffCardLeft}>
-                    <div className={styles.staffAvatarCircle}>{staff.initials}</div>
-                    <div className={styles.staffCardInfo}>
-                      <div className={styles.staffCardName}>{staff.name}</div>
-                      {staff.rating && (
-                        <div className={styles.ratingInline}>
-                          <span className={styles.ratingStar}>★</span>
-                          {staff.rating}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <div className={styles.radioWrapper}>
-                    <div className={`${styles.radioCircle} ${selected ? styles.radioCircleChecked : ''}`}>
-                      {selected && <div className={styles.radioInnerDot} />}
-                    </div>
-                  </div>
+            return (
+              <div key={item.categoryId} className={styles.perServiceStaffBlock}>
+                <div className={styles.perServiceStaffLabel}>
+                  <span className={styles.perServiceStaffServiceName}>
+                    {getServiceName(item.mainService.id, item.mainService.name)}
+                  </span>
+                  <span className={styles.perServiceStaffDuration}>
+                    {item.mainService.durationMinutes} {locale === 'de' ? 'Min' : locale === 'vi' ? 'phút' : 'min'}
+                  </span>
                 </div>
-              );
-            })}
-          </div>
+
+                <div className={styles.staffGrid}>
+                  {/* Any staff option */}
+                  <div
+                    className={`${styles.staffCard} ${isItemAnySelected ? styles.staffCardSelected : ''}`}
+                    onClick={() => handleSelectAnyForService(item.categoryId)}
+                  >
+                    <div className={styles.staffCardLeft}>
+                      <div className={styles.anyStaffIcon}>👥</div>
+                      <div className={styles.staffCardInfo}>
+                        <div className={styles.staffCardName}>{localLabels.noPreference}</div>
+                      </div>
+                    </div>
+                    <div className={styles.radioWrapper}>
+                      <div className={`${styles.radioCircle} ${isItemAnySelected ? styles.radioCircleChecked : ''}`}>
+                        {isItemAnySelected && <div className={styles.radioInnerDot} />}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Individual staff for this service */}
+                  {serviceStaffList.map((staff) => {
+                    const selected = isItemStaffSelected(staff.id);
+                    return (
+                      <div
+                        key={staff.id}
+                        className={`${styles.staffCard} ${selected ? styles.staffCardSelected : ''}`}
+                        onClick={() => handleSelectStaffForService(item.categoryId, staff)}
+                      >
+                        <div className={styles.staffCardLeft}>
+                          <div className={styles.staffAvatarCircle}>{staff.initials}</div>
+                          <div className={styles.staffCardInfo}>
+                            <div className={styles.staffCardName}>{staff.name}</div>
+                            {staff.rating && (
+                              <div className={styles.ratingInline}>
+                                <span className={styles.ratingStar}>★</span>
+                                {staff.rating}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className={styles.radioWrapper}>
+                          <div className={`${styles.radioCircle} ${selected ? styles.radioCircleChecked : ''}`}>
+                            {selected && <div className={styles.radioInnerDot} />}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
         </section>
       )}
 

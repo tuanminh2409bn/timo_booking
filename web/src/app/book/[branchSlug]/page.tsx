@@ -4,14 +4,13 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
-import { hasConflict } from '@/lib/types';
+import { hasConflict, MAX_MAIN_SERVICES } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import type { Service, ServiceCategory } from '@/lib/types';
 import styles from './page.module.css';
 
-const MAX_CATEGORIES = 3;
 
 export default function ServiceSelectionPage() {
   const router = useRouter();
@@ -131,7 +130,7 @@ export default function ServiceSelectionPage() {
         return 'conflict';
       }
       // Check max categories
-      if (state.selectedServices.length >= MAX_CATEGORIES) {
+      if (state.selectedServices.length >= MAX_MAIN_SERVICES) {
         return 'max';
       }
       return null;
@@ -254,7 +253,7 @@ export default function ServiceSelectionPage() {
                     {/* Max reached badge */}
                     {disableReason === 'max' && (
                       <span className={styles.categoryMaxBadge}>
-                        Max {MAX_CATEGORIES} Kategorien
+                        Max {MAX_MAIN_SERVICES}
                       </span>
                     )}
                     <span className={`${styles.chevron} ${isExpanded ? styles.chevronOpen : ''}`}>

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { Phone, Store } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { useI18n } from '@/lib/i18n';
 import { collection, onSnapshot, doc, updateDoc, getDoc, query, where, getDocs } from 'firebase/firestore';
@@ -25,9 +26,9 @@ interface BusinessPlan {
 }
 
 const PLAN_LABELS: Record<string, Record<string, string>> = {
-  starter: { vi: '🟢 Starter (1 tiệm)', de: '🟢 Starter (1 Filiale)', en: '🟢 Starter (1 branch)' },
-  professional: { vi: '🔵 Professional (3 tiệm)', de: '🔵 Professional (3 Filialen)', en: '🔵 Professional (3 branches)' },
-  enterprise: { vi: '🟣 Enterprise (10 tiệm)', de: '🟣 Enterprise (10 Filialen)', en: '🟣 Enterprise (10 branches)' },
+  starter: { vi: 'Starter (1 tiệm)', de: 'Starter (1 Filiale)', en: 'Starter (1 branch)' },
+  professional: { vi: 'Professional (3 tiệm)', de: 'Professional (3 Filialen)', en: 'Professional (3 branches)' },
+  enterprise: { vi: 'Enterprise (10 tiệm)', de: 'Enterprise (10 Filialen)', en: 'Enterprise (10 branches)' },
 };
 
 export default function AccountsManagementPage() {
@@ -250,7 +251,7 @@ export default function AccountsManagementPage() {
             {item.name} {item.uid === user.uid && <span style={{ fontSize: '11px', color: '#d97706' }}>(You)</span>}
           </div>
           <div style={{ fontSize: '12px', color: '#6b7280' }}>{item.email}</div>
-          {item.phone && <div style={{ fontSize: '11px', color: '#9ca3af' }}>📞 {item.phone}</div>}
+          {item.phone && <div style={{ fontSize: '11px', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '2px', marginTop: '2px' }}><Phone className="w-3 h-3 text-gray-400" /> {item.phone}</div>}
         </div>
       </div>
 
@@ -261,7 +262,8 @@ export default function AccountsManagementPage() {
             <span key={slug} style={{
               fontSize: '11px', padding: '3px 8px', borderRadius: '4px',
               backgroundColor: '#f3f4f6', color: '#374151', fontWeight: 500,
-            }}>🏪 {slug}</span>
+              display: 'inline-flex', alignItems: 'center', gap: '3px'
+            }}><Store className="w-3 h-3 text-gray-400" /> {slug}</span>
           ))
         )}
         {item.role === 'owner' && item.businessId && (
@@ -295,10 +297,10 @@ export default function AccountsManagementPage() {
           disabled={item.uid === user.uid}
           style={{ fontSize: '11px', padding: '4px 6px' }}
         >
-          <option value="approved">{locale === 'vi' ? '✅ Duyệt' : '✅ Approve'}</option>
-          <option value="pending_superadmin">{locale === 'vi' ? '⏳ SaaS Chờ' : '⏳ SaaS Pending'}</option>
-          <option value="pending_owner">{locale === 'vi' ? '⏳ Chủ Chờ' : '⏳ Owner Pending'}</option>
-          <option value="rejected">{locale === 'vi' ? '❌ Khóa' : '❌ Suspend'}</option>
+          <option value="approved">{locale === 'vi' ? 'Duyệt' : 'Approve'}</option>
+          <option value="pending_superadmin">{locale === 'vi' ? 'SaaS Chờ' : 'SaaS Pending'}</option>
+          <option value="pending_owner">{locale === 'vi' ? 'Chủ Chờ' : 'Owner Pending'}</option>
+          <option value="rejected">{locale === 'vi' ? 'Khóa' : 'Suspend'}</option>
         </select>
         <select
           className={styles.actionSelect}

@@ -157,10 +157,7 @@ service cloud.firestore {
     // -------- Bookings --------
     match /branches/{branchId}/bookings/{bookingId} {
       allow create: if true; // Clients can book online without authentication
-      allow read: if isSignedIn() && (
-        canManageBranch(branchId) ||
-        (getUserData().role == 'staff' && resource.data.staffId == getUserData().staffId)
-      );
+      allow read: if true;   // Clients need to read bookings to check staff availability
       allow update, delete: if isSignedIn() && (
         canManageBranch(branchId) ||
         (getUserData().role == 'staff' && resource.data.staffId == getUserData().staffId)

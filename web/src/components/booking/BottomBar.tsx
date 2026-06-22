@@ -2,7 +2,7 @@
 
 import { useI18n } from '@/lib/i18n';
 import { useBooking } from '@/lib/bookingContext';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import styles from './BottomBar.module.css';
 
 const STEP_PATHS = ['', '/staff', '/confirm'];
@@ -11,8 +11,9 @@ export default function BottomBar() {
   const { t } = useI18n();
   const { state, totals } = useBooking();
   const router = useRouter();
-  const params = useParams();
-  const branchSlug = params.branchSlug as string;
+  // Use branchSlug from booking context (set via window.location) instead of useParams()
+  // because Firebase Hosting serves pre-rendered HTML for all slugs, making useParams() unreliable
+  const branchSlug = state.branchSlug;
 
   const { selectedServices, selectedStaff, selectedStaffType, selectedDate, selectedTime, currentStep } = state;
 

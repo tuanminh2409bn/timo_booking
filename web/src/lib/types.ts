@@ -47,6 +47,7 @@ export interface Service {
   isAddon?: boolean;                             // +duration addon like "Design / Extra"
   conflictGroup?: 'gel' | 'acryl';               // inherited from category
   staffType?: 'main' | 'junior' | 'any';         // which staff type can do this
+  staffPriority?: 'assistant_staff' | 'main_staff' | 'none'; // Spec V1: priority rule for auto-assign
   createdAt: string;
 }
 
@@ -161,13 +162,21 @@ export interface SelectedServiceItem {
   categoryName: string;
   mainService: Service;
   extras: Service[];                             // Design/Extra addons
+  selectedStaff: Staff | null;                   // Spec V1: per-service staff selection
+  selectedStaffType: 'specific' | 'any';         // Spec V1: per-service staff type
 }
+
+// ===== BOOKING CONSTANTS (Spec V1) =====
+export const MAX_MAIN_SERVICES = 2;              // Spec V1: tối đa 2 dịch vụ chính
+export const CUSTOMER_CANCEL_CUTOFF_HOURS = 12;  // Spec V1: hủy lịch confirmed trước 12 giờ
 
 // ===== BOOKING STATE =====
 export interface BookingState {
   branchSlug: string;
   branch: Branch | null;
-  selectedServices: SelectedServiceItem[];       // multi-service: max 3 categories
+  selectedServices: SelectedServiceItem[];       // Spec V1: max 2 main services
+  // NOTE: Staff selection is now per-service (inside SelectedServiceItem)
+  // Legacy fields kept for backward compat during migration:
   selectedStaff: Staff | null;
   selectedStaffType: 'specific' | 'any';
   selectedDate: string | null;
@@ -186,6 +195,11 @@ export interface BookingState {
 }
 
 // ===== COMPUTED HELPERS =====
+/**
+ * Spec V1: totalDuration chỉ tính dịch vụ chính (main services).
+ * Add-on extras không ảnh hưởng đến thời lượng/availability trên calendar.
+ * totalPrice vẫn cộng dồn cả extras để hiển thị tham khảo.
+ */
 export function computeBookingTotals(services: SelectedServiceItem[]): {
   totalDuration: number;
   totalPrice: number;
@@ -201,7 +215,8 @@ export function computeBookingTotals(services: SelectedServiceItem[]): {
     serviceCount++;
 
     for (const extra of item.extras) {
-      totalDuration += extra.durationMinutes;
+      // Spec V1: Add-on extras do NOT add to duration (no calendar block)
+      // but still add to price for reference
       totalPrice += extra.price;
       serviceCount++;
     }

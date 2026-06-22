@@ -9,7 +9,7 @@ import { useI18n, Locale } from './index';
 
 type TranslatedItem = { name: string; description: string };
 
-const categoryTranslations: Record<Locale, Record<string, TranslatedItem>> = {
+export const categoryTranslations: Record<Locale, Record<string, TranslatedItem>> = {
   de: {
     'cat-gel': { name: 'Neumodellage mit Gel', description: 'Gel-Neumodellage für natürliche und kreative Nägel' },
     'cat-acryl': { name: 'Neumodellage mit Acryl', description: 'Acryl-Neumodellage für haltbare Nagelverstärkung' },
@@ -48,7 +48,7 @@ const categoryTranslations: Record<Locale, Record<string, TranslatedItem>> = {
   },
 };
 
-const serviceTranslations: Record<Locale, Record<string, TranslatedItem>> = {
+export const serviceTranslations: Record<Locale, Record<string, TranslatedItem>> = {
   de: {
     // Gel
     'svc-gel-natur': { name: 'Natur', description: 'Natürliche Gel-Neumodellage ohne Farbe' },
@@ -226,3 +226,81 @@ export function useServiceTranslation() {
       serviceTranslations[locale]?.[id]?.description ?? fallback,
   };
 }
+
+/** Automatically translate/localize category or service name using translation dictionary */
+export function autoLocalizeName(name: string): { vi: string; en: string; de: string } {
+  const clean = name.trim();
+  if (!clean) return { vi: '', en: '', de: '' };
+
+  const lower = clean.toLowerCase();
+
+  // 1. Check category translations (bidirectional matching)
+  for (const catId of Object.keys(categoryTranslations.de)) {
+    const deName = categoryTranslations.de[catId]?.name || '';
+    const enName = categoryTranslations.en[catId]?.name || '';
+    const viName = categoryTranslations.vi[catId]?.name || '';
+
+    if (
+      deName.toLowerCase() === lower ||
+      enName.toLowerCase() === lower ||
+      viName.toLowerCase() === lower
+    ) {
+      return { vi: viName, en: enName, de: deName };
+    }
+  }
+
+  // 2. Check service translations (bidirectional matching)
+  for (const svcId of Object.keys(serviceTranslations.de)) {
+    const deName = serviceTranslations.de[svcId]?.name || '';
+    const enName = serviceTranslations.en[svcId]?.name || '';
+    const viName = serviceTranslations.vi[svcId]?.name || '';
+
+    if (
+      deName.toLowerCase() === lower ||
+      enName.toLowerCase() === lower ||
+      viName.toLowerCase() === lower
+    ) {
+      return { vi: viName, en: enName, de: deName };
+    }
+  }
+
+  // 3. Custom glossary of common variations and fragments
+  const glossary = [
+    { de: 'Natur', en: 'Natural', vi: 'Tự nhiên' },
+    { de: 'Gel', en: 'Gel', vi: 'Gel' },
+    { de: 'Acryl', en: 'Acrylic', vi: 'Acrylic' },
+    { de: 'Mit Gel', en: 'With Gel', vi: 'Gel' },
+    { de: 'Mit Acryl', en: 'With Acrylic', vi: 'Acrylic' },
+    { de: 'Basic', en: 'Basic', vi: 'Cơ bản' },
+    { de: 'Mit Nagellack', en: 'With Nail Polish', vi: 'Sơn thường' },
+    { de: 'Mit Shellac', en: 'With Shellac', vi: 'Shellac' },
+    { de: 'Maniküre', en: 'Manicure', vi: 'Chăm sóc tay' },
+    { de: 'Pediküre', en: 'Pedicure', vi: 'Chăm sóc chân' },
+    { de: 'Wimpern', en: 'Eyelashes', vi: 'Lông mi' },
+    { de: 'Ablösung', en: 'Removal', vi: 'Tháo móng' },
+    { de: 'Zusatz', en: 'Add-on', vi: 'Bổ sung' },
+    { de: 'Tự nhiên', en: 'Natural', vi: 'Tự nhiên' },
+    { de: 'Cơ bản', en: 'Basic', vi: 'Cơ bản' },
+    { de: 'Sơn thường', en: 'With Nail Polish', vi: 'Sơn thường' },
+    { de: 'Sơn móng', en: 'Nail Polish', vi: 'Sơn móng' },
+    { de: 'Tháo móng', en: 'Removal', vi: 'Tháo móng' },
+    { de: 'Lông mi', en: 'Eyelashes', vi: 'Lông mi' },
+    { de: 'Nối mi', en: 'Eyelash Extensions', vi: 'Nối mi' },
+    { de: 'Bổ sung mi', en: 'Eyelash Refill', vi: 'Bổ sung mi' },
+    { de: 'Tháo mi', en: 'Eyelash Removal', vi: 'Tháo mi' },
+  ];
+
+  for (const item of glossary) {
+    if (
+      item.de.toLowerCase() === lower ||
+      item.en.toLowerCase() === lower ||
+      item.vi.toLowerCase() === lower
+    ) {
+      return { vi: item.vi, en: item.en, de: item.de };
+    }
+  }
+
+  // 4. Fallback if no match is found: use the same name for all languages
+  return { vi: clean, en: clean, de: clean };
+}
+

@@ -2,7 +2,7 @@
 
 import { useI18n } from '@/lib/i18n';
 import { useBooking } from '@/lib/bookingContext';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import styles from './Stepper.module.css';
 
 const STEPS = [
@@ -15,8 +15,8 @@ export default function Stepper() {
   const { t } = useI18n();
   const { state } = useBooking();
   const router = useRouter();
-  const params = useParams();
-  const branchSlug = params.branchSlug as string;
+  // Use branchSlug from booking context (set via window.location) instead of useParams()
+  const branchSlug = state.branchSlug;
 
   const stepLabels: Record<string, string> = {
     service: t.booking.stepper.service,
