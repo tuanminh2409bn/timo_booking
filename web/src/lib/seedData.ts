@@ -131,6 +131,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'gel',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -147,6 +148,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'gel',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -163,6 +165,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'gel',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -180,6 +183,7 @@ export const demoServices: Service[] = [
     type: 'standard',
     isAddon: true,
     conflictGroup: 'gel',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
 
@@ -198,6 +202,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'gel',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -214,6 +219,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'gel',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -230,6 +236,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'gel',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -247,6 +254,7 @@ export const demoServices: Service[] = [
     type: 'standard',
     isAddon: true,
     conflictGroup: 'gel',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
 
@@ -265,6 +273,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'acryl',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -281,6 +290,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'acryl',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -297,6 +307,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'acryl',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -314,6 +325,7 @@ export const demoServices: Service[] = [
     type: 'standard',
     isAddon: true,
     conflictGroup: 'acryl',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
 
@@ -332,6 +344,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'acryl',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -348,6 +361,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'acryl',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -364,6 +378,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     conflictGroup: 'acryl',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -381,6 +396,7 @@ export const demoServices: Service[] = [
     type: 'standard',
     isAddon: true,
     conflictGroup: 'acryl',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
 
@@ -398,6 +414,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -413,6 +430,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -429,6 +447,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     isAddon: true,
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
 
@@ -446,6 +465,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'assistant_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -461,6 +481,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'assistant_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -476,6 +497,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'conditional_assistant',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -492,6 +514,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     isAddon: true,
+    staffPriority: 'none',
     createdAt: '2026-01-01T00:00:00Z',
   },
 
@@ -509,6 +532,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'assistant_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -524,6 +548,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'assistant_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -539,6 +564,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'conditional_assistant',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -555,6 +581,7 @@ export const demoServices: Service[] = [
     hasAppointments: false,
     type: 'standard',
     isAddon: true,
+    staffPriority: 'none',
     createdAt: '2026-01-01T00:00:00Z',
   },
 
@@ -572,6 +599,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -587,6 +615,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'main_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -602,6 +631,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'conditional_assistant',
     createdAt: '2026-01-01T00:00:00Z',
   },
 
@@ -619,6 +649,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'standard',
+    staffPriority: 'assistant_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
 
@@ -636,6 +667,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'addon',
+    staffPriority: 'assistant_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -651,6 +683,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'addon',
+    staffPriority: 'assistant_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -666,6 +699,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'addon',
+    staffPriority: 'assistant_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -681,6 +715,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'addon',
+    staffPriority: 'assistant_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -696,6 +731,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'addon',
+    staffPriority: 'assistant_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -711,6 +747,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'addon',
+    staffPriority: 'assistant_staff',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -726,6 +763,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'addon',
+    staffPriority: 'none',
     createdAt: '2026-01-01T00:00:00Z',
   },
   {
@@ -741,6 +779,7 @@ export const demoServices: Service[] = [
     isActive: true,
     hasAppointments: false,
     type: 'addon',
+    staffPriority: 'none',
     createdAt: '2026-01-01T00:00:00Z',
   },
 ];

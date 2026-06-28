@@ -164,6 +164,13 @@ service cloud.firestore {
       );
     }
 
+    // -------- Audit Logs --------
+    match /branches/{branchId}/auditLogs/{logId} {
+      allow read: if isSignedIn() && canManageBranch(branchId);
+      allow create: if isSignedIn() && canManageBranch(branchId);
+      allow update, delete: if isSignedIn() && (isOwnerOfBranch(branchId) || isSuperadmin());
+    }
+
     // -------- Financial Analytics (Owner & Superadmin ONLY) --------
     match /branches/{branchId}/analytics/{analyticsId} {
       allow read, write: if isSignedIn() && (

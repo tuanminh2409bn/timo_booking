@@ -1007,9 +1007,8 @@ export default function StaffManagementPage() {
 
         batch.set(absRef, absData);
 
-        // Booking reconciliation
-        const isPlannedLeave = date !== germanToday;
-        if (isPlannedLeave) {
+        // Booking reconciliation — always reconcile, including same-day leave
+        {
           const bookingsRef = collection(db, 'branches', branchId, 'bookings');
           const bookingsSnap = await getDocs(query(bookingsRef, where('appointmentDate', '==', date)));
           const bookingsOnDate: any[] = [];
@@ -1220,8 +1219,11 @@ export default function StaffManagementPage() {
                 const bookingStart = bh * 60 + bm;
                 const bookingEnd = bookingStart + (booking.totalDurationMinutes || 30);
 
+                // Fix: booking.services is an array of objects {serviceId, serviceName, ...}
+                const serviceNames = (booking.services || []).map((s: any) => s.serviceName || s.name || '');
+                const hasFirstFiveBlock = serviceNames.some((name: string) => isFirstFiveBlockService(name));
+
                 const candidates = otherStaff.filter(staff => {
-                  const hasFirstFiveBlock = booking.services.some((sName: string) => isFirstFiveBlockService(sName));
                   if (hasFirstFiveBlock && staff.staffType !== 'main') return false;
 
                   if (booking.serviceIds && booking.serviceIds.length > 0) {
@@ -1311,9 +1313,14 @@ export default function StaffManagementPage() {
       setActiveDrawer(null);
       
       showToast(ts.saveSuccess, 'success');
-    } catch (err) {
-      console.error('Error adding absence:', err);
-      showToast(ts.saveError, 'error');
+    } catch (err: any) {
+      console.error('Error adding absence:', err?.message || err, err?.code);
+      const errorDetail = err?.code === 'permission-denied'
+        ? (locale === 'vi' ? 'Không có quyền lưu nghỉ phép. Vui lòng kiểm tra quyền tài khoản.' : 'Permission denied. Check account permissions.')
+        : err?.code === 'unavailable'
+        ? (locale === 'vi' ? 'Mất kết nối. Vui lòng kiểm tra internet.' : 'Connection lost. Check internet.')
+        : ts.saveError;
+      showToast(errorDetail, 'error');
     } finally {
       setSaving(false);
     }
@@ -2301,12 +2308,24 @@ export default function StaffManagementPage() {
                             <div className={styles.absenceCardMiddleDetails}>
                               <div className={styles.badgesAbsenceRow}>
                                 <span className={styles.badgePinkAbsence}>
-                                  {locale === 'vi' ? 'Nghỉ phép' : 'On leave'}
+                                  {locale === 'vi' ? 'Nghỉ phép' : locale === 'de' ? 'Abwesend' : 'On leave'}
                                 </span>
-                                <span className={styles.badgeDaysDuration}>
-                                  <Clock className="w-3 h-3 text-gray-500 mr-1" />
-                                  {period.ids.length} {locale === 'vi' ? 'ngày' : 'days'}
-                                </span>
+                                {period.isFullDay ? (
+                                  <span className={styles.badgeDaysDuration}>
+                                    <Clock className="w-3 h-3 text-gray-500 mr-1" />
+                                    {period.ids.length} {locale === 'vi' ? 'ngày' : locale === 'de' ? 'Tag(e)' : 'day(s)'}
+                                    {' · '}
+                                    {locale === 'vi' ? 'Cả ngày' : locale === 'de' ? 'Ganztägig' : 'Full day'}
+                                  </span>
+                                ) : (
+                                  <span className={styles.badgeDaysDuration}>
+                                    <Clock className="w-3 h-3 text-gray-500 mr-1" />
+                                    {period.startTime && period.endTime 
+                                      ? `${period.startTime} - ${period.endTime}`
+                                      : (locale === 'vi' ? 'Vài giờ' : locale === 'de' ? 'Teilzeit' : 'Partial day')
+                                    }
+                                  </span>
+                                )}
                               </div>
                               {period.note && (
                                 <p className={styles.absenceCardReasonText}>

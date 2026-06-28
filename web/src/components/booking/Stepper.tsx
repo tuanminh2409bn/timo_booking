@@ -19,8 +19,8 @@ export default function Stepper() {
   const branchSlug = state.branchSlug;
 
   const stepLabels: Record<string, string> = {
-    service: t.booking.stepper.service,
-    staff: `${t.booking.stepper.staff} & ${t.booking.stepper.dateTime}`,
+    service: `${t.booking.stepper.service} & ${t.booking.stepper.staff}`,
+    staff: t.booking.stepper.dateTime,
     confirm: t.booking.stepper.confirm,
   };
 

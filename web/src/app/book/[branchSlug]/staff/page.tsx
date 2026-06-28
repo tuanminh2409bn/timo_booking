@@ -45,6 +45,8 @@ export default function StaffSelectionPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [realBookings, setRealBookings] = useState<any[]>([]);
+  const [staffAbsences, setStaffAbsences] = useState<Record<string, any[]>>({});
+  const [staffWorkingHours, setStaffWorkingHours] = useState<Record<string, any[]>>({});
 
   useEffect(() => {
     if (!branchSlug) return;
@@ -62,7 +64,8 @@ export default function StaffSelectionPage() {
 
         const staffSnap = await getDocs(collection(db, 'branches', branchSlug, 'staff'));
         if (!staffSnap.empty) {
-          setStaffList(staffSnap.docs.map(doc => doc.data() as Staff));
+          const staffData = staffSnap.docs.map(doc => doc.data() as Staff);
+          setStaffList(staffData);
         }
       } catch (e) {
         console.error('Error fetching Firestore resources, using local seed fallback', e);
@@ -71,6 +74,44 @@ export default function StaffSelectionPage() {
     
     fetchDbData();
   }, [branchSlug]);
+
+  // Real-time listener for staff absences — updates slots immediately when admin sets absence
+  useEffect(() => {
+    if (!branchSlug || staffList.length === 0) return;
+
+    const unsubscribes: (() => void)[] = [];
+
+    for (const staff of staffList) {
+      if (staff.status !== 'active') continue;
+      const absRef = collection(db, 'branches', branchSlug, 'staff', staff.id, 'absences');
+      const unsubAbs = onSnapshot(absRef, (snap) => {
+        const absList = snap.docs.map(d => d.data());
+        setStaffAbsences(prev => ({
+          ...prev,
+          [staff.id]: absList,
+        }));
+      }, (e) => {
+        console.error(`Error listening to absences for ${staff.id}:`, e);
+      });
+      unsubscribes.push(unsubAbs);
+
+      const whRef = collection(db, 'branches', branchSlug, 'staff', staff.id, 'workingHours');
+      const unsubWh = onSnapshot(whRef, (snap) => {
+        const whList = snap.docs.map(d => d.data());
+        setStaffWorkingHours(prev => ({
+          ...prev,
+          [staff.id]: whList,
+        }));
+      }, (e) => {
+        console.error(`Error listening to working hours for ${staff.id}:`, e);
+      });
+      unsubscribes.push(unsubWh);
+    }
+
+    return () => {
+      unsubscribes.forEach(unsub => unsub());
+    };
+  }, [branchSlug, staffList]);
 
   useEffect(() => {
     if (!branchSlug) return;
@@ -107,9 +148,6 @@ export default function StaffSelectionPage() {
   }), [locale]);
 
   // ── Service addition state ──
-  const [showAddService, setShowAddService] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
   // ── Date/Time states matching screenshot 2.png ──
   const today = new Date();
@@ -179,16 +217,34 @@ export default function StaffSelectionPage() {
 
     if (state.selectedServices.length === 0) return staffList.filter((s) => s.status === 'active');
     
-    const hasFirstFiveBlock = state.selectedServices.some(s => 
-      isFirstFiveBlockService(s.mainService.name) || 
-      ((s.mainService as any).nameLocalized && Object.values((s.mainService as any).nameLocalized).some(val => isFirstFiveBlockService(val as string)))
-    );
+    // Check service.staffType from Firestore (data-driven)
+    const requiredStaffTypes = state.selectedServices
+      .map(s => (s.mainService as any).staffType || 'any')
+      .filter((t: string) => t !== 'any');
+
+    // Determine required staff type: if any service requires 'main', require main
+    // If any requires 'junior', require junior. Mixed = 'any' (can't satisfy both)
+    let requiredType: 'main' | 'junior' | 'any' = 'any';
+    if (requiredStaffTypes.includes('main')) {
+      requiredType = 'main';
+    } else if (requiredStaffTypes.includes('junior')) {
+      requiredType = 'junior';
+    }
+
+    // Fallback: hardcoded first-five-block check for services without staffType
+    if (requiredType === 'any') {
+      const hasFirstFiveBlock = state.selectedServices.some(s => 
+        isFirstFiveBlockService(s.mainService.name) || 
+        ((s.mainService as any).nameLocalized && Object.values((s.mainService as any).nameLocalized).some(val => isFirstFiveBlockService(val as string)))
+      );
+      if (hasFirstFiveBlock) requiredType = 'main';
+    }
 
     const mainServiceIds = state.selectedServices.map((s) => s.mainService.id);
     return staffList.filter(
       (s) =>
         s.status === 'active' && 
-        (!hasFirstFiveBlock || s.staffType === 'main') &&
+        (requiredType === 'any' || s.staffType === requiredType) &&
         mainServiceIds.every((id) => (s.serviceIds || []).includes(id))
     );
   }, [state.selectedServices, staffList]);
@@ -213,86 +269,6 @@ export default function StaffSelectionPage() {
     setViewYear(weekStartDate.getFullYear());
   }, [weekStartDate]);
 
-  // ── Inline Service Selector Logic ──
-  const filteredServices = useMemo(() => {
-    if (!searchQuery.trim()) return services;
-    const q = searchQuery.toLowerCase();
-    return services.filter(
-      (s) =>
-        s.name.toLowerCase().includes(q) ||
-        s.description.toLowerCase().includes(q)
-    );
-  }, [services, searchQuery]);
-
-  const categoriesWithServices = useMemo(() => {
-    return categories
-      .filter((cat) => cat.isActive)
-      .map((cat) => ({
-        ...cat,
-        services: filteredServices.filter((s) => s.categoryId === cat.id && s.isActive),
-      }))
-      .filter((cat) => cat.services.length > 0);
-  }, [categories, filteredServices]);
-
-  const isMainSelected = useCallback(
-    (categoryId: string, serviceId: string) => {
-      const item = state.selectedServices.find((s) => s.categoryId === categoryId);
-      return item?.mainService.id === serviceId;
-    },
-    [state.selectedServices]
-  );
-
-  const getCategoryDisableReason = useCallback(
-    (category: ServiceCategory): 'conflict' | 'max' | null => {
-      if (state.selectedServices.some((s) => s.categoryId === category.id)) {
-        return null;
-      }
-      if (hasConflict(state.selectedServices, category.conflictGroup)) {
-        return 'conflict';
-      }
-      if (state.selectedServices.length >= MAX_MAIN_SERVICES) {
-        return 'max';
-      }
-      return null;
-    },
-    [state.selectedServices]
-  );
-
-  const handleSelectMain = (category: ServiceCategory, service: Service) => {
-    if (isMainSelected(category.id, service.id)) {
-      dispatch({ type: 'REMOVE_CATEGORY', categoryId: category.id });
-    } else {
-      dispatch({ type: 'ADD_MAIN_SERVICE', category, service });
-    }
-  };
-
-  const handleToggleExtra = (categoryId: string, extra: Service) => {
-    dispatch({ type: 'TOGGLE_EXTRA', categoryId, extra });
-  };
-
-  const getConflictGroupLabel = (category: ServiceCategory): string => {
-    if (!category.conflictGroup) return '';
-    const oppositeGroup = category.conflictGroup === 'gel' ? 'acryl' : 'gel';
-    return oppositeGroup === 'gel' ? 'Gel' : 'Acryl';
-  };
-
-  const toggleCategory = (catId: string) => {
-    setExpandedCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(catId)) next.delete(catId);
-      else next.add(catId);
-      return next;
-    });
-  };
-
-  // Spec V1: Per-service staff selection handlers
-  const handleSelectAnyForService = (categoryId: string) => {
-    dispatch({ type: 'SELECT_STAFF_FOR_SERVICE', categoryId, staff: null, staffType: 'any' });
-  };
-
-  const handleSelectStaffForService = (categoryId: string, staff: Staff) => {
-    dispatch({ type: 'SELECT_STAFF_FOR_SERVICE', categoryId, staff, staffType: 'specific' });
-  };
 
   // Legacy global handlers (kept for backward compat)
   const handleSelectAny = () => {
@@ -307,9 +283,64 @@ export default function StaffSelectionPage() {
   const isStaffSelected = (staffId: string) =>
     state.selectedStaffType === 'specific' && state.selectedStaff?.id === staffId;
 
-  // Helper to check if a staff has any overlapping booking
-  const checkStaffOverlap = useCallback((staffId: string, dateStr: string, slotStartMins: number, durationMins: number): boolean => {
+  // Helper to check if a staff is on leave/absence for a given date+time
+  const checkStaffAbsence = useCallback((staffId: string, dateStr: string, slotStartMins: number, durationMins: number): boolean => {
+    const absences = staffAbsences[staffId];
+    if (!absences || absences.length === 0) return false;
+
     const slotEndMins = slotStartMins + durationMins;
+
+    return absences.some(abs => {
+      if (abs.absenceDate !== dateStr) return false;
+      if (abs.isFullDay) return true; // Full day leave = always blocked
+
+      // Partial day leave — check time overlap
+      if (abs.startTime && abs.endTime) {
+        const [sh, sm] = abs.startTime.split(':').map(Number);
+        const [eh, em] = abs.endTime.split(':').map(Number);
+        const absStart = sh * 60 + sm;
+        const absEnd = eh * 60 + em;
+        return slotStartMins < absEnd && slotEndMins > absStart;
+      }
+      return false;
+    });
+  }, [staffAbsences]);
+
+  // Helper to check if a staff has any overlapping booking OR is on leave
+  const checkStaffOverlap = useCallback((staffId: string, dateStr: string, slotStartMins: number, durationMins: number): boolean => {
+    // 1. Check working hours first
+    const dateObj = new Date(dateStr + 'T00:00:00');
+    const dayOfWeek = (dateObj.getDay() + 6) % 7; // Mon = 0, Sun = 6
+    const hoursList = staffWorkingHours[staffId] || [];
+    const schedule = hoursList.find(h => h.dayOfWeek === dayOfWeek);
+    
+    let isWorking = false;
+    let workStart = 9 * 60;
+    let workEnd = (dayOfWeek === 5 ? 16 : 18) * 60; // defaults
+
+    if (schedule) {
+      if (!schedule.isWorking) return true; // not working = busy
+      isWorking = true;
+      const [sh, sm] = schedule.startTime.split(':').map(Number);
+      const [eh, em] = schedule.endTime.split(':').map(Number);
+      workStart = sh * 60 + sm;
+      workEnd = eh * 60 + em;
+    } else {
+      isWorking = dayOfWeek !== 6; // Closed on Sunday by default
+    }
+
+    const slotEndMins = slotStartMins + durationMins;
+
+    if (!isWorking || slotStartMins < workStart || slotEndMins > workEnd) {
+      return true; // outside working hours = busy
+    }
+
+    // 2. Check absences (most important override)
+    if (checkStaffAbsence(staffId, dateStr, slotStartMins, durationMins)) {
+      return true; // Staff is on leave
+    }
+
+    // 3. Check booking overlaps
     
     return realBookings.some(booking => {
       if (booking.appointmentDate !== dateStr) return false;
@@ -324,7 +355,7 @@ export default function StaffSelectionPage() {
       // Overlap formula: slotStart < bookingEnd && slotEnd > bookingStart
       return slotStartMins < endVal && slotEndMins > startVal;
     });
-  }, [realBookings]);
+  }, [realBookings, checkStaffAbsence, staffWorkingHours]);
 
   // ── 7-Day Time Table Logic (Spec V1: 2-segment availability) ──
   const getSlotsForDate = useCallback((dateStr: string) => {
@@ -337,12 +368,15 @@ export default function StaffSelectionPage() {
     const endHour = dayOfWeek === 5 ? 16 : 18; // Saturday closes at 16:00
 
     // Spec V1: Each service segment has its own duration & staff
-    const segments = state.selectedServices.map(item => ({
-      duration: item.mainService.durationMinutes || 30,
-      staffId: item.selectedStaffType === 'specific' ? item.selectedStaff?.id : undefined,
-      staffType: item.selectedStaffType,
-      serviceId: item.mainService.id,
-    }));
+    const segments = state.selectedServices.map(item => {
+      const extraDuration = item.extras ? item.extras.reduce((sum, e) => sum + (e.durationMinutes || 0), 0) : 0;
+      return {
+        duration: (item.mainService.durationMinutes || 30) + extraDuration,
+        staffId: item.selectedStaffType === 'specific' ? item.selectedStaff?.id : undefined,
+        staffType: item.selectedStaffType,
+        serviceId: item.mainService.id,
+      };
+    });
 
     // Fallback: If no services selected, use total duration with legacy staff
     const totalDuration = totals.totalDuration || 30;
@@ -526,342 +560,9 @@ export default function StaffSelectionPage() {
 
   return (
     <div className={styles.page}>
-      <h1 className={styles.pageTitle}>{t.booking.staff.title} & {t.booking.dateTime.title}</h1>
+      <h1 className={styles.pageTitle}>{t.booking.dateTime.title}</h1>
 
-      {/* 📦 SECTION 1: Selected Services & Accordion Adder */}
-      <section className={styles.sectionCard}>
-        <h2 className={styles.sectionTitle}>1. {t.booking.services.summary.services}</h2>
-        
-        {state.selectedServices.length === 0 ? (
-          <div className={styles.emptyServices}>
-            <p>{t.booking.services.summary.selectService}</p>
-          </div>
-        ) : (
-          <div className={styles.selectedServicesList}>
-            {state.selectedServices.map((item) => (
-              <div key={item.categoryId} className={styles.selectedServiceItem}>
-                <div className={styles.selectedServiceHeader}>
-                  <div className={styles.selectedServiceHeaderInfo}>
-                    <span className={styles.categoryLabel}>{item.categoryName}</span>
-                    <h4 className={styles.selectedServiceName}>
-                      {getServiceName(item.mainService.id, item.mainService.name)}
-                    </h4>
-                  </div>
-                  <div className={styles.selectedServiceActions}>
-                    <span className={styles.selectedServicePrice}>€{item.mainService.price}</span>
-                    <button
-                      className={styles.removeServiceButton}
-                      onClick={() => dispatch({ type: 'REMOVE_CATEGORY', categoryId: item.categoryId })}
-                      aria-label="Remove category"
-                    >
-                      ×
-                    </button>
-                  </div>
-                </div>
-
-                <div className={styles.selectedServiceMeta}>
-                  <span className={styles.selectedServiceDuration}>
-                    {t.booking.services.item.duration.replace('{duration}', String(item.mainService.durationMinutes))}
-                  </span>
-                </div>
-
-                {/* Extras/Addons within this selected service */}
-                {services.filter(s => s.categoryId === item.categoryId && s.isAddon).length > 0 && (
-                  <div className={styles.extraOptions}>
-                    <span className={styles.extrasTitle}>Extras:</span>
-                    <div className={styles.extrasGrid}>
-                      {services
-                        .filter(s => s.categoryId === item.categoryId && s.isAddon)
-                        .map(extra => {
-                          const isSelected = item.extras.some(e => e.id === extra.id);
-                          return (
-                            <button
-                              key={extra.id}
-                              className={`${styles.extraOptionItem} ${isSelected ? styles.extraOptionItemSelected : ''}`}
-                              onClick={() => handleToggleExtra(item.categoryId, extra)}
-                            >
-                              <span className={styles.extraCheck}>{isSelected ? '✓' : '+'}</span>
-                              <span className={styles.extraName}>{getServiceName(extra.id, extra.name)}</span>
-                              <span className={styles.extraPrice}>(+€{extra.price})</span>
-                            </button>
-                          );
-                        })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Planity style black pill button */}
-        <div className={styles.serviceAdderWrapper}>
-          <button
-            className={styles.addServiceBtn}
-            onClick={() => setShowAddService(!showAddService)}
-          >
-            {showAddService
-              ? (locale === 'de' ? '✕ Dienstleistungen schließen' : locale === 'vi' ? '✕ Đóng danh mục dịch vụ' : '✕ Close services list')
-              : (locale === 'de' ? '+ Service hinzufügen' : locale === 'vi' ? '+ Thêm dịch vụ khác' : '+ Add another service')}
-          </button>
-
-          {showAddService && (
-            <div className={styles.collapsedServiceList}>
-              <div className={styles.searchWrapper}>
-                <span className={styles.searchIcon}>🔍</span>
-                <input
-                  type="text"
-                  className={styles.searchInput}
-                  placeholder={t.booking.services.searchPlaceholder}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              </div>
-
-              <div className={styles.categories}>
-                {categoriesWithServices.map((category) => {
-                  const isExpanded = expandedCategories.has(category.id);
-                  const disableReason = getCategoryDisableReason(category);
-                  const isDisabled = disableReason !== null;
-                  const hasMain = state.selectedServices.some(s => s.categoryId === category.id);
-
-                  const mainServices = category.services.filter((s) => !s.isAddon);
-                  const extraServices = category.services.filter((s) => s.isAddon);
-
-                  const selectedLabel = locale === 'de' ? '✓ Ausgewählt' : locale === 'vi' ? '✓ Đang chọn' : '✓ Selected';
-                  const maxBadgeLabel = locale === 'de' ? `Max ${MAX_MAIN_SERVICES} Kategorien` : locale === 'vi' ? `Tối đa ${MAX_MAIN_SERVICES} nhóm` : `Max ${MAX_MAIN_SERVICES} categories`;
-                  const conflictLabel = locale === 'de' 
-                    ? `⚠ Konflikt mit ${getConflictGroupLabel(category)}` 
-                    : locale === 'vi' 
-                    ? `⚠ Trùng lặp với ${getConflictGroupLabel(category)}` 
-                    : `⚠ Conflict with ${getConflictGroupLabel(category)}`;
-
-                  return (
-                    <div
-                      key={category.id}
-                      className={`${styles.categoryCard} ${isDisabled ? styles.categoryDisabled : ''} ${hasMain ? styles.categoryCardSelected : ''}`}
-                    >
-                      <div
-                        className={styles.categoryHeader}
-                        onClick={() => !isDisabled && toggleCategory(category.id)}
-                      >
-                        <div className={styles.categoryInfo}>
-                          <span className={styles.categoryName}>
-                            {getCategoryName(category.id, category.name)}
-                          </span>
-                          <span className={styles.categoryDescription}>
-                            {getCategoryDescription(category.id, category.description)}
-                          </span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {hasMain && (
-                            <span className={styles.categoryBadge}>
-                              {selectedLabel}
-                            </span>
-                          )}
-                          {disableReason === 'conflict' && (
-                            <span className={styles.categoryConflictBadge}>
-                              {conflictLabel}
-                            </span>
-                          )}
-                          {disableReason === 'max' && (
-                            <span className={styles.categoryMaxBadge}>
-                              {maxBadgeLabel}
-                            </span>
-                          )}
-                          <span className={`${styles.chevron} ${isExpanded ? styles.chevronOpen : ''}`}>
-                            ▾
-                          </span>
-                        </div>
-                      </div>
-
-                      {isExpanded && (
-                        <div className={styles.serviceList}>
-                          {/* Main services */}
-                          {mainServices.map((service) => {
-                            const selected = isMainSelected(category.id, service.id);
-
-                            return (
-                              <div key={service.id} className={styles.serviceItem}>
-                                <div className={styles.serviceDetails}>
-                                  <div className={styles.serviceName}>
-                                    {getServiceName(service.id, service.name)}
-                                  </div>
-                                  <div className={styles.serviceDescription}>
-                                    {getServiceDescription(service.id, service.description)}
-                                  </div>
-                                  <div className={styles.serviceMeta}>
-                                    <span className={styles.serviceDuration}>
-                                      {t.booking.services.item.duration.replace(
-                                        '{duration}',
-                                        String(service.durationMinutes)
-                                      )}
-                                    </span>
-                                    <span className={styles.metaDot} />
-                                    <span className={styles.servicePrice}>
-                                      €{service.price}
-                                    </span>
-                                  </div>
-                                </div>
-                                <button
-                                  className={`${styles.selectButton} ${
-                                    selected ? styles.selectedButton : ''
-                                  }`}
-                                  onClick={() => handleSelectMain(category, service)}
-                                >
-                                  {selected
-                                    ? t.booking.services.item.selected
-                                    : t.booking.services.item.add}
-                                </button>
-                              </div>
-                            );
-                          })}
-
-                          {/* Extra services (addons) */}
-                          {extraServices.map((service) => {
-                            const selected = state.selectedServices
-                              .find((s) => s.categoryId === category.id)
-                              ?.extras.some((e) => e.id === service.id) ?? false;
-                            const addonDisabled = !hasMain;
-
-                            return (
-                              <div
-                                key={service.id}
-                                className={`${styles.serviceItem} ${addonDisabled ? styles.addonDisabled : ''}`}
-                              >
-                                <div className={styles.serviceDetails}>
-                                  <div className={styles.serviceName}>
-                                    {getServiceName(service.id, service.name)}
-                                  </div>
-                                  <div className={styles.serviceDescription}>
-                                    {getServiceDescription(service.id, service.description)}
-                                  </div>
-                                  <div className={styles.serviceMeta}>
-                                    <span className={styles.serviceDuration}>
-                                      +{t.booking.services.item.duration.replace(
-                                        '{duration}',
-                                        String(service.durationMinutes)
-                                      )}
-                                    </span>
-                                    <span className={styles.metaDot} />
-                                    <span className={styles.servicePrice}>
-                                      €{service.price}
-                                    </span>
-                                  </div>
-                                </div>
-                                <button
-                                  className={`${styles.extraButton} ${
-                                    selected ? styles.extraButtonSelected : ''
-                                  }`}
-                                  disabled={addonDisabled}
-                                  onClick={() => handleToggleExtra(category.id, service)}
-                                >
-                                  {selected ? '✓ Extra' : t.booking.services.item.add}
-                                </button>
-                              </div>
-                            );
-                          })}
-
-                          {/* Spec V1: Add-on note */}
-                          {extraServices.length > 0 && (
-                            <div className={styles.addonNote}>
-                              <span className={styles.addonNoteIcon}>ℹ️</span>
-                              <span>{t.booking.services.addonNote}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* 👤 SECTION 2: Per-Service Staff Selection (Spec V1) */}
-      {!skipStaffSelection && state.selectedServices.length > 0 && (
-        <section className={styles.sectionCard}>
-          <h2 className={styles.sectionTitle}>
-            {locale === 'de' ? '2. Mitarbeiter auswählen' : locale === 'vi' ? '2. Chọn nhân viên' : '2. Choose your professional'}
-          </h2>
-          
-          {state.selectedServices.map((item) => {
-            const serviceStaffList = staffList.filter(
-              (s) => s.status === 'active' && (s.serviceIds || []).includes(item.mainService.id)
-            );
-            const isItemAnySelected = item.selectedStaffType === 'any' && !item.selectedStaff;
-            const isItemStaffSelected = (staffId: string) =>
-              item.selectedStaffType === 'specific' && item.selectedStaff?.id === staffId;
-
-            return (
-              <div key={item.categoryId} className={styles.perServiceStaffBlock}>
-                <div className={styles.perServiceStaffLabel}>
-                  <span className={styles.perServiceStaffServiceName}>
-                    {getServiceName(item.mainService.id, item.mainService.name)}
-                  </span>
-                  <span className={styles.perServiceStaffDuration}>
-                    {item.mainService.durationMinutes} {locale === 'de' ? 'Min' : locale === 'vi' ? 'phút' : 'min'}
-                  </span>
-                </div>
-
-                <div className={styles.staffGrid}>
-                  {/* Any staff option */}
-                  <div
-                    className={`${styles.staffCard} ${isItemAnySelected ? styles.staffCardSelected : ''}`}
-                    onClick={() => handleSelectAnyForService(item.categoryId)}
-                  >
-                    <div className={styles.staffCardLeft}>
-                      <div className={styles.anyStaffIcon}>👥</div>
-                      <div className={styles.staffCardInfo}>
-                        <div className={styles.staffCardName}>{localLabels.noPreference}</div>
-                      </div>
-                    </div>
-                    <div className={styles.radioWrapper}>
-                      <div className={`${styles.radioCircle} ${isItemAnySelected ? styles.radioCircleChecked : ''}`}>
-                        {isItemAnySelected && <div className={styles.radioInnerDot} />}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Individual staff for this service */}
-                  {serviceStaffList.map((staff) => {
-                    const selected = isItemStaffSelected(staff.id);
-                    return (
-                      <div
-                        key={staff.id}
-                        className={`${styles.staffCard} ${selected ? styles.staffCardSelected : ''}`}
-                        onClick={() => handleSelectStaffForService(item.categoryId, staff)}
-                      >
-                        <div className={styles.staffCardLeft}>
-                          <div className={styles.staffAvatarCircle}>{staff.initials}</div>
-                          <div className={styles.staffCardInfo}>
-                            <div className={styles.staffCardName}>{staff.name}</div>
-                            {staff.rating && (
-                              <div className={styles.ratingInline}>
-                                <span className={styles.ratingStar}>★</span>
-                                {staff.rating}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                        <div className={styles.radioWrapper}>
-                          <div className={`${styles.radioCircle} ${selected ? styles.radioCircleChecked : ''}`}>
-                            {selected && <div className={styles.radioInnerDot} />}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </section>
-      )}
-
-      {/* 📅 SECTION 3: Date & Time Calendar & Time Grid (Planity Style 2.png) */}
+      {/* 📅 Date & Time Calendar & Time Grid */}
       <section className={styles.sectionCard}>
         <div className={styles.dateTimeHeader}>
           <h2 className={styles.sectionTitle}>{localLabels.chooseTime}</h2>

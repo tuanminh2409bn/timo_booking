@@ -4,24 +4,25 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
-import { hasConflict, MAX_MAIN_SERVICES } from '@/lib/types';
+import { hasConflict, MAX_MAIN_SERVICES, shouldSkipStaffSelection } from '@/lib/types';
 import { useRouter } from 'next/navigation';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
-import type { Service, ServiceCategory } from '@/lib/types';
+import type { Service, ServiceCategory, Staff } from '@/lib/types';
 import styles from './page.module.css';
 
 
 export default function ServiceSelectionPage() {
   const router = useRouter();
 
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { getCategoryName, getCategoryDescription, getServiceName, getServiceDescription } = useServiceTranslation();
   const { state, dispatch } = useBooking();
   const branchSlug = state.branchSlug;
   
   const [categories, setCategories] = useState<ServiceCategory[]>([]);
   const [services, setServices] = useState<Service[]>([]);
+  const [staffList, setStaffList] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
@@ -65,6 +66,46 @@ export default function ServiceSelectionPage() {
     });
     return () => unsubscribe();
   }, [branchSlug]);
+
+  // Fetch staff from Firestore
+  useEffect(() => {
+    if (!branchSlug) return;
+    const fetchStaff = async () => {
+      try {
+        const staffSnap = await getDocs(collection(db, 'branches', branchSlug, 'staff'));
+        if (!staffSnap.empty) {
+          setStaffList(staffSnap.docs.map(doc => doc.data() as Staff));
+        }
+      } catch (e) {
+        console.error('Error fetching staff:', e);
+      }
+    };
+    fetchStaff();
+  }, [branchSlug]);
+
+  // ── Localized labels ──
+  const localLabels = useMemo(() => ({
+    noPreference: {
+      de: 'Beliebiger Mitarbeiter',
+      en: 'No preference',
+      vi: 'Bất kỳ ai',
+    }[locale] || 'No preference',
+    chooseStaff: {
+      de: 'Mitarbeiter auswählen:',
+      en: 'Choose professional:',
+      vi: 'Chọn thợ:',
+    }[locale] || 'Choose professional:',
+    continueBtn: {
+      de: 'Weiter zur Terminauswahl',
+      en: 'Continue to date & time',
+      vi: 'Tiếp tục chọn ngày & giờ',
+    }[locale] || 'Continue to date & time',
+    selectStaffFirst: {
+      de: 'Bitte wählen Sie einen Mitarbeiter',
+      en: 'Please select a staff member',
+      vi: 'Vui lòng chọn thợ cho dịch vụ',
+    }[locale] || 'Please select a staff member',
+  }), [locale]);
 
   // ── Filter services by search query ──
   const filteredServices = useMemo(() => {
@@ -159,20 +200,68 @@ export default function ServiceSelectionPage() {
     });
   };
 
-  // ── Handle selecting a main service ──
+  // ── Handle selecting a main service (NO NAVIGATION) ──
   const handleSelectMain = (category: ServiceCategory, service: Service) => {
     // If this service is already the main service, remove the entire category
     if (isMainSelected(category.id, service.id)) {
       dispatch({ type: 'REMOVE_CATEGORY', categoryId: category.id });
     } else {
       dispatch({ type: 'ADD_MAIN_SERVICE', category, service });
-      router.push(`/book/${branchSlug}/staff`);
+      // DO NOT navigate — stay on page, show staff picker inline
     }
   };
 
   // ── Handle toggling an extra/addon ──
   const handleToggleExtra = (categoryId: string, extra: Service) => {
     dispatch({ type: 'TOGGLE_EXTRA', categoryId, extra });
+  };
+
+  // ── Per-service staff selection handlers ──
+  const handleSelectAnyForService = (categoryId: string) => {
+    dispatch({ type: 'SELECT_STAFF_FOR_SERVICE', categoryId, staff: null, staffType: 'any' });
+  };
+
+  const handleSelectStaffForService = (categoryId: string, staff: Staff) => {
+    dispatch({ type: 'SELECT_STAFF_FOR_SERVICE', categoryId, staff, staffType: 'specific' });
+  };
+
+  // ── Get staff eligible for a specific service ──
+  const getStaffForService = useCallback((serviceId: string): Staff[] => {
+    // Find service data to check staffType
+    const service = services.find(s => s.id === serviceId);
+    const svcStaffType = (service as any)?.staffType || 'any';
+    
+    return staffList.filter(
+      (s) => {
+        if (s.status !== 'active') return false;
+        if (!(s.serviceIds || []).includes(serviceId)) return false;
+        // Filter by service's required staff type
+        if (svcStaffType === 'main' && s.staffType !== 'main') return false;
+        if (svcStaffType === 'junior' && s.staffType !== 'junior') return false;
+        return true;
+      }
+    );
+  }, [staffList, services]);
+
+  // ── Check if skip staff selection (auto-assign categories like Pediküre) ──
+  const skipStaffSelection = useMemo(() => {
+    return shouldSkipStaffSelection(state.selectedServices, categories);
+  }, [state.selectedServices, categories]);
+
+  // ── Check if can continue ──
+  const canContinue = useMemo(() => {
+    if (state.selectedServices.length === 0) return false;
+    if (skipStaffSelection) return true;
+    // Every service must have staff selected (either 'any' or specific)
+    return state.selectedServices.every(item => 
+      item.selectedStaffType === 'any' || item.selectedStaff !== null
+    );
+  }, [state.selectedServices, skipStaffSelection]);
+
+  // ── Handle continue ──
+  const handleContinue = () => {
+    if (!canContinue) return;
+    router.push(`/book/${branchSlug}/staff`);
   };
 
   // ── Build the badge text for a category ──
@@ -221,6 +310,7 @@ export default function ServiceSelectionPage() {
             const isDisabled = disableReason !== null;
             const badgeText = getCategoryBadgeText(category.id);
             const hasMain = categoryHasMainSelected(category.id);
+            const selectedItem = getSelectedItem(category.id);
 
             // Split services: main services (non-addon) and extras (addon)
             const mainServices = category.services.filter((s) => !s.isAddon);
@@ -269,37 +359,95 @@ export default function ServiceSelectionPage() {
                       const selected = isMainSelected(category.id, service.id);
 
                       return (
-                        <div key={service.id} className={styles.serviceItem}>
-                          <div className={styles.serviceDetails}>
-                            <div className={styles.serviceName}>
-                              {getServiceName(service.id, service.name)}
+                        <div key={service.id}>
+                          <div className={styles.serviceItem}>
+                            <div className={styles.serviceDetails}>
+                              <div className={styles.serviceName}>
+                                {getServiceName(service.id, service.name)}
+                              </div>
+                              <div className={styles.serviceDescription}>
+                                {getServiceDescription(service.id, service.description)}
+                              </div>
+                              <div className={styles.serviceMeta}>
+                                <span className={styles.serviceDuration}>
+                                  {t.booking.services.item.duration.replace(
+                                    '{duration}',
+                                    String(service.durationMinutes)
+                                  )}
+                                </span>
+                                <span className={styles.metaDot} />
+                                <span className={styles.servicePrice}>
+                                  €{service.price}
+                                </span>
+                              </div>
                             </div>
-                            <div className={styles.serviceDescription}>
-                              {getServiceDescription(service.id, service.description)}
-                            </div>
-                            <div className={styles.serviceMeta}>
-                              <span className={styles.serviceDuration}>
-                                {t.booking.services.item.duration.replace(
-                                  '{duration}',
-                                  String(service.durationMinutes)
-                                )}
-                              </span>
-                              <span className={styles.metaDot} />
-                              <span className={styles.servicePrice}>
-                                €{service.price}
-                              </span>
-                            </div>
+                            <button
+                              className={`${styles.selectButton} ${
+                                selected ? styles.selectedButton : ''
+                              }`}
+                              onClick={() => handleSelectMain(category, service)}
+                            >
+                              {selected
+                                ? t.booking.services.item.selected
+                                : t.booking.services.item.add}
+                            </button>
                           </div>
-                          <button
-                            className={`${styles.selectButton} ${
-                              selected ? styles.selectedButton : ''
-                            }`}
-                            onClick={() => handleSelectMain(category, service)}
-                          >
-                            {selected
-                              ? t.booking.services.item.selected
-                              : t.booking.services.item.add}
-                          </button>
+
+                          {/* ── Inline Staff Picker (only for selected service) ── */}
+                          {selected && !skipStaffSelection && (
+                            <div className={styles.inlineStaffPicker}>
+                              <div className={styles.staffPickerLabel}>
+                                {localLabels.chooseStaff}
+                              </div>
+                              <div className={styles.staffPickerGrid}>
+                                {/* "Any staff" option */}
+                                <div
+                                  className={`${styles.staffPickerCard} ${
+                                    selectedItem?.selectedStaffType === 'any' && !selectedItem?.selectedStaff
+                                      ? styles.staffPickerCardSelected
+                                      : ''
+                                  }`}
+                                  onClick={() => handleSelectAnyForService(category.id)}
+                                >
+                                  <div className={styles.staffPickerAvatar}>
+                                    <span>👥</span>
+                                  </div>
+                                  <div className={styles.staffPickerName}>
+                                    {localLabels.noPreference}
+                                  </div>
+                                </div>
+
+                                {/* Individual staff cards */}
+                                {getStaffForService(service.id).map((staff) => {
+                                  const isStaffChosen = 
+                                    selectedItem?.selectedStaffType === 'specific' && 
+                                    selectedItem?.selectedStaff?.id === staff.id;
+                                  
+                                  return (
+                                    <div
+                                      key={staff.id}
+                                      className={`${styles.staffPickerCard} ${
+                                        isStaffChosen ? styles.staffPickerCardSelected : ''
+                                      }`}
+                                      onClick={() => handleSelectStaffForService(category.id, staff)}
+                                    >
+                                      <div className={styles.staffPickerAvatar}>
+                                        <span>{staff.initials}</span>
+                                      </div>
+                                      <div className={styles.staffPickerName}>
+                                        {staff.name}
+                                      </div>
+                                      {staff.staffType && (
+                                        <div className={styles.staffPickerBadge}>
+                                          {staff.staffType === 'main' ? '⭐' : '🔹'}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -356,6 +504,29 @@ export default function ServiceSelectionPage() {
         <div className={styles.noResults}>
           <div className={styles.noResultsIcon}>💅</div>
           <p className={styles.noResultsText}>No services found</p>
+        </div>
+      )}
+
+      {/* ── Floating Continue Button ── */}
+      {state.selectedServices.length > 0 && (
+        <div className={styles.floatingFooter}>
+          <div className={styles.floatingFooterInner}>
+            <div className={styles.footerSummary}>
+              <span className={styles.footerServiceCount}>
+                {state.selectedServices.length} {
+                  locale === 'de' ? 'Dienst(e)' : locale === 'vi' ? 'dịch vụ' : 'service(s)'
+                }
+              </span>
+            </div>
+            <button
+              className={`${styles.continueButton} ${!canContinue ? styles.continueButtonDisabled : ''}`}
+              onClick={handleContinue}
+              disabled={!canContinue}
+            >
+              {canContinue ? localLabels.continueBtn : localLabels.selectStaffFirst}
+              {canContinue && <span className={styles.continueArrow}>→</span>}
+            </button>
+          </div>
         </div>
       )}
     </div>

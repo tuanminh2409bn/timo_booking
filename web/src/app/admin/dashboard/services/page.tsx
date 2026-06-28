@@ -66,6 +66,7 @@ interface ServiceData {
   type: 'standard' | 'addon';
   isAddon?: boolean;
   staffType?: 'main' | 'junior' | 'any';
+  staffPriority?: 'assistant_staff' | 'main_staff' | 'conditional_assistant' | 'none';
   branchId: string;
   businessId?: string;
   hasAppointments: boolean;
@@ -245,6 +246,7 @@ export default function ServicesManagementPage() {
   const [svcIsActive, setSvcIsActive] = useState(true);
   const [svcType, setSvcType] = useState<'standard' | 'addon'>('standard');
   const [svcStaffType, setSvcStaffType] = useState<'main' | 'junior' | 'any'>('any');
+  const [svcStaffPriority, setSvcStaffPriority] = useState<'assistant_staff' | 'main_staff' | 'conditional_assistant' | 'none'>('none');
 
   const branchId = user?.assignedBranches?.[0] || '';
   const ts = t.admin.services;
@@ -359,6 +361,7 @@ export default function ServicesManagementPage() {
     setSvcIsActive(true);
     setSvcType('standard');
     setSvcStaffType('any');
+    setSvcStaffPriority('none');
   };
 
   // ===== Open Add Category modal =====
@@ -504,6 +507,7 @@ export default function ServicesManagementPage() {
     setSvcIsActive(svc.isActive);
     setSvcType(svc.type);
     setSvcStaffType(svc.staffType || 'any');
+    setSvcStaffPriority(svc.staffPriority || 'none');
     setModalMode('editService');
   };
 
@@ -533,6 +537,7 @@ export default function ServicesManagementPage() {
         type: svcType,
         isAddon: svcType === 'addon',
         staffType: svcStaffType,
+        staffPriority: svcStaffPriority,
         branchId,
         businessId: user?.businessId || '',
       };
@@ -1176,6 +1181,26 @@ export default function ServicesManagementPage() {
                       >
                         <option value="standard">{ts.standard}</option>
                         <option value="addon">{ts.addon}</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Staff Priority (Spec V1) */}
+                  <div className={styles.formRow}>
+                    <div className={styles.formGroup}>
+                      <label className={styles.formLabel}>
+                        {locale === 'vi' ? 'Ưu tiên thợ' : locale === 'de' ? 'Mitarbeiter-Priorität' : 'Staff Priority'}
+                      </label>
+                      <select
+                        className={styles.formSelectOnly}
+                        value={svcStaffPriority}
+                        onChange={(e) => setSvcStaffPriority(e.target.value as any)}
+                        disabled={saving}
+                      >
+                        <option value="none">{locale === 'vi' ? 'Không ưu tiên' : locale === 'de' ? 'Keine Priorität' : 'No priority'}</option>
+                        <option value="assistant_staff">{locale === 'vi' ? '⭐ Thợ phụ ưu tiên' : locale === 'de' ? '⭐ Hilfskraft bevorzugt' : '⭐ Junior preferred'}</option>
+                        <option value="conditional_assistant">{locale === 'vi' ? '🔄 Thợ phụ (nếu quen tay)' : locale === 'de' ? '🔄 Hilfskraft (wenn erfahren)' : '🔄 Junior (if experienced)'}</option>
+                        <option value="main_staff">{locale === 'vi' ? '🔒 Chỉ thợ chính' : locale === 'de' ? '🔒 Nur Hauptmitarbeiter' : '🔒 Main staff only'}</option>
                       </select>
                     </div>
                   </div>

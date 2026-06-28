@@ -47,7 +47,7 @@ export interface Service {
   isAddon?: boolean;                             // +duration addon like "Design / Extra"
   conflictGroup?: 'gel' | 'acryl';               // inherited from category
   staffType?: 'main' | 'junior' | 'any';         // which staff type can do this
-  staffPriority?: 'assistant_staff' | 'main_staff' | 'none'; // Spec V1: priority rule for auto-assign
+  staffPriority?: 'assistant_staff' | 'main_staff' | 'conditional_assistant' | 'none'; // Spec V1: priority rule for auto-assign
   createdAt: string;
 }
 

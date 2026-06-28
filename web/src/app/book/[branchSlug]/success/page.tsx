@@ -10,7 +10,7 @@ import styles from './page.module.css';
 
 export default function SuccessPage() {
   const { t } = useI18n();
-  const { getServiceName } = useServiceTranslation();
+  const { getCategoryName, getServiceName } = useServiceTranslation();
   const { state, dispatch, totals } = useBooking();
   const router = useRouter();
   const branchSlug = state.branchSlug;
@@ -126,29 +126,77 @@ export default function SuccessPage() {
             : t.booking.success.subtitle}
         </p>
 
-        {/* Details */}
+        {/* Details — services with category + name + staff + time */}
         <div className={styles.detailsCard}>
+          {/* Service blocks */}
+          {state.selectedServices.map((item, idx) => {
+            const svcDuration = item.mainService.durationMinutes
+              + item.extras.reduce((sum, e) => sum + e.durationMinutes, 0);
+            const staffLabel = item.selectedStaffType === 'any'
+              ? t.booking.staff.anyStaff.title
+              : item.selectedStaff?.name || '—';
+
+            // Calculate sequential time for this service
+            let segStartMin = 0;
+            if (state.selectedTime) {
+              const [h, m] = state.selectedTime.split(':').map(Number);
+              segStartMin = h * 60 + m;
+              for (let j = 0; j < idx; j++) {
+                segStartMin += state.selectedServices[j].mainService.durationMinutes
+                  + state.selectedServices[j].extras.reduce((sum, e) => sum + e.durationMinutes, 0);
+              }
+            }
+            const segEndMin = segStartMin + svcDuration;
+            const segStartStr = state.selectedTime
+              ? `${Math.floor(segStartMin / 60).toString().padStart(2, '0')}:${(segStartMin % 60).toString().padStart(2, '0')}`
+              : '';
+            const segEndStr = state.selectedTime
+              ? `${Math.floor(segEndMin / 60).toString().padStart(2, '0')}:${(segEndMin % 60).toString().padStart(2, '0')}`
+              : '';
+
+            return (
+              <div key={item.categoryId} className={styles.serviceBlock}>
+                {state.selectedServices.length > 1 && (
+                  <span className={styles.serviceBadge}>{idx + 1}</span>
+                )}
+                <div className={styles.serviceBlockContent}>
+                  <span className={styles.serviceCategoryLabel}>
+                    {getCategoryName(item.categoryId, item.categoryName)}
+                  </span>
+                  <span className={styles.serviceNameLabel}>
+                    {getServiceName(item.mainService.id, item.mainService.name)}
+                  </span>
+                  {item.extras.length > 0 && (
+                    <span className={styles.serviceExtrasLabel}>
+                      + {item.extras.map(e => getServiceName(e.id, e.name)).join(', ')}
+                    </span>
+                  )}
+                  <div className={styles.serviceMetaRow}>
+                    <span className={styles.serviceMetaChip}>🕐 {svcDuration} {t.common.minutes}</span>
+                    <span className={styles.serviceMetaChip}>👤 {staffLabel}</span>
+                    {state.selectedTime && (
+                      <span className={styles.serviceMetaChip}>⏰ {segStartStr} – {segEndStr}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Date & Location */}
           <div className={styles.detailRow}>
-            <span className={styles.detailLabel}>{t.booking.success.details.service}</span>
-            <span className={styles.detailValue}>{serviceDisplayText}</span>
-          </div>
-          <div className={styles.detailRow}>
-            <span className={styles.detailLabel}>{t.booking.success.details.when}</span>
+            <span className={styles.detailLabel}>📅 {t.booking.dateTime.summary.date}</span>
             <span className={styles.detailValue}>
-              {state.selectedDate ? `${formatDate(state.selectedDate)} · ${state.selectedTime}` : '—'}
+              {state.selectedDate ? formatDate(state.selectedDate) : '—'}
             </span>
           </div>
           <div className={styles.detailRow}>
-            <span className={styles.detailLabel}>{t.booking.success.details.professional}</span>
-            <span className={styles.detailValue}>
-              {state.selectedStaffType === 'any'
-                ? t.booking.staff.anyStaff.title
-                : state.selectedStaff?.name || '—'}
-            </span>
+            <span className={styles.detailLabel}>📍 {t.booking.success.details.where}</span>
+            <span className={styles.detailValue}>{state.branch?.name || demoBranch.name}</span>
           </div>
           <div className={styles.detailRow}>
-            <span className={styles.detailLabel}>{t.booking.success.details.where}</span>
-            <span className={styles.detailValue}>{demoBranch.name}</span>
+            <span className={styles.detailLabel}>⏱ {t.booking.services.summary.duration}</span>
+            <span className={styles.detailValue}>{totals.totalDuration} {t.common.minutes}</span>
           </div>
         </div>
 

@@ -4,11 +4,11 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/authContext';
 import { useI18n } from '@/lib/i18n';
-import { collection, onSnapshot, doc, updateDoc, query, where } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, query, where, setDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/config';
 import { getGermanDateObject, getGermanTodayString } from '@/lib/timeUtils';
 import styles from './page.module.css';
-import { Search, List, Calendar, ChevronLeft, ChevronRight, X, Users, User, Clock, ChevronDown } from 'lucide-react';
+import { Search, List, Calendar, ChevronLeft, ChevronRight, X, Users, User, Clock, ChevronDown, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/admin/ui/button';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 
@@ -188,7 +188,8 @@ export default function BookingsManagementPage() {
   const { t, locale } = useI18n();
   const { getServiceName: translateService, getCategoryName: translateCategory } = useServiceTranslation();
   const [bookings, setBookings] = useState<FirestoreBooking[]>([]);
-  const [realStaffList, setRealStaffList] = useState<{ id: string; name: string; status: string }[]>([]);
+  const [realStaffList, setRealStaffList] = useState<{ id: string; name: string; status: string; serviceIds?: string[]; staffType?: string }[]>([]);
+  const [staffAbsences, setStaffAbsences] = useState<Record<string, any[]>>({});
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('calendar');
@@ -200,6 +201,19 @@ export default function BookingsManagementPage() {
     booking: FirestoreBooking; 
   } | null>(null);
   const [popoverAnchorEl, setPopoverAnchorEl] = useState<HTMLElement | null>(null);
+
+  // Walk-in booking modal state
+  const [showNewBookingModal, setShowNewBookingModal] = useState(false);
+  const [newBookingStaffId, setNewBookingStaffId] = useState('');
+  const [newBookingStaffName, setNewBookingStaffName] = useState('');
+  const [newBookingTime, setNewBookingTime] = useState('09:00');
+  const [newBookingCustomerName, setNewBookingCustomerName] = useState('');
+  const [newBookingCustomerPhone, setNewBookingCustomerPhone] = useState('');
+  const [newBookingNotes, setNewBookingNotes] = useState('');
+  const [newBookingServices, setNewBookingServices] = useState<{categoryId: string; categoryName: string; serviceId: string; serviceName: string; duration: number; price: number}[]>([]);
+  const [newBookingCreating, setNewBookingCreating] = useState(false);
+  const [allCategories, setAllCategories] = useState<any[]>([]);
+  const [allServices, setAllServices] = useState<any[]>([]);
 
   // Firestore real-time sync for Bookings
   useEffect(() => {
@@ -229,18 +243,59 @@ export default function BookingsManagementPage() {
     const staffRef = collection(db, 'branches', branchId, 'staff');
 
     const unsubscribe = onSnapshot(staffRef, (snap) => {
-      const list: { id: string; name: string; status: string }[] = [];
+      const list: { id: string; name: string; status: string; serviceIds?: string[]; staffType?: string }[] = [];
       snap.forEach(doc => {
         const data = doc.data();
         list.push({
           id: doc.id,
           name: data.name || '',
           status: data.status || 'active',
+          serviceIds: data.serviceIds || [],
+          staffType: data.staffType || 'main',
         });
       });
       setRealStaffList(list);
     }, (err) => console.error('Error fetching staff list:', err));
     return () => unsubscribe();
+  }, [user, activeBranch]);
+
+  // Real-time sync for staff absences — show leave blocks on calendar
+  useEffect(() => {
+    if (!user || realStaffList.length === 0) return;
+    const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
+    const unsubscribes: (() => void)[] = [];
+
+    for (const staff of realStaffList) {
+      if (staff.status !== 'active') continue;
+      const absRef = collection(db, 'branches', branchId, 'staff', staff.id, 'absences');
+      const unsub = onSnapshot(absRef, (snap) => {
+        const absList = snap.docs.map(d => d.data());
+        setStaffAbsences(prev => ({ ...prev, [staff.id]: absList }));
+      }, (e) => console.error(`Error listening absences for ${staff.id}:`, e));
+      unsubscribes.push(unsub);
+    }
+
+    return () => unsubscribes.forEach(u => u());
+  }, [user, activeBranch, realStaffList]);
+
+  // Fetch categories and services for walk-in booking
+  useEffect(() => {
+    if (!user || user.role === 'staff') return;
+    const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
+    
+    const unsubCats = onSnapshot(collection(db, 'branches', branchId, 'categories'), (snap) => {
+      const cats = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((c: any) => c.isActive !== false);
+      cats.sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0));
+      setAllCategories(cats);
+    });
+    
+    const unsubSvcs = onSnapshot(collection(db, 'branches', branchId, 'services'), (snap) => {
+      const svcs = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((s: any) => s.isActive !== false && s.type !== 'addon');
+      svcs.sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0));
+      setAllServices(svcs);
+    });
+    
+    return () => { unsubCats(); unsubSvcs(); };
   }, [user, activeBranch]);
 
   // Handlers
@@ -259,6 +314,76 @@ export default function BookingsManagementPage() {
   const handleReassignStaff = async (bookingId: string, staffId: string, staffName: string) => {
     if (!user) return;
     const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
+
+    // Find the booking being reassigned
+    const booking = bookings.find(b => b.id === bookingId);
+    if (!booking) return;
+
+    // 1. Check if staff is on leave on the booking date
+    const absences = staffAbsences[staffId] || [];
+    const dateAbsences = absences.filter((abs: any) => abs.absenceDate === booking.appointmentDate);
+    
+    if (dateAbsences.length > 0) {
+      for (const abs of dateAbsences) {
+        if (abs.isFullDay) {
+          const msg = locale === 'vi' 
+            ? `⚠️ ${staffName} đang nghỉ phép cả ngày ${booking.appointmentDate}. Không thể chuyển lịch sang thợ này.`
+            : locale === 'de'
+            ? `⚠️ ${staffName} hat am ${booking.appointmentDate} ganztägig frei. Zuweisung nicht möglich.`
+            : `⚠️ ${staffName} is on full-day leave on ${booking.appointmentDate}. Cannot reassign.`;
+          alert(msg);
+          return;
+        }
+        // Partial leave — check time overlap
+        if (abs.startTime && abs.endTime) {
+          const [absStartH, absStartM] = abs.startTime.split(':').map(Number);
+          const [absEndH, absEndM] = abs.endTime.split(':').map(Number);
+          const absStart = absStartH * 60 + absStartM;
+          const absEnd = absEndH * 60 + absEndM;
+
+          const [bStartH, bStartM] = booking.startTime.split(':').map(Number);
+          const bStart = bStartH * 60 + bStartM;
+          const bEnd = bStart + (booking.totalDurationMinutes || 30);
+
+          if (bStart < absEnd && bEnd > absStart) {
+            const msg = locale === 'vi'
+              ? `⚠️ ${staffName} đang nghỉ phép từ ${abs.startTime} đến ${abs.endTime} ngày ${booking.appointmentDate}. Lịch hẹn ${booking.startTime} bị trùng.`
+              : locale === 'de'
+              ? `⚠️ ${staffName} ist von ${abs.startTime} bis ${abs.endTime} am ${booking.appointmentDate} abwesend. Termin ${booking.startTime} kollidiert.`
+              : `⚠️ ${staffName} is on leave ${abs.startTime}-${abs.endTime} on ${booking.appointmentDate}. Booking at ${booking.startTime} conflicts.`;
+            alert(msg);
+            return;
+          }
+        }
+      }
+    }
+
+    // 2. Check if staff already has a booking at the same time
+    const conflictBooking = bookings.find(b => 
+      b.id !== bookingId &&
+      b.staffId === staffId &&
+      b.appointmentDate === booking.appointmentDate &&
+      b.status !== 'cancelled'
+    );
+    if (conflictBooking) {
+      const [cStartH, cStartM] = conflictBooking.startTime.split(':').map(Number);
+      const cStart = cStartH * 60 + cStartM;
+      const cEnd = cStart + (conflictBooking.totalDurationMinutes || 30);
+
+      const [bStartH, bStartM] = booking.startTime.split(':').map(Number);
+      const bStart = bStartH * 60 + bStartM;
+      const bEnd = bStart + (booking.totalDurationMinutes || 30);
+
+      if (bStart < cEnd && bEnd > cStart) {
+        const msg = locale === 'vi'
+          ? `⚠️ ${staffName} đã có lịch hẹn khác lúc ${conflictBooking.startTime} ngày ${booking.appointmentDate}. Bạn có muốn chuyển không?`
+          : locale === 'de'
+          ? `⚠️ ${staffName} hat bereits einen Termin um ${conflictBooking.startTime} am ${booking.appointmentDate}. Trotzdem zuweisen?`
+          : `⚠️ ${staffName} already has a booking at ${conflictBooking.startTime} on ${booking.appointmentDate}. Reassign anyway?`;
+        if (!confirm(msg)) return;
+      }
+    }
+
     try {
       await updateDoc(doc(db, 'branches', branchId, 'bookings', bookingId), {
         staffId,
@@ -417,6 +542,259 @@ export default function BookingsManagementPage() {
     }
   }, [t]);
 
+  // Walk-in booking: open modal with pre-filled staff + time
+  const openNewBookingModal = useCallback((staffId: string, staffName: string, timeStr: string) => {
+    // Block if staff is inactive
+    if (staffId) {
+      const staff = realStaffList.find(s => s.id === staffId);
+      if (staff && staff.status !== 'active') {
+        const msg = locale === 'vi' ? `⚠️ ${staffName} đang nghỉ việc, không thể đặt lịch.` 
+          : locale === 'de' ? `⚠️ ${staffName} ist inaktiv.` 
+          : `⚠️ ${staffName} is inactive.`;
+        alert(msg);
+        return;
+      }
+      // Block if staff is on leave at selected date/time
+      const absences = staffAbsences[staffId] || [];
+      const dateAbsences = absences.filter((abs: any) => abs.absenceDate === selectedDate);
+      for (const abs of dateAbsences) {
+        if (abs.isFullDay) {
+          const msg = locale === 'vi' ? `⚠️ ${staffName} nghỉ phép cả ngày ${selectedDate}.`
+            : locale === 'de' ? `⚠️ ${staffName} hat am ${selectedDate} ganztägig frei.`
+            : `⚠️ ${staffName} is on full-day leave on ${selectedDate}.`;
+          alert(msg);
+          return;
+        }
+        if (abs.startTime && abs.endTime) {
+          const [absStartH, absStartM] = abs.startTime.split(':').map(Number);
+          const [absEndH, absEndM] = abs.endTime.split(':').map(Number);
+          const absStart = absStartH * 60 + absStartM;
+          const absEnd = absEndH * 60 + absEndM;
+          const [clickH, clickM] = timeStr.split(':').map(Number);
+          const clickMin = clickH * 60 + clickM;
+          if (clickMin >= absStart && clickMin < absEnd) {
+            const msg = locale === 'vi' ? `⚠️ ${staffName} nghỉ phép ${abs.startTime}-${abs.endTime}. Không thể đặt lúc ${timeStr}.`
+              : locale === 'de' ? `⚠️ ${staffName} ist ${abs.startTime}-${abs.endTime} abwesend.`
+              : `⚠️ ${staffName} is on leave ${abs.startTime}-${abs.endTime}.`;
+            alert(msg);
+            return;
+          }
+        }
+      }
+    }
+    setNewBookingStaffId(staffId);
+    setNewBookingStaffName(staffName);
+    setNewBookingTime(timeStr);
+    setNewBookingCustomerName('');
+    setNewBookingCustomerPhone('');
+    setNewBookingNotes('');
+    setNewBookingServices([]);
+    setShowNewBookingModal(true);
+  }, [realStaffList, staffAbsences, selectedDate, locale]);
+
+  const handleCreateWalkInBooking = useCallback(async () => {
+    if (!user || newBookingServices.length === 0 || !newBookingCustomerName.trim() || !newBookingCustomerPhone.trim()) {
+      alert(t.admin.bookings.fillRequired || 'Please fill required fields');
+      return;
+    }
+    
+    // --- Validation 1: Staff service compatibility ---
+    if (newBookingStaffId) {
+      const staff = realStaffList.find(s => s.id === newBookingStaffId);
+      if (staff && staff.serviceIds && staff.serviceIds.length > 0) {
+        const incompatible = newBookingServices.filter(svc => !staff.serviceIds!.includes(svc.serviceId));
+        if (incompatible.length > 0) {
+          const names = incompatible.map(s => s.serviceName).join(', ');
+          const msg = locale === 'vi' ? `⚠️ ${staff.name} không làm được dịch vụ: ${names}. Vui lòng chọn thợ khác hoặc bỏ dịch vụ này.`
+            : locale === 'de' ? `⚠️ ${staff.name} kann folgende Services nicht: ${names}.`
+            : `⚠️ ${staff.name} cannot perform: ${names}. Please choose another staff or remove the service.`;
+          alert(msg);
+          return;
+        }
+      }
+      
+      // --- Validation 2: Staff inactive ---
+      if (staff && staff.status !== 'active') {
+        const msg = locale === 'vi' ? `⚠️ ${staff.name} đang nghỉ việc.` : `⚠️ ${staff.name} is inactive.`;
+        alert(msg);
+        return;
+      }
+      
+      // --- Validation 3: Staff on leave ---
+      const absences = staffAbsences[newBookingStaffId] || [];
+      const dateAbsences = absences.filter((abs: any) => abs.absenceDate === selectedDate);
+      const totalDuration = newBookingServices.reduce((sum, s) => sum + s.duration, 0);
+      const [startH, startM] = newBookingTime.split(':').map(Number);
+      const bookStart = startH * 60 + startM;
+      const bookEnd = bookStart + totalDuration;
+      
+      for (const abs of dateAbsences) {
+        if (abs.isFullDay) {
+          const msg = locale === 'vi' ? `⚠️ ${newBookingStaffName} nghỉ phép cả ngày ${selectedDate}.`
+            : `⚠️ ${newBookingStaffName} is on full-day leave on ${selectedDate}.`;
+          alert(msg);
+          return;
+        }
+        if (abs.startTime && abs.endTime) {
+          const [aH1, aM1] = abs.startTime.split(':').map(Number);
+          const [aH2, aM2] = abs.endTime.split(':').map(Number);
+          const absStart = aH1 * 60 + aM1;
+          const absEnd = aH2 * 60 + aM2;
+          if (bookStart < absEnd && bookEnd > absStart) {
+            const msg = locale === 'vi' ? `⚠️ ${newBookingStaffName} nghỉ phép ${abs.startTime}-${abs.endTime}. Lịch ${newBookingTime} bị trùng.`
+              : `⚠️ ${newBookingStaffName} is on leave ${abs.startTime}-${abs.endTime}. Conflicts with ${newBookingTime}.`;
+            alert(msg);
+            return;
+          }
+        }
+      }
+      
+      // --- Validation 4: Time conflict with existing bookings ---
+      const conflictBookings = bookings.filter(b =>
+        b.staffId === newBookingStaffId &&
+        b.appointmentDate === selectedDate &&
+        b.status !== 'cancelled'
+      );
+      for (const cb of conflictBookings) {
+        const [cH, cM] = cb.startTime.split(':').map(Number);
+        const cStart = cH * 60 + cM;
+        const cEnd = cStart + (cb.totalDurationMinutes || 30);
+        if (bookStart < cEnd && bookEnd > cStart) {
+          const msg = locale === 'vi' 
+            ? `⚠️ ${newBookingStaffName} đã có lịch lúc ${cb.startTime} (${cb.totalDurationMinutes}min). Bạn có muốn đặt trùng không?`
+            : `⚠️ ${newBookingStaffName} has a booking at ${cb.startTime}. Overlap anyway?`;
+          if (!confirm(msg)) return;
+          break;
+        }
+      }
+    }
+    setNewBookingCreating(true);
+    const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
+    
+    try {
+      const now = new Date().toISOString();
+      const baseId = `WI-${Date.now().toString(36).toUpperCase()}`;
+      const [startH, startM] = newBookingTime.split(':').map(Number);
+      let currentStartMinutes = startH * 60 + startM;
+      
+      // Create sequential bookings (one per service, like customer booking flow)
+      for (let i = 0; i < newBookingServices.length; i++) {
+        const svc = newBookingServices[i];
+        const bookingId = newBookingServices.length === 1 ? baseId : `${baseId}-${String.fromCharCode(65 + i)}`;
+        const svcStartH = Math.floor(currentStartMinutes / 60);
+        const svcStartM = currentStartMinutes % 60;
+        const svcStartTime = `${String(svcStartH).padStart(2, '0')}:${String(svcStartM).padStart(2, '0')}`;
+        const svcEndMinutes = currentStartMinutes + svc.duration;
+        const svcEndH = Math.floor(svcEndMinutes / 60);
+        const svcEndM = svcEndMinutes % 60;
+        const svcEndTime = `${String(svcEndH).padStart(2, '0')}:${String(svcEndM).padStart(2, '0')}`;
+        
+        const bookingDoc = {
+          id: bookingId,
+          parentBookingId: i === 0 ? null : baseId + '-A',
+          branchId,
+          businessId: user.businessId || '',
+          staffId: newBookingStaffId,
+          staffName: newBookingStaffName,
+          staffSelectionType: 'specific',
+          customerId: null,
+          customerName: newBookingCustomerName.trim(),
+          customerPhone: newBookingCustomerPhone.trim(),
+          customerEmail: null,
+          services: [{
+            serviceId: svc.serviceId,
+            categoryId: svc.categoryId,
+            serviceName: svc.serviceName,
+            categoryName: svc.categoryName,
+            extras: [],
+            durationMinutes: svc.duration,
+            price: svc.price,
+          }],
+          serviceIds: [svc.serviceId],
+          appointmentDate: selectedDate,
+          startTime: svcStartTime,
+          endTime: svcEndTime,
+          totalDurationMinutes: svc.duration,
+          totalPrice: svc.price,
+          status: 'confirmed',
+          source: 'walk_in',
+          notes: i === 0 ? newBookingNotes.trim() : '',
+          sequenceIndex: i,
+          totalSequenceServices: newBookingServices.length,
+          createdAt: now,
+        };
+        
+        await setDoc(doc(db, 'branches', branchId, 'bookings', bookingId), bookingDoc);
+        
+        // Next service starts after this one ends
+        currentStartMinutes = svcEndMinutes;
+      }
+      
+      setShowNewBookingModal(false);
+      alert(t.admin.bookings.bookingCreated || 'Booking created!');
+    } catch (err) {
+      console.error('Error creating walk-in booking:', err);
+      alert('Error creating booking');
+    } finally {
+      setNewBookingCreating(false);
+    }
+  }, [user, activeBranch, newBookingServices, newBookingCustomerName, newBookingCustomerPhone, newBookingNotes, newBookingTime, newBookingStaffId, newBookingStaffName, selectedDate, t, realStaffList, staffAbsences, bookings, locale]);
+
+  // Delete all bookings and absences
+  const handleDeleteAll = useCallback(async () => {
+    if (!user || !isManagerOrOwner) return;
+    const confirmMsg = locale === 'vi' 
+      ? '⚠️ Bạn có chắc muốn XÓA TẤT CẢ lịch hẹn và nghỉ phép của thợ?\n\nHành động này KHÔNG THỂ hoàn tác!'
+      : locale === 'de' 
+      ? '⚠️ Sind Sie sicher, dass Sie ALLE Termine und Abwesenheiten löschen möchten?\n\nDiese Aktion kann NICHT rückgängig gemacht werden!'
+      : '⚠️ Are you sure you want to DELETE ALL bookings and staff absences?\n\nThis action CANNOT be undone!';
+    if (!confirm(confirmMsg)) return;
+    
+    const doubleConfirmMsg = locale === 'vi'
+      ? 'Nhập "XOA" để xác nhận xóa tất cả:'
+      : locale === 'de'
+      ? 'Geben Sie "DELETE" ein, um zu bestätigen:'
+      : 'Type "DELETE" to confirm:';
+    const typed = prompt(doubleConfirmMsg);
+    const expected = locale === 'vi' ? 'XOA' : 'DELETE';
+    if (!typed || typed.toUpperCase() !== expected) {
+      alert(locale === 'vi' ? 'Đã hủy thao tác.' : 'Operation cancelled.');
+      return;
+    }
+    
+    const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
+    
+    try {
+      // Delete all bookings
+      const bookingsSnap = await getDocs(collection(db, 'branches', branchId, 'bookings'));
+      let deletedBookings = 0;
+      for (const d of bookingsSnap.docs) {
+        await deleteDoc(doc(db, 'branches', branchId, 'bookings', d.id));
+        deletedBookings++;
+      }
+      
+      // Delete all absences for all staff
+      let deletedAbsences = 0;
+      for (const staff of realStaffList) {
+        const absSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staff.id, 'absences'));
+        for (const a of absSnap.docs) {
+          await deleteDoc(doc(db, 'branches', branchId, 'staff', staff.id, 'absences', a.id));
+          deletedAbsences++;
+        }
+      }
+      
+      const successMsg = locale === 'vi'
+        ? `✅ Đã xóa ${deletedBookings} lịch hẹn và ${deletedAbsences} nghỉ phép thành công!`
+        : locale === 'de'
+        ? `✅ ${deletedBookings} Termine und ${deletedAbsences} Abwesenheiten gelöscht!`
+        : `✅ Deleted ${deletedBookings} bookings and ${deletedAbsences} absences!`;
+      alert(successMsg);
+    } catch (err) {
+      console.error('Error deleting all:', err);
+      alert('Error: ' + (err as Error).message);
+    }
+  }, [user, isManagerOrOwner, activeBranch, realStaffList, locale]);
+
   // Calendar
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
   const hours = useMemo(() => Array.from({ length: CALENDAR_END_HOUR - CALENDAR_START_HOUR }, (_, i) => CALENDAR_START_HOUR + i), []);
@@ -435,21 +813,22 @@ export default function BookingsManagementPage() {
   const staffColumnsForDate = useMemo(() => {
     if (!isManagerOrOwner) return [];
     const dayBookings = bookingsByDate[selectedDate] || [];
-    const map = new Map<string, { name: string; bookings: FirestoreBooking[] }>();
+    const map = new Map<string, { name: string; bookings: FirestoreBooking[]; isInactive: boolean }>();
 
-    // 1. Thêm tất cả nhân viên có status === 'active' từ realStaffList
-    realStaffList.forEach(s => {
+    // 1. Add all active staff first (sorted by name for consistent order)
+    const sortedStaff = [...realStaffList].sort((a, b) => a.name.localeCompare(b.name));
+
+    sortedStaff.forEach(s => {
       if (s.status === 'active') {
-        map.set(s.id, { name: s.name, bookings: [] });
+        map.set(s.id, { name: s.name, bookings: [], isInactive: false });
       }
     });
 
-    // Spec V1: Tạo cột Request cho các booking chờ duyệt hoặc chưa gán thợ
+    // Spec V1: Request column for unassigned/pending bookings
     const requestColumnBookings: FirestoreBooking[] = [];
 
-    // 2. Phân loại booking vào cột tương ứng
+    // 2. Assign bookings to columns
     dayBookings.forEach(b => {
-      // Spec V1: Booking pending_approval hoặc chưa gán thợ → cột Request
       const isUnassigned = !b.staffId || b.staffId === 'any' || b.staffId === '';
       const isPending = b.status === 'pending_approval';
 
@@ -457,9 +836,11 @@ export default function BookingsManagementPage() {
         requestColumnBookings.push(b);
       } else {
         if (!map.has(b.staffId)) {
+          // Staff is inactive but has bookings on this day → add column for them
           const staff = realStaffList.find(s => s.id === b.staffId);
           const name = staff ? staff.name : b.staffName;
-          map.set(b.staffId, { name, bookings: [] });
+          const isInactive = staff ? staff.status !== 'active' : true;
+          map.set(b.staffId, { name, bookings: [], isInactive });
         }
         map.get(b.staffId)!.bookings.push(b);
       }
@@ -467,12 +848,22 @@ export default function BookingsManagementPage() {
 
     const staffColumns = Array.from(map.entries()).map(([id, data]) => ({ id, ...data }));
 
-    // Spec V1: Thêm cột Request ở cuối nếu có booking chờ duyệt
+    // Sort: active staff by name first, then inactive staff with bookings by name
+    staffColumns.sort((a, b) => {
+      if (a.id === '__request__') return 1;
+      if (b.id === '__request__') return -1;
+      if (a.isInactive && !b.isInactive) return 1;
+      if (!a.isInactive && b.isInactive) return -1;
+      return a.name.localeCompare(b.name);
+    });
+
+    // Add Request column at the end if there are pending bookings
     if (requestColumnBookings.length > 0 || dayBookings.some(b => b.status === 'pending_approval')) {
       staffColumns.push({
         id: '__request__',
         name: locale === 'vi' ? 'Yêu cầu' : locale === 'de' ? 'Anfragen' : 'Requests',
         bookings: requestColumnBookings,
+        isInactive: false,
       });
     }
 
@@ -740,6 +1131,7 @@ export default function BookingsManagementPage() {
           >
             <ChevronRight className="w-5 h-5" />
           </Button>
+
         </div>
 
         <div className={styles.calGrid}>
@@ -758,13 +1150,20 @@ export default function BookingsManagementPage() {
               cols.map((col) => {
                 const isRequestCol = col.id === '__request__';
                 const displayName = isRequestCol ? col.name : getStaffNameDisplay(col.id, col.name);
+                const isInactive = 'isInactive' in col && col.isInactive;
                 return (
-                  <div key={col.id} className={`${styles.calDayCol} ${styles.calHeaderCell} ${isRequestCol ? styles.calHeaderCellRequest : ''}`}>
-                    <div className={isRequestCol ? styles.requestAvatar : styles.staffAvatar}>
+                  <div key={col.id} className={`${styles.calDayCol} ${styles.calHeaderCell} ${isRequestCol ? styles.calHeaderCellRequest : ''} ${isInactive ? styles.calHeaderCellInactive : ''}`}>
+                    <div className={isRequestCol ? styles.requestAvatar : isInactive ? styles.staffAvatarInactive : styles.staffAvatar}>
                       {isRequestCol ? '📋' : displayName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
                     </div>
                     <span className={styles.calStaffName}>{displayName}</span>
-                    <span className={styles.calStaffSubtitle}>{isRequestCol ? (locale === 'vi' ? 'chờ duyệt' : 'pending') : 'employee'}</span>
+                    <span className={styles.calStaffSubtitle}>
+                      {isRequestCol 
+                        ? (locale === 'vi' ? 'chờ duyệt' : locale === 'de' ? 'wartend' : 'pending') 
+                        : isInactive 
+                        ? (locale === 'vi' ? '🔴 Nghỉ làm' : locale === 'de' ? '🔴 Inaktiv' : '🔴 Inactive')
+                        : 'employee'}
+                    </span>
                   </div>
                 );
               })
@@ -791,8 +1190,66 @@ export default function BookingsManagementPage() {
               ) : (
                 cols.map((col) => {
                   const positioned = computeOverlappingLayout(col.bookings);
+                  // Get absence blocks for this staff on selected date
+                  const colAbsences = (col.id !== '__request__' && staffAbsences[col.id]) 
+                    ? staffAbsences[col.id].filter((abs: any) => abs.absenceDate === selectedDate)
+                    : [];
                   return (
-                    <div key={col.id} className={styles.calColumn}>
+                    <div 
+                      key={col.id} 
+                      className={styles.calColumn}
+                    >
+                      {/* Clickable time slots for walk-in booking */}
+                      {col.id !== '__request__' && isManagerOrOwner && hours.flatMap((hour) => {
+                        return [0, 30].map((minOffset) => {
+                          const slotMinutes = hour * 60 + minOffset;
+                          const topPx = (hour - CALENDAR_START_HOUR) * HOUR_HEIGHT + (minOffset / 60) * HOUR_HEIGHT;
+                          const timeStr = `${String(hour).padStart(2, '0')}:${String(minOffset).padStart(2, '0')}`;
+                          return (
+                            <div
+                              key={`slot-${hour}-${minOffset}`}
+                              className={styles.calTimeSlot}
+                              style={{ top: `${topPx}px`, height: `${HOUR_HEIGHT / 2}px` }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openNewBookingModal(col.id, col.name, timeStr);
+                              }}
+                              title={timeStr}
+                            />
+                          );
+                        });
+                      })}
+                      {/* Absence blocks */}
+                      {colAbsences.map((abs: any, idx: number) => {
+                        let absStartH: number, absStartM: number, absEndH: number, absEndM: number;
+                        if (abs.isFullDay) {
+                          absStartH = CALENDAR_START_HOUR; absStartM = 0;
+                          absEndH = CALENDAR_END_HOUR; absEndM = 0;
+                        } else if (abs.startTime && abs.endTime) {
+                          [absStartH, absStartM] = abs.startTime.split(':').map(Number);
+                          [absEndH, absEndM] = abs.endTime.split(':').map(Number);
+                        } else {
+                          return null;
+                        }
+                        const topOffset = (absStartH - CALENDAR_START_HOUR) * HOUR_HEIGHT + (absStartM / 60) * HOUR_HEIGHT;
+                        const durationMins = (absEndH * 60 + absEndM) - (absStartH * 60 + absStartM);
+                        const height = (durationMins / 60) * HOUR_HEIGHT;
+                        const leaveLabel = locale === 'vi' ? 'Nghỉ phép' : locale === 'de' ? 'Abwesend' : 'On leave';
+                        const timeLabel = abs.isFullDay 
+                          ? (locale === 'vi' ? 'Cả ngày' : locale === 'de' ? 'Ganztägig' : 'Full day')
+                          : `${abs.startTime} - ${abs.endTime}`;
+                        return (
+                          <div
+                            key={`abs-${idx}`}
+                            className={styles.calAbsenceBlock}
+                            style={{ top: `${topOffset}px`, height: `${Math.max(height, 24)}px` }}
+                          >
+                            <span className={styles.calAbsenceLabel}>{leaveLabel}</span>
+                            <span className={styles.calAbsenceTime}>{timeLabel}</span>
+                            {abs.note && <span className={styles.calAbsenceNote}>{abs.note}</span>}
+                          </div>
+                        );
+                      })}
                       {positioned.map(({ booking, left, width }) => renderCalBookingBlock(booking, left, width))}
                     </div>
                   );
@@ -815,6 +1272,10 @@ export default function BookingsManagementPage() {
           <div className={styles.legendItem}>
             <span className={`${styles.legendDot} ${styles.legendDotGrey}`}></span>
             <span className={styles.legendText}>{t.admin.bookings.statusCancelled}</span>
+          </div>
+          <div className={styles.legendItem}>
+            <span className={`${styles.legendDot} ${styles.legendDotRed}`}></span>
+            <span className={styles.legendText}>{locale === 'vi' ? 'Nghỉ phép' : locale === 'de' ? 'Abwesend' : 'On leave'}</span>
           </div>
         </div>
       </div>
@@ -853,6 +1314,17 @@ export default function BookingsManagementPage() {
             {locale === 'vi' ? 'Lịch hẹn' : locale === 'de' ? 'Termine' : 'Bookings'}
           </h1>
           <div className={styles.topBarRight}>
+            {isManagerOrOwner && (
+              <Button
+                variant="outline"
+                size="icon"
+                className={styles.toggleViewBtn + ' ' + styles.deleteAllBtn}
+                onClick={handleDeleteAll}
+                title={locale === 'vi' ? 'Xóa tất cả lịch hẹn & nghỉ phép' : locale === 'de' ? 'Alle löschen' : 'Delete all'}
+              >
+                <Trash2 className="w-5 h-5" />
+              </Button>
+            )}
             <Button
               variant="outline"
               size="icon"
@@ -878,9 +1350,14 @@ export default function BookingsManagementPage() {
                 onChange={(e) => setStaffFilterId(e.target.value)}
               >
                 <option value="all">{locale === 'vi' ? 'Tất cả thợ' : locale === 'de' ? 'Alle Mitarbeiter' : 'All staff'}</option>
-                {staffList.map(s => (
-                  <option key={s.id} value={s.id}>{getStaffNameDisplay(s.id, s.name)}</option>
-                ))}
+                {staffList.map(s => {
+                  const isInactive = s.status !== 'active';
+                  return (
+                    <option key={s.id} value={s.id}>
+                      {getStaffNameDisplay(s.id, s.name)}{isInactive ? ` (${locale === 'vi' ? 'Nghỉ làm' : locale === 'de' ? 'Inaktiv' : 'Inactive'})` : ''}
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <div className={styles.filterDivider}></div>
@@ -975,6 +1452,13 @@ export default function BookingsManagementPage() {
                       </div>
                       <div className={styles.cardStaffLine}>
                         {getStaffNameDisplay(booking.staffId, booking.staffName)}
+                        {(() => {
+                          const staff = realStaffList.find(s => s.id === booking.staffId);
+                          if (staff && staff.status !== 'active') {
+                            return <span className={styles.cardInactiveBadge}>{locale === 'vi' ? 'Nghỉ làm' : locale === 'de' ? 'Inaktiv' : 'Inactive'}</span>;
+                          }
+                          return null;
+                        })()}
                       </div>
                       {user?.role !== 'staff' && (
                         <div className={styles.cardCustomerLine}>
@@ -993,6 +1477,209 @@ export default function BookingsManagementPage() {
         </>
       ) : (
         <>{isManagerOrOwner ? renderStaffDayCalendar() : renderWeeklyCalendar()}</>
+      )}
+
+      {/* Walk-in Booking Modal */}
+      {showNewBookingModal && (
+        <>
+          <div className={styles.modalOverlay} onClick={() => setShowNewBookingModal(false)} />
+          <div className={styles.newBookingModal}>
+            <div className={styles.nbmHeader}>
+              <h3 className={styles.nbmTitle}>{t.admin.bookings.walkInBooking || 'Walk-in Booking'}</h3>
+              <Button variant="ghost" size="icon" className="w-7 h-7 p-0 border-0 bg-transparent cursor-pointer" onClick={() => setShowNewBookingModal(false)}>
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <div className={styles.nbmBody}>
+              {/* Date & Time & Staff */}
+              <div className={styles.nbmRow}>
+                <div className={styles.nbmField}>
+                  <label className={styles.nbmLabel}>📅 {t.admin.bookings.detailDate}</label>
+                  <span className={styles.nbmValue}>{formatDateGroupLabel(selectedDate, locale)}</span>
+                </div>
+                <div className={styles.nbmField}>
+                  <label className={styles.nbmLabel}>⏰ {t.admin.bookings.startTime || 'Start time'}</label>
+                  <input 
+                    type="time" 
+                    className={styles.nbmInput}
+                    value={newBookingTime} 
+                    onChange={(e) => setNewBookingTime(e.target.value)} 
+                  />
+                </div>
+              </div>
+
+              <div className={styles.nbmField}>
+                <label className={styles.nbmLabel}>👤 {t.admin.bookings.detailStaff}</label>
+                <select 
+                  className={styles.nbmSelect}
+                  value={newBookingStaffId} 
+                  onChange={(e) => {
+                    const s = realStaffList.find(st => st.id === e.target.value);
+                    setNewBookingStaffId(e.target.value);
+                    setNewBookingStaffName(s?.name || '');
+                    // Clear services incompatible with new staff
+                    if (s && s.serviceIds && s.serviceIds.length > 0) {
+                      setNewBookingServices(prev => prev.filter(svc => s.serviceIds!.includes(svc.serviceId)));
+                    }
+                  }}
+                >
+                  <option value="">{t.admin.bookings.anyStaff}</option>
+                  {realStaffList.filter(s => s.status === 'active').map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Services */}
+              <div className={styles.nbmServicesSection}>
+                <label className={styles.nbmLabel}>💅 {t.admin.bookings.service || 'Service'}</label>
+                {newBookingServices.map((svc, idx) => (
+                  <div key={idx} className={styles.nbmServiceRow}>
+                    <div className={styles.nbmServiceInfo}>
+                      <span className={styles.nbmServiceCat}>{svc.categoryName}</span>
+                      <span className={styles.nbmServiceName}>{svc.serviceName}</span>
+                      <span className={styles.nbmServiceMeta}>{svc.duration} min · €{svc.price}</span>
+                    </div>
+                    <button 
+                      className={styles.nbmRemoveBtn}
+                      onClick={() => setNewBookingServices(prev => prev.filter((_, i) => i !== idx))}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+
+                {newBookingServices.length < 2 && (() => {
+                  // Filter services based on selected staff's capabilities
+                  const selectedStaff = newBookingStaffId ? realStaffList.find(s => s.id === newBookingStaffId) : null;
+                  const staffServiceIds = selectedStaff?.serviceIds;
+                  const hasServiceFilter = staffServiceIds && staffServiceIds.length > 0;
+                  const availableServices = hasServiceFilter 
+                    ? allServices.filter((s: any) => staffServiceIds!.includes(s.id))
+                    : allServices;
+                  
+                  return (
+                  <div className={styles.nbmAddService}>
+                    {hasServiceFilter && (
+                      <div className={styles.nbmFilterHint}>
+                        {locale === 'vi' ? `Chỉ hiện dịch vụ ${selectedStaff?.name} có thể làm` 
+                          : locale === 'de' ? `Nur Services die ${selectedStaff?.name} kann`
+                          : `Only showing services ${selectedStaff?.name} can do`}
+                      </div>
+                    )}
+                    <select 
+                      className={styles.nbmSelect}
+                      value="" 
+                      onChange={(e) => {
+                        const svcId = e.target.value;
+                        if (!svcId) return;
+                        const svc = allServices.find((s: any) => s.id === svcId);
+                        if (!svc) return;
+                        const cat = allCategories.find((c: any) => c.id === svc.categoryId);
+                        setNewBookingServices(prev => [...prev, {
+                          categoryId: svc.categoryId || '',
+                          categoryName: cat?.name || svc.categoryName || '',
+                          serviceId: svc.id,
+                          serviceName: svc.name || '',
+                          duration: svc.durationMinutes || 30,
+                          price: svc.price || 0,
+                        }]);
+                      }}
+                    >
+                      <option value="">{t.admin.bookings.addService || '+ Add service'}</option>
+                      {allCategories.map((cat: any) => {
+                        const catServices = availableServices.filter((s: any) => s.categoryId === cat.id);
+                        if (catServices.length === 0) return null;
+                        return (
+                          <optgroup key={cat.id} label={translateCategory(cat.id, cat.name)}>
+                            {catServices.map((s: any) => (
+                              <option key={s.id} value={s.id}>
+                                {translateService(s.id, s.name)} ({s.durationMinutes}min · €{s.price})
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
+                    </select>
+                  </div>
+                  );
+                })()}
+              </div>
+
+              {/* Customer info */}
+              <div className={styles.nbmField}>
+                <label className={styles.nbmLabel}>🧑 {t.admin.bookings.customerName || 'Customer name'} *</label>
+                <input 
+                  type="text" 
+                  className={styles.nbmInput}
+                  placeholder={t.admin.bookings.customerName}
+                  value={newBookingCustomerName} 
+                  onChange={(e) => setNewBookingCustomerName(e.target.value)} 
+                />
+              </div>
+              <div className={styles.nbmField}>
+                <label className={styles.nbmLabel}>📱 {t.admin.bookings.customerPhone || 'Phone'} *</label>
+                <input 
+                  type="tel" 
+                  className={styles.nbmInput}
+                  placeholder="+49 123 456 789"
+                  value={newBookingCustomerPhone} 
+                  onChange={(e) => setNewBookingCustomerPhone(e.target.value)} 
+                />
+              </div>
+              <div className={styles.nbmField}>
+                <label className={styles.nbmLabel}>📝 {t.admin.bookings.notes || 'Notes'}</label>
+                <textarea 
+                  className={styles.nbmTextarea}
+                  placeholder="..."
+                  value={newBookingNotes} 
+                  onChange={(e) => setNewBookingNotes(e.target.value)} 
+                  rows={2}
+                />
+              </div>
+
+              {/* Summary */}
+              {newBookingServices.length > 0 && (() => {
+                const totalDuration = newBookingServices.reduce((s, sv) => s + sv.duration, 0);
+                const totalPrice = newBookingServices.reduce((s, sv) => s + sv.price, 0);
+                const [sH, sM] = newBookingTime.split(':').map(Number);
+                let runMin = sH * 60 + sM;
+                return (
+                  <div className={styles.nbmSummary}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', flex: 1 }}>
+                      {newBookingServices.map((sv, i) => {
+                        const from = `${String(Math.floor(runMin / 60)).padStart(2, '0')}:${String(runMin % 60).padStart(2, '0')}`;
+                        runMin += sv.duration;
+                        const to = `${String(Math.floor(runMin / 60)).padStart(2, '0')}:${String(runMin % 60).padStart(2, '0')}`;
+                        return (
+                          <span key={i} style={{ fontSize: '12px' }}>
+                            {i + 1}. {sv.serviceName}: {from} → {to}
+                          </span>
+                        );
+                      })}
+                      <span style={{ marginTop: '4px', fontWeight: 700 }}>
+                        ⏱ {totalDuration} min · 💰 €{totalPrice}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className={styles.nbmFooter}>
+              <Button variant="outline" onClick={() => setShowNewBookingModal(false)}>
+                {locale === 'vi' ? 'Hủy' : locale === 'de' ? 'Abbrechen' : 'Cancel'}
+              </Button>
+              <Button 
+                onClick={handleCreateWalkInBooking}
+                disabled={newBookingCreating || newBookingServices.length === 0 || !newBookingCustomerName.trim() || !newBookingCustomerPhone.trim()}
+              >
+                {newBookingCreating ? '...' : (t.admin.bookings.confirmCreate || 'Confirm booking')}
+              </Button>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Popover */}
@@ -1036,9 +1723,15 @@ export default function BookingsManagementPage() {
                 }}
               >
                 <option value="any">{t.admin.bookings.anyStaff || 'Bất kỳ ai'}</option>
-                {realStaffList.map(s => (
-                  <option key={s.id} value={s.id}>{s.name} {s.status !== 'active' ? `(${locale === 'vi' ? 'Khóa' : 'Inactive'})` : ''}</option>
-                ))}
+                {realStaffList.map(s => {
+                  const isInactive = s.status !== 'active';
+                  const label = isInactive 
+                    ? `🔴 ${s.name} (${locale === 'vi' ? 'Nghỉ làm' : locale === 'de' ? 'Inaktiv' : 'Inactive'})`
+                    : s.name;
+                  return (
+                    <option key={s.id} value={s.id} disabled={isInactive}>{label}</option>
+                  );
+                })}
               </select>
             ) : (
               <span className={styles.calPopoverValue}>{getStaffNameDisplay(popover.booking.staffId, popover.booking.staffName)}</span>
