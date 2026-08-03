@@ -1,0 +1,10 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Frontend does not currently need direct Firebase Storage access.
+    // Keep client-side access closed until a scoped upload/download flow exists.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

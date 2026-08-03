@@ -4,15 +4,25 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
-import { demoCategories, demoServices, demoStaff, generateDemoTimeSlots } from '@/lib/seedData';
 import { hasConflict, shouldSkipStaffSelection, MAX_MAIN_SERVICES } from '@/lib/types';
 import type { Staff, Service, ServiceCategory } from '@/lib/types';
 import { useRouter } from 'next/navigation';
-import { collection, getDocs, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
+import { fetchHrmAvailability, fetchHrmServices, fetchHrmStaff } from '@/lib/hrmApi';
 import styles from './page.module.css';
 
 type TimeFilter = 'all' | 'morning' | 'afternoon' | 'evening';
+type CalendarBooking = {
+  staffId: string;
+  appointmentDate: string;
+  startTime: string;
+  totalDurationMinutes: number;
+  status: string;
+};
+type PublicAbsence = {
+  startDate: string;
+  endDate: string;
+  allDay: boolean;
+};
 
 const WEEKDAY_LABELS = {
   de: ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'],
@@ -44,88 +54,88 @@ export default function StaffSelectionPage() {
   const [categories, setCategories] = useState<ServiceCategory[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
-  const [realBookings, setRealBookings] = useState<any[]>([]);
-  const [staffAbsences, setStaffAbsences] = useState<Record<string, any[]>>({});
-  const [staffWorkingHours, setStaffWorkingHours] = useState<Record<string, any[]>>({});
+  const [realBookings, setRealBookings] = useState<CalendarBooking[]>([]);
+  const [staffAbsences, setStaffAbsences] = useState<Record<string, PublicAbsence[]>>({});
+  const [dataLoadError, setDataLoadError] = useState(false);
+  const [availabilityLoadError, setAvailabilityLoadError] = useState(false);
 
   useEffect(() => {
     if (!branchSlug) return;
     const fetchDbData = async () => {
+      setDataLoadError(false);
       try {
-        const catSnap = await getDocs(collection(db, 'branches', branchSlug, 'categories'));
-        if (!catSnap.empty) {
-          setCategories(catSnap.docs.map(doc => doc.data() as ServiceCategory));
+        // Fetch services from HRM API and map to local types
+        const hrmServices = await fetchHrmServices(branchSlug);
+        const categoryMap = new Map<string, ServiceCategory>();
+        const serviceList: Service[] = [];
+        let categoryOrder = 0;
+
+        for (const hrm of hrmServices) {
+          const groupName = hrm.groupService || hrm.category || 'Other';
+          const catId = groupName.toLowerCase().replace(/\s+/g, '-');
+
+          if (!categoryMap.has(catId)) {
+            categoryMap.set(catId, {
+              id: catId,
+              branchId: branchSlug,
+              name: groupName,
+              description: '',
+              displayOrder: categoryOrder++,
+              isActive: true,
+            });
+          }
+
+          serviceList.push({
+            id: hrm.id,
+            branchId: branchSlug,
+            categoryId: catId,
+            name: hrm.name,
+            description: '',
+            durationMinutes: hrm.durationMin || hrm.durationMax || 30,
+            price: hrm.price,
+            currency: 'EUR',
+            displayOrder: serviceList.length,
+            isActive: true,
+            hasAppointments: false,
+            type: 'standard',
+            isAddon: hrm.bookingKind === 'add_on',
+            staffType: hrm.preferredWorkerType === 'assistant' ? 'junior' : 'main',
+            createdAt: '',
+          });
         }
 
-        const svcSnap = await getDocs(collection(db, 'branches', branchSlug, 'services'));
-        if (!svcSnap.empty) {
-          setServices(svcSnap.docs.map(doc => doc.data() as Service));
-        }
+        const catList = Array.from(categoryMap.values());
+        catList.sort((a, b) => a.displayOrder - b.displayOrder);
+        setCategories(catList);
 
-        const staffSnap = await getDocs(collection(db, 'branches', branchSlug, 'staff'));
-        if (!staffSnap.empty) {
-          const staffData = staffSnap.docs.map(doc => doc.data() as Staff);
-          setStaffList(staffData);
-        }
+        serviceList.sort((a, b) => a.displayOrder - b.displayOrder);
+        setServices(serviceList);
+
+        // Fetch staff from HRM API and map to local types
+        const hrmStaff = await fetchHrmStaff(branchSlug);
+        const mapped: Staff[] = hrmStaff.map((s, idx) => ({
+          id: s.uid,
+          branchId: branchSlug,
+          userUid: s.uid,
+          name: s.name,
+          initials: s.name.substring(0, 2).toUpperCase(),
+          role: 'staff' as const,
+          staffType: s.workerType === 'assistant' ? 'junior' as const : 'main' as const,
+          serviceIds: s.serviceIds || [],
+          displayOrder: idx,
+          status: 'active' as const,
+          hasAppointments: false,
+          createdAt: '',
+        }));
+        setStaffList(mapped);
+
       } catch (e) {
-        console.error('Error fetching Firestore resources, using local seed fallback', e);
+        console.error('Error fetching booking data from HRM', e);
+        setDataLoadError(true);
       }
     };
     
     fetchDbData();
-  }, [branchSlug]);
-
-  // Real-time listener for staff absences — updates slots immediately when admin sets absence
-  useEffect(() => {
-    if (!branchSlug || staffList.length === 0) return;
-
-    const unsubscribes: (() => void)[] = [];
-
-    for (const staff of staffList) {
-      if (staff.status !== 'active') continue;
-      const absRef = collection(db, 'branches', branchSlug, 'staff', staff.id, 'absences');
-      const unsubAbs = onSnapshot(absRef, (snap) => {
-        const absList = snap.docs.map(d => d.data());
-        setStaffAbsences(prev => ({
-          ...prev,
-          [staff.id]: absList,
-        }));
-      }, (e) => {
-        console.error(`Error listening to absences for ${staff.id}:`, e);
-      });
-      unsubscribes.push(unsubAbs);
-
-      const whRef = collection(db, 'branches', branchSlug, 'staff', staff.id, 'workingHours');
-      const unsubWh = onSnapshot(whRef, (snap) => {
-        const whList = snap.docs.map(d => d.data());
-        setStaffWorkingHours(prev => ({
-          ...prev,
-          [staff.id]: whList,
-        }));
-      }, (e) => {
-        console.error(`Error listening to working hours for ${staff.id}:`, e);
-      });
-      unsubscribes.push(unsubWh);
-    }
-
-    return () => {
-      unsubscribes.forEach(unsub => unsub());
-    };
-  }, [branchSlug, staffList]);
-
-  useEffect(() => {
-    if (!branchSlug) return;
-    const bookingsRef = collection(db, 'branches', branchSlug, 'bookings');
-    const unsubscribe = onSnapshot(bookingsRef, (snap) => {
-      const list: any[] = [];
-      snap.forEach(doc => {
-        list.push(doc.data());
-      });
-      setRealBookings(list);
-    }, (e) => {
-      console.error('Error listening to bookings', e);
-    });
-    return () => unsubscribe();
   }, [branchSlug]);
 
   // ── Local Labels ──
@@ -164,6 +174,68 @@ export default function StaffSelectionPage() {
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
+
+  useEffect(() => {
+    if (!branchSlug) return;
+    const dates = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(weekStartDate);
+      date.setDate(date.getDate() + index);
+      return formatDateISO(date.getFullYear(), date.getMonth(), date.getDate());
+    });
+
+    let active = true;
+    setAvailabilityLoadError(false);
+    Promise.all(dates.map((date) => fetchHrmAvailability(branchSlug, date)))
+      .then((availabilityDays) => {
+        if (!active) return;
+        const bookings: CalendarBooking[] = [];
+        const absenceMap: Record<string, PublicAbsence[]> = {};
+
+        for (const availability of availabilityDays) {
+          for (const busy of availability.busy) {
+            bookings.push({
+              staffId: busy.employeeUserId,
+              appointmentDate: availability.date,
+              startTime: `${Math.floor(busy.startTime / 60).toString().padStart(2, '0')}:${(busy.startTime % 60).toString().padStart(2, '0')}`,
+              totalDurationMinutes: busy.endTime - busy.startTime,
+              status: busy.status,
+            });
+          }
+          for (const absence of availability.absences) {
+            const existing = absenceMap[absence.employeeUserId] ?? [];
+            if (
+              !existing.some(
+                (item) =>
+                  item.startDate === absence.startDate &&
+                  item.endDate === absence.endDate,
+              )
+            ) {
+              existing.push({
+                startDate: absence.startDate,
+                endDate: absence.endDate,
+                allDay: absence.allDay,
+              });
+            }
+            absenceMap[absence.employeeUserId] = existing;
+          }
+        }
+
+        setRealBookings(bookings);
+        setStaffAbsences(absenceMap);
+      })
+      .catch((error: unknown) => {
+        console.error('Error fetching public availability:', error);
+        if (active) {
+          setRealBookings([]);
+          setStaffAbsences({});
+          setAvailabilityLoadError(true);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [branchSlug, weekStartDate]);
 
   const calendarRef = useRef<HTMLDivElement>(null);
   const calendarBtnRef = useRef<HTMLButtonElement>(null);
@@ -219,7 +291,7 @@ export default function StaffSelectionPage() {
     
     // Check service.staffType from Firestore (data-driven)
     const requiredStaffTypes = state.selectedServices
-      .map(s => (s.mainService as any).staffType || 'any')
+      .map(s => s.mainService.staffType || 'any')
       .filter((t: string) => t !== 'any');
 
     // Determine required staff type: if any service requires 'main', require main
@@ -235,7 +307,8 @@ export default function StaffSelectionPage() {
     if (requiredType === 'any') {
       const hasFirstFiveBlock = state.selectedServices.some(s => 
         isFirstFiveBlockService(s.mainService.name) || 
-        ((s.mainService as any).nameLocalized && Object.values((s.mainService as any).nameLocalized).some(val => isFirstFiveBlockService(val as string)))
+        (s.mainService.nameLocalized &&
+          Object.values(s.mainService.nameLocalized).some(isFirstFiveBlockService))
       );
       if (hasFirstFiveBlock) requiredType = 'main';
     }
@@ -284,64 +357,30 @@ export default function StaffSelectionPage() {
     state.selectedStaffType === 'specific' && state.selectedStaff?.id === staffId;
 
   // Helper to check if a staff is on leave/absence for a given date+time
-  const checkStaffAbsence = useCallback((staffId: string, dateStr: string, slotStartMins: number, durationMins: number): boolean => {
+  const checkStaffAbsence = useCallback((staffId: string, dateStr: string): boolean => {
     const absences = staffAbsences[staffId];
     if (!absences || absences.length === 0) return false;
 
-    const slotEndMins = slotStartMins + durationMins;
-
-    return absences.some(abs => {
-      if (abs.absenceDate !== dateStr) return false;
-      if (abs.isFullDay) return true; // Full day leave = always blocked
-
-      // Partial day leave — check time overlap
-      if (abs.startTime && abs.endTime) {
-        const [sh, sm] = abs.startTime.split(':').map(Number);
-        const [eh, em] = abs.endTime.split(':').map(Number);
-        const absStart = sh * 60 + sm;
-        const absEnd = eh * 60 + em;
-        return slotStartMins < absEnd && slotEndMins > absStart;
-      }
-      return false;
-    });
+    return absences.some(
+      (absence) =>
+        absence.allDay &&
+        absence.startDate <= dateStr &&
+        absence.endDate >= dateStr,
+    );
   }, [staffAbsences]);
-
   // Helper to check if a staff has any overlapping booking OR is on leave
+  // NOTE: Branch-level working hours (open/close) are enforced by getSlotsForDate.
+  // This function only checks absences and booking overlaps, NOT individual staff working hours,
+  // because staff WH (isWorking) is for scheduling preferences, not hard blocking.
   const checkStaffOverlap = useCallback((staffId: string, dateStr: string, slotStartMins: number, durationMins: number): boolean => {
-    // 1. Check working hours first
-    const dateObj = new Date(dateStr + 'T00:00:00');
-    const dayOfWeek = (dateObj.getDay() + 6) % 7; // Mon = 0, Sun = 6
-    const hoursList = staffWorkingHours[staffId] || [];
-    const schedule = hoursList.find(h => h.dayOfWeek === dayOfWeek);
-    
-    let isWorking = false;
-    let workStart = 9 * 60;
-    let workEnd = (dayOfWeek === 5 ? 16 : 18) * 60; // defaults
-
-    if (schedule) {
-      if (!schedule.isWorking) return true; // not working = busy
-      isWorking = true;
-      const [sh, sm] = schedule.startTime.split(':').map(Number);
-      const [eh, em] = schedule.endTime.split(':').map(Number);
-      workStart = sh * 60 + sm;
-      workEnd = eh * 60 + em;
-    } else {
-      isWorking = dayOfWeek !== 6; // Closed on Sunday by default
-    }
-
     const slotEndMins = slotStartMins + durationMins;
 
-    if (!isWorking || slotStartMins < workStart || slotEndMins > workEnd) {
-      return true; // outside working hours = busy
-    }
-
-    // 2. Check absences (most important override)
-    if (checkStaffAbsence(staffId, dateStr, slotStartMins, durationMins)) {
+    // 1. Check absences first (most important)
+    if (checkStaffAbsence(staffId, dateStr)) {
       return true; // Staff is on leave
     }
 
-    // 3. Check booking overlaps
-    
+    // 2. Check booking overlaps
     return realBookings.some(booking => {
       if (booking.appointmentDate !== dateStr) return false;
       if (booking.status === 'cancelled') return false;
@@ -355,40 +394,52 @@ export default function StaffSelectionPage() {
       // Overlap formula: slotStart < bookingEnd && slotEnd > bookingStart
       return slotStartMins < endVal && slotEndMins > startVal;
     });
-  }, [realBookings, checkStaffAbsence, staffWorkingHours]);
+  }, [realBookings, checkStaffAbsence]);
 
   // ── 7-Day Time Table Logic (Spec V1: 2-segment availability) ──
   const getSlotsForDate = useCallback((dateStr: string) => {
     type SlotItem = { time: string; available: boolean; status: 'available' | 'held' | 'booked' | 'request_only' };
     const slots: SlotItem[] = [];
+    if (availabilityLoadError) return slots;
     const dateObj = new Date(dateStr + 'T00:00:00');
     const dayOfWeek = (dateObj.getDay() + 6) % 7; // Convert to Mon=0 (0-6)
     
     if (dayOfWeek === 6) return [] as SlotItem[]; // Sunday is closed
-    const endHour = dayOfWeek === 5 ? 16 : 18; // Saturday closes at 16:00
+    const parseMinutes = (value: string | undefined, fallback: number) => {
+      if (!value || !/^\d{2}:\d{2}$/.test(value)) return fallback;
+      const [hours, minutes] = value.split(':').map(Number);
+      return hours * 60 + minutes;
+    };
+    const openMinutes = parseMinutes(state.branch?.openTime, 9 * 60);
+    const closeMinutes = parseMinutes(state.branch?.closeTime, dayOfWeek === 5 ? 16 * 60 : 18 * 60);
+    const interval = state.branch?.slotIntervalMinutes ?? 15;
 
     // Spec V1: Each service segment has its own duration & staff
     const segments = state.selectedServices.map(item => {
-      const extraDuration = item.extras ? item.extras.reduce((sum, e) => sum + (e.durationMinutes || 0), 0) : 0;
+      const extraDuration = 0; // Addons do not add to availability duration
       return {
         duration: (item.mainService.durationMinutes || 30) + extraDuration,
         staffId: item.selectedStaffType === 'specific' ? item.selectedStaff?.id : undefined,
         staffType: item.selectedStaffType,
         serviceId: item.mainService.id,
+        requiredStaffType: item.mainService.staffType,
       };
     });
 
     // Fallback: If no services selected, use total duration with legacy staff
     const totalDuration = totals.totalDuration || 30;
 
-    for (let hour = 9; hour < endHour; hour++) {
-      for (const min of [0, 30]) {
+    for (let slotStartMins = openMinutes; slotStartMins < closeMinutes; slotStartMins += interval) {
+        const hour = Math.floor(slotStartMins / 60);
+        const min = slotStartMins % 60;
         const time = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
-        const slotStartMins = hour * 60 + min;
+        const appointmentEpoch = new Date(`${dateStr}T${time}:00`).getTime();
+        const minimumEpoch = Date.now() + (state.branch?.minimumNoticeHours ?? 2) * 60 * 60 * 1000;
+        if (appointmentEpoch < minimumEpoch) continue;
 
         // Check if the entire booking (all segments) fits within working hours
         const totalEnd = slotStartMins + totalDuration;
-        if (totalEnd > endHour * 60) {
+        if (totalEnd > closeMinutes) {
           // Slot would overflow working hours, skip
           continue;
         }
@@ -414,9 +465,12 @@ export default function StaffSelectionPage() {
                 isHidden = true;
               }
             } else {
-              // Any staff: check if at least one eligible staff is free
+              // Any staff: check if at least one active staff is free
+              // In a nail salon, all active staff can perform all services
               const eligibleStaff = staffList.filter(
-                (s) => s.status === 'active' && (s.serviceIds || []).includes(seg.serviceId)
+                (s) =>
+                  s.status === 'active' &&
+                  (s.serviceIds.length === 0 || s.serviceIds.includes(seg.serviceId))
               );
 
               if (eligibleStaff.length === 0) {
@@ -442,10 +496,9 @@ export default function StaffSelectionPage() {
             status: slotStatus,
           });
         }
-      }
     }
     return slots;
-  }, [totals.totalDuration, state.selectedServices, staffList, checkStaffOverlap]);
+  }, [availabilityLoadError, totals.totalDuration, state.selectedServices, state.branch, staffList, checkStaffOverlap]);
 
   const columnsList = useMemo(() => {
     const list = [];
@@ -453,6 +506,9 @@ export default function StaffSelectionPage() {
       const d = new Date(weekStartDate);
       d.setDate(weekStartDate.getDate() + i);
       const isoStr = formatDateISO(d.getFullYear(), d.getMonth(), d.getDate());
+      const maximumDate = new Date(today);
+      maximumDate.setDate(maximumDate.getDate() + (state.branch?.bookingWindowDays ?? 30));
+      const isOutsideWindow = d > maximumDate;
       
       // Localized labels
       const weekdayLabel = d.toLocaleDateString(locale === 'de' ? 'de-DE' : locale === 'vi' ? 'vi-VN' : 'en-US', {
@@ -464,7 +520,7 @@ export default function StaffSelectionPage() {
       });
 
       // Spec V1: per-service staff is now inside selectedServices, no longer global
-      const rawSlots = getSlotsForDate(isoStr);
+      const rawSlots = isOutsideWindow ? [] : getSlotsForDate(isoStr);
       
       const filtered = rawSlots.filter((slot) => {
         if (timeFilter === 'all') return true;
@@ -484,7 +540,7 @@ export default function StaffSelectionPage() {
       });
     }
     return list;
-  }, [weekStartDate, locale, state.selectedServices, timeFilter, getSlotsForDate]);
+  }, [weekStartDate, locale, state.selectedServices, state.branch?.bookingWindowDays, timeFilter, getSlotsForDate]);
 
   const handlePrevWeek = () => {
     setWeekStartDate((prev) => {
@@ -499,7 +555,9 @@ export default function StaffSelectionPage() {
     setWeekStartDate((prev) => {
       const next = new Date(prev);
       next.setDate(prev.getDate() + 7);
-      return next;
+      const maximumDate = new Date(today);
+      maximumDate.setDate(maximumDate.getDate() + (state.branch?.bookingWindowDays ?? 30));
+      return next <= maximumDate ? next : prev;
     });
   };
 
@@ -557,6 +615,17 @@ export default function StaffSelectionPage() {
   };
 
   const isPrevMonthDisabled = viewYear === today.getFullYear() && viewMonth <= today.getMonth();
+
+  if (dataLoadError || availabilityLoadError) {
+    return (
+      <div className={styles.page} role="alert">
+        <h1 className={styles.pageTitle}>{t.booking.dateTime.title}</h1>
+        <section className={styles.sectionCard}>
+          <p>Không thể kiểm tra lịch trống của cửa hàng. Vui lòng thử lại sau.</p>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.page}>

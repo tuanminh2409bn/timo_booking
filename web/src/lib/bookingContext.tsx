@@ -38,6 +38,7 @@ type BookingAction =
   // Flow control
   | { type: 'SET_STEP'; step: number }
   | { type: 'SET_SKIP_STAFF'; skip: boolean }
+  | { type: 'SET_BOOKING_RESULT'; attendanceCode: string }
   | { type: 'RESET' };
 
 // ═══════════════════════════════════════════════════
@@ -58,7 +59,6 @@ const initialState: BookingState = {
     name: '',
     phone: '',
     email: '',
-    password: '',
     notes: '',
     isReturning: false,
   },
@@ -241,6 +241,9 @@ function bookingReducer(state: BookingState, action: BookingAction): BookingStat
 
     case 'SET_SKIP_STAFF':
       return { ...state, skipStaffSelection: action.skip };
+
+    case 'SET_BOOKING_RESULT':
+      return { ...state, attendanceCode: action.attendanceCode };
 
     case 'RESET':
       return initialState;

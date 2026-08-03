@@ -5,8 +5,11 @@ import { useI18n } from '@/lib/i18n';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
 import { useRouter } from 'next/navigation';
-import { doc, setDoc, collection, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
+import { createHrmBooking } from '@/lib/hrmApi';
+import type {
+  HrmBookingAddonInput,
+  HrmBookingServiceInput,
+} from '@/lib/hrmApi';
 import styles from './page.module.css';
 
 export default function ConfirmPage() {
@@ -17,6 +20,7 @@ export default function ConfirmPage() {
   const branchSlug = state.branchSlug;
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const isReturning = state.customerInfo.isReturning;
   const isRequestMode = state.bookingMode === 'request';
@@ -43,110 +47,12 @@ export default function ConfirmPage() {
     setIsSubmitting(true);
 
     try {
-      const bookingId = `BK-${Math.floor(1000 + Math.random() * 9000)}`;
-      
       const [hours, mins] = (state.selectedTime || '09:00').split(':').map(Number);
       const startMin = hours * 60 + mins;
 
-      // NOTE: isFirstFiveBlockService / isPedicureService removed.
-      // Staff priority is now data-driven via service.staffPriority field.
-
-      // Fetch all staff members for this branch
-      const staffSnap = await getDocs(collection(db, 'branches', branchSlug, 'staff'));
-      const allStaff = staffSnap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() } as any));
-      
-      // Filter active staff who can perform the selected services
-      const mainServiceIds = state.selectedServices.map((s) => s.mainService.id);
-      const activeStaff = allStaff.filter((s) => s.status === 'active');
-
-      // Fetch working hours and absences for ALL active staff
-      // (needed because resolveStaffForService checks per-service, not all-services)
-      const staffWorkingHours: Record<string, any[]> = {};
-      const staffAbsences: Record<string, any[]> = {};
-
-      for (const staff of activeStaff) {
-        const hoursSnap = await getDocs(collection(db, 'branches', branchSlug, 'staff', staff.id, 'workingHours'));
-        staffWorkingHours[staff.id] = hoursSnap.docs.map(d => d.data());
-
-        const absencesSnap = await getDocs(collection(db, 'branches', branchSlug, 'staff', staff.id, 'absences'));
-        staffAbsences[staff.id] = absencesSnap.docs.map(d => d.data());
+      if (!state.selectedDate || !state.selectedTime) {
+        throw new Error('Please select a date and time.');
       }
-
-      // Fetch active bookings for this date to check conflicts
-      const bookingsSnap = await getDocs(collection(db, 'branches', branchSlug, 'bookings'));
-      const activeBookings = bookingsSnap.docs
-        .map(docSnap => docSnap.data() as any)
-        .filter(b => b.appointmentDate === state.selectedDate && b.status !== 'cancelled');
-
-      // Load-balancing: count existing bookings per staff on this date
-      const bookingCountByStaff: Record<string, number> = {};
-      for (const b of activeBookings) {
-        if (b.staffId) {
-          bookingCountByStaff[b.staffId] = (bookingCountByStaff[b.staffId] || 0) + 1;
-        }
-      }
-
-      // Helper to check if staff is available
-      const isStaffAvailable = (staffId: string, dateStr: string, timeStr: string, durationMin: number) => {
-        const dateObj = new Date(dateStr + 'T00:00:00');
-        const dayOfWeek = (dateObj.getDay() + 6) % 7; // Mon = 0, Sun = 6
-        
-        // 1. Check weekly working hours
-        const hoursList = staffWorkingHours[staffId] || [];
-        const schedule = hoursList.find(h => h.dayOfWeek === dayOfWeek);
-        
-        const [slotH, slotM] = timeStr.split(':').map(Number);
-        const slotStart = slotH * 60 + slotM;
-        const slotEnd = slotStart + durationMin;
-
-        let isWorking = false;
-        let workStart = 9 * 60;
-        let workEnd = (dayOfWeek === 5 ? 16 : 18) * 60; // defaults
-
-        if (schedule) {
-          if (!schedule.isWorking) return false;
-          isWorking = true;
-          const [sh, sm] = schedule.startTime.split(':').map(Number);
-          const [eh, em] = schedule.endTime.split(':').map(Number);
-          workStart = sh * 60 + sm;
-          workEnd = eh * 60 + em;
-        } else {
-          isWorking = dayOfWeek !== 6; // Closed on Sunday by default
-        }
-
-        if (!isWorking || slotStart < workStart || slotEnd > workEnd) {
-          return false;
-        }
-
-        // 2. Check absences
-        const absencesList = staffAbsences[staffId] || [];
-        const isAbsent = absencesList.some(abs => {
-          if (abs.absenceDate !== dateStr) return false;
-          if (abs.isFullDay) return true;
-          
-          if (abs.startTime && abs.endTime) {
-            const [sh, sm] = abs.startTime.split(':').map(Number);
-            const [eh, em] = abs.endTime.split(':').map(Number);
-            const absStart = sh * 60 + sm;
-            const absEnd = eh * 60 + em;
-            return slotStart < absEnd && slotEnd > absStart;
-          }
-          return false;
-        });
-
-        if (isAbsent) return false;
-
-        // 3. Check overlapping bookings
-        const hasOverlap = activeBookings.some(b => {
-          if (b.staffId !== staffId) return false;
-          const [bh, bm] = b.startTime.split(':').map(Number);
-          const bStart = bh * 60 + bm;
-          const bEnd = bStart + (b.totalDurationMinutes || 30);
-          return slotStart < bEnd && slotEnd > bStart;
-        });
-
-        return !hasOverlap;
-      };
 
       // ═══════════════════════════════════════════════
       // Sequential booking: Mỗi dịch vụ = 1 booking riêng, thời gian nối tiếp
@@ -161,191 +67,70 @@ export default function ConfirmPage() {
         return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
       };
 
-      const resolveStaffForService = (
-        serviceItem: typeof state.selectedServices[0],
-        segmentStartTimeStr: string,  // thời gian bắt đầu thực tế của dịch vụ này
-      ) => {
-        const servicePriority = serviceItem.mainService.staffPriority || 'none';
-        const serviceStaffType = serviceItem.selectedStaffType || 'any';
-        const serviceStaff = serviceItem.selectedStaff;
+      let currentOffsetMin = startMin;
+      const hrmServices: HrmBookingServiceInput[] = [];
+      const addOns: HrmBookingAddonInput[] = [];
 
-        // If customer chose a specific staff for this service, use it
-        if (serviceStaffType === 'specific' && serviceStaff) {
-          return {
-            staffId: serviceStaff.id,
-            staffName: serviceStaff.name,
-            staffType: serviceStaffType,
-          };
-        }
-
-        // Auto-assign based on staffPriority for this service
-        const serviceEligible = allStaff.filter(
-          (s) => s.status === 'active' && (s.serviceIds || []).includes(serviceItem.mainService.id)
-        );
-
-        let candidates = [...serviceEligible];
-
-        // Filter by service.staffType (loại thợ phục vụ) from Firestore
-        const svcStaffType = (serviceItem.mainService as any).staffType || 'any';
-        if (svcStaffType === 'main') {
-          const mainOnly = candidates.filter(s => s.staffType === 'main');
-          if (mainOnly.length > 0) candidates = mainOnly;
-        } else if (svcStaffType === 'junior') {
-          const juniorOnly = candidates.filter(s => s.staffType === 'junior');
-          if (juniorOnly.length > 0) candidates = juniorOnly;
-        }
-
-        // Sort by staffPriority (ưu tiên thợ) + load-balancing (ít lịch hơn ưu tiên hơn)
-        candidates.sort((a, b) => {
-          const aType = a.staffType || 'main';
-          const bType = b.staffType || 'main';
-
-          // Primary sort: by staff type based on service priority
-          if (servicePriority === 'main_staff') {
-            if (aType === 'main' && bType === 'junior') return -1;
-            if (aType === 'junior' && bType === 'main') return 1;
-          } else {
-            // assistant_staff, conditional_assistant, none → junior first
-            if (aType === 'junior' && bType === 'main') return -1;
-            if (aType === 'main' && bType === 'junior') return 1;
-          }
-
-          // Tie-breaker: load-balancing — prefer staff with fewer bookings today
-          const aCount = bookingCountByStaff[a.id] || 0;
-          const bCount = bookingCountByStaff[b.id] || 0;
-          return aCount - bCount;
+      for (const serviceItem of state.selectedServices) {
+        const selectedStaff = serviceItem.selectedStaffType === 'specific'
+          ? serviceItem.selectedStaff
+          : null;
+        const svcDuration = serviceItem.mainService.durationMinutes;
+        currentOffsetMin += svcDuration;
+        hrmServices.push({
+          sourceServiceId: serviceItem.mainService.id,
+          staffSelectionType: serviceItem.selectedStaffType,
+          name: serviceItem.mainService.name,
+          category: 'nail',
+          durationMinutes: svcDuration,
+          price: serviceItem.mainService.price,
+          employeeUserId: selectedStaff?.id,
+          employeeName: selectedStaff?.name,
         });
 
-        // For main_staff priority, filter out junior staff (additional check)
-        if (servicePriority === 'main_staff') {
-          const mainOnly = candidates.filter(s => s.staffType === 'main');
-          if (mainOnly.length > 0) candidates = mainOnly;
+        for (const extra of serviceItem.extras) {
+          addOns.push({
+            sourceServiceId: extra.id,
+            name: extra.name,
+            price: extra.price,
+          });
         }
-
-        // Find available staff — check at the sequential start time of THIS segment
-        let foundStaff = null;
-        for (const staff of candidates) {
-          if (isStaffAvailable(staff.id, state.selectedDate as string, segmentStartTimeStr, serviceItem.mainService.durationMinutes)) {
-            foundStaff = staff;
-            break;
-          }
-        }
-
-        if (foundStaff) {
-          return {
-            staffId: foundStaff.id,
-            staffName: foundStaff.name,
-            staffType: 'any' as const,
-          };
-        }
-
-        // Fallback: assign first candidate even if busy
-        if (candidates.length > 0) {
-          return {
-            staffId: candidates[0].id,
-            staffName: candidates[0].name,
-            staffType: 'any' as const,
-          };
-        }
-
-        return {
-          staffId: '',
-          staffName: locale === 'de' ? 'Nicht zugewiesen' : locale === 'vi' ? 'Chưa gán thợ' : 'Unassigned',
-          staffType: 'any' as const,
-        };
-      };
-
-      // ── Sequential booking creation ──
-      // Each service gets its own booking with sequential start times
-      const isMultiService = state.selectedServices.length > 1;
-      let currentOffsetMin = startMin; // starts at the customer's selected time
-
-      for (let i = 0; i < state.selectedServices.length; i++) {
-        const serviceItem = state.selectedServices[i];
-        const segmentStartTimeStr = minsToTimeStr(currentOffsetMin);
-
-        // Resolve staff at the correct sequential time
-        const staffAssignment = resolveStaffForService(serviceItem, segmentStartTimeStr);
-
-        // Calculate duration and price for this service
-        const svcDuration = serviceItem.mainService.durationMinutes
-          + serviceItem.extras.reduce((sum, e) => sum + e.durationMinutes, 0);
-        const svcPrice = serviceItem.mainService.price
-          + serviceItem.extras.reduce((sum, e) => sum + e.price, 0);
-
-        // Calculate end time for this service segment
-        const segmentEndMin = currentOffsetMin + svcDuration;
-        const segmentEndTimeStr = minsToTimeStr(segmentEndMin);
-
-        // Sub-booking ID: BK-1234 for single, BK-1234-A / BK-1234-B for multi
-        const subBookingId = isMultiService
-          ? `${bookingId}-${String.fromCharCode(65 + i)}`
-          : bookingId;
-
-        // Determine status
-        let segmentStatus = state.bookingMode === 'request' ? 'pending_approval' : 'confirmed';
-        if (staffAssignment.staffType === 'specific' && staffAssignment.staffId) {
-          const available = isStaffAvailable(
-            staffAssignment.staffId,
-            state.selectedDate as string,
-            segmentStartTimeStr,
-            svcDuration,
-          );
-          if (!available) segmentStatus = 'pending_approval';
-        }
-        if (!staffAssignment.staffId) segmentStatus = 'pending_approval';
-
-        const bookingDoc = {
-          id: subBookingId,
-          parentBookingId: isMultiService ? bookingId : null,
-          branchId: branchSlug,
-          businessId: state.branch?.businessId || '',
-          staffId: staffAssignment.staffId,
-          staffName: staffAssignment.staffName,
-          staffSelectionType: staffAssignment.staffType,
-          customerId: null,
-          customerName: state.customerInfo.name,
-          customerPhone: state.customerInfo.phone,
-          customerEmail: state.customerInfo.email || null,
-          services: [{
-            serviceId: serviceItem.mainService.id,
-            categoryId: serviceItem.categoryId,
-            serviceName: serviceItem.mainService.name,
-            categoryName: serviceItem.categoryName,
-            extras: serviceItem.extras.map(e => ({
-              serviceId: e.id,
-              name: e.name,
-              durationMinutes: e.durationMinutes,
-              price: e.price,
-            })),
-            durationMinutes: serviceItem.mainService.durationMinutes,
-            price: serviceItem.mainService.price,
-          }],
-          serviceIds: [serviceItem.mainService.id],
-          appointmentDate: state.selectedDate,
-          startTime: segmentStartTimeStr,
-          endTime: segmentEndTimeStr,
-          totalDurationMinutes: svcDuration,
-          totalPrice: svcPrice,
-          status: segmentStatus,
-          source: 'online',
-          notes: i === 0 ? (state.customerInfo.notes || '') : '', // notes only on first booking
-          sequenceIndex: i,                    // thứ tự trong chuỗi dịch vụ
-          totalSequenceServices: state.selectedServices.length,
-          createdAt: new Date().toISOString(),
-        };
-
-        await setDoc(doc(db, 'branches', branchSlug, 'bookings', subBookingId), bookingDoc);
-
-        // Advance offset for next service
-        currentOffsetMin = segmentEndMin;
       }
-    } catch (e) {
-      console.error('Error saving booking to Firestore:', e);
-    }
 
-    setIsSubmitting(false);
-    router.push(`/book/${branchSlug}/success`);
+      const bookingResult = await createHrmBooking({
+        storeId: branchSlug,
+        customerName: state.customerInfo.name,
+        customerPhone: state.customerInfo.phone,
+        customerEmail: state.customerInfo.email || undefined,
+        appointmentDate: state.selectedDate,
+        startTime: state.selectedTime,
+        endTime: minsToTimeStr(currentOffsetMin),
+        services: hrmServices,
+        addOns,
+        staffSelectionType: state.selectedServices.some(
+          (service) => service.selectedStaffType === 'specific',
+        ) ? 'specific' : 'any',
+        bookingMode: state.bookingMode,
+        notes: state.customerInfo.notes || undefined,
+        source: 'online_booking',
+      });
+
+      if (bookingResult.item.attendanceCode) {
+        dispatch({
+          type: 'SET_BOOKING_RESULT',
+          attendanceCode: bookingResult.item.attendanceCode,
+        });
+      }
+
+      router.push(`/book/${branchSlug}/success`);
+    } catch (error: unknown) {
+      console.error('Error creating booking via HRM API:', error);
+      setSubmitError(
+        error instanceof Error ? error.message : 'Booking failed. Please try again.',
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const formatDate = (dateStr: string) => {
@@ -369,8 +154,7 @@ export default function ConfirmPage() {
         
         <div className={styles.summaryList}>
           {state.selectedServices.map((item, idx) => {
-            const svcDuration = item.mainService.durationMinutes
-              + item.extras.reduce((sum, e) => sum + e.durationMinutes, 0);
+            const svcDuration = item.mainService.durationMinutes;
             const svcPrice = item.mainService.price
               + item.extras.reduce((sum, e) => sum + e.price, 0);
             const staffLabel = item.selectedStaffType === 'any'
@@ -383,8 +167,7 @@ export default function ConfirmPage() {
               const [h, m] = state.selectedTime.split(':').map(Number);
               segStartMin = h * 60 + m;
               for (let j = 0; j < idx; j++) {
-                segStartMin += state.selectedServices[j].mainService.durationMinutes
-                  + state.selectedServices[j].extras.reduce((sum, e) => sum + e.durationMinutes, 0);
+                segStartMin += state.selectedServices[j].mainService.durationMinutes;
               }
             }
             const segEndMin = segStartMin + svcDuration;
@@ -526,22 +309,6 @@ export default function ConfirmPage() {
             />
           </div>
 
-          {/* Password - only for new clients */}
-          {!isReturning && (
-            <div className={styles.formGroup}>
-              <label className={styles.label}>
-                {t.booking.confirm.form.password}
-              </label>
-              <input
-                type="password"
-                className={styles.input}
-                placeholder={t.booking.confirm.form.passwordPlaceholder}
-                value={state.customerInfo.password}
-                onChange={(e) => handleChange('password', e.target.value)}
-              />
-            </div>
-          )}
-
           {/* Notes */}
           <div className={`${styles.formGroup} ${styles.formGroupFull}`}>
             <label className={styles.label}>
@@ -566,6 +333,11 @@ export default function ConfirmPage() {
         >
           {isSubmitting ? '...' : confirmButtonText}
         </button>
+        {submitError && (
+          <div style={{ color: '#e53e3e', fontSize: '14px', marginTop: '12px', textAlign: 'center', padding: '8px 16px', background: '#fff5f5', borderRadius: '8px', border: '1px solid #fed7d7' }}>
+            ⚠️ {submitError}
+          </div>
+        )}
         {isRequestMode && (
           <div className={styles.requestNoteCard}>
             <svg

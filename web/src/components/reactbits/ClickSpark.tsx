@@ -38,7 +38,7 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
     }, [sparkColor, sparkSize, sparkRadius, extraScale]
   );
 
-  const animate = useCallback((timestamp: number) => {
+  const animate = useCallback(function runAnimation(timestamp: number) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -50,7 +50,7 @@ const ClickSpark: React.FC<ClickSparkProps> = ({
       drawSpark(ctx, spark, elapsed / duration);
       return true;
     });
-    if (sparksRef.current.length > 0) requestAnimationFrame(animate);
+    if (sparksRef.current.length > 0) requestAnimationFrame(runAnimation);
   }, [duration, drawSpark]);
 
   const handleClick = useCallback((e: globalThis.MouseEvent) => {

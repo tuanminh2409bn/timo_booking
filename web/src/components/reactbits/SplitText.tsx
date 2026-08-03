@@ -34,21 +34,33 @@ const SplitText: React.FC<SplitTextProps> = ({
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const fallback = window.setTimeout(() => setInView(true), 250);
+    if (typeof IntersectionObserver === 'undefined') {
+      return () => window.clearTimeout(fallback);
+    }
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) { setInView(true); observer.unobserve(el); }
+        if (entry.isIntersecting) {
+          window.clearTimeout(fallback);
+          setInView(true);
+          observer.unobserve(el);
+        }
       },
       { threshold, rootMargin }
     );
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      window.clearTimeout(fallback);
+      observer.disconnect();
+    };
   }, [threshold, rootMargin]);
 
   const springs = useSprings(
     letters.length,
     letters.map((_, i) => ({
       from: animationFrom,
-      to: inView ? { ...animationTo, delay: i * delay } : animationFrom,
+      to: inView ? animationTo : animationFrom,
+      delay: inView ? i * delay : 0,
       onRest: () => {
         if (inView) {
           animatedCount.current += 1;

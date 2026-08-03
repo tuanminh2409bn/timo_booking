@@ -1,0 +1,194 @@
+﻿[
+  {
+    "density": "SPARSE_ALL",
+    "fields": [
+      {
+        "fieldPath": "ownerId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "storeId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "type",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "__name__",
+        "order": "ASCENDING"
+      }
+    ],
+    "name": "projects/thermal-highway-470815-u4/databases/defaultdatabase/collectionGroups/services/indexes/CICAgNiav4AJ",
+    "queryScope": "COLLECTION",
+    "state": "READY"
+  },
+  {
+    "density": "SPARSE_ALL",
+    "fields": [
+      {
+        "fieldPath": "ownerId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "storeId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "workDate",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "__name__",
+        "order": "ASCENDING"
+      }
+    ],
+    "name": "projects/thermal-highway-470815-u4/databases/defaultdatabase/collectionGroups/expenses/indexes/CICAgNiav4AK",
+    "queryScope": "COLLECTION",
+    "state": "READY"
+  },
+  {
+    "density": "SPARSE_ALL",
+    "fields": [
+      {
+        "fieldPath": "ownerId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "storeId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "workDate",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "__name__",
+        "order": "ASCENDING"
+      }
+    ],
+    "name": "projects/thermal-highway-470815-u4/databases/defaultdatabase/collectionGroups/attendances/indexes/CICAgJj7z4EK",
+    "queryScope": "COLLECTION",
+    "state": "READY"
+  },
+  {
+    "density": "SPARSE_ALL",
+    "fields": [
+      {
+        "fieldPath": "ownerId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "storeId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "status",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "workDate",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "__name__",
+        "order": "ASCENDING"
+      }
+    ],
+    "name": "projects/thermal-highway-470815-u4/databases/defaultdatabase/collectionGroups/attendance_correction_requests/indexes/CICAgNjpgYIK",
+    "queryScope": "COLLECTION",
+    "state": "READY"
+  },
+  {
+    "density": "SPARSE_ALL",
+    "fields": [
+      {
+        "fieldPath": "ownerId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "storeWorkDateKey",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "__name__",
+        "order": "ASCENDING"
+      }
+    ],
+    "name": "projects/thermal-highway-470815-u4/databases/defaultdatabase/collectionGroups/attendances/indexes/CICAgNi47oMK",
+    "queryScope": "COLLECTION",
+    "state": "READY"
+  },
+  {
+    "density": "SPARSE_ALL",
+    "fields": [
+      {
+        "fieldPath": "ownerId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "storeId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "workDate",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "__name__",
+        "order": "ASCENDING"
+      }
+    ],
+    "name": "projects/thermal-highway-470815-u4/databases/defaultdatabase/collectionGroups/work_day_closings/indexes/CICAgOi3kJAK",
+    "queryScope": "COLLECTION",
+    "state": "READY"
+  },
+  {
+    "density": "SPARSE_ALL",
+    "fields": [
+      {
+        "fieldPath": "ownerId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "employeeCode",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "__name__",
+        "order": "ASCENDING"
+      }
+    ],
+    "name": "projects/thermal-highway-470815-u4/databases/defaultdatabase/collectionGroups/user/indexes/CICAgJiUsZIK",
+    "queryScope": "COLLECTION",
+    "state": "READY"
+  },
+  {
+    "density": "SPARSE_ALL",
+    "fields": [
+      {
+        "fieldPath": "ownerId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "role",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "storeId",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "active",
+        "order": "ASCENDING"
+      },
+      {
+        "fieldPath": "__name__",
+        "order": "ASCENDING"
+      }
+    ],
+    "name": "projects/thermal-highway-470815-u4/databases/defaultdatabase/collectionGroups/user/indexes/CICAgNjp5ZMK",
+    "queryScope": "COLLECTION",
+    "state": "READY"
+  }
+]

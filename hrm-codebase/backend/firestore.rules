@@ -1,0 +1,156 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Prototype read-only client rules for the canonical nested model.
+    // Assumed model:
+    // - users/{uid}: uid, email, ownerId, role, active, optional storeId.
+    // - stores/{storeId}: ownerId, storeId/id, name, status.
+    // - stores/{storeId}/{subcollection}/{doc}: ownerId + storeId are persisted fields.
+    // - stores/{storeId}/service_categories/{categoryId}/services/{serviceId}: ownerId + storeId fields.
+    // - audit_logs/{id}: ownerId field.
+    // Client writes are denied; backend Admin SDK remains the only writer.
+
+    function signedIn() {
+      return request.auth != null && request.auth.uid is string;
+    }
+
+    function ownerId() {
+      return request.auth.token.get('ownerId', null);
+    }
+
+    function tokenStoreId() {
+      return request.auth.token.get('storeId', null);
+    }
+
+    function userPath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function hasActiveProfile() {
+      return signedIn()
+        && exists(userPath(request.auth.uid))
+        && get(userPath(request.auth.uid)).data.active == true
+        && get(userPath(request.auth.uid)).data.ownerId == ownerId()
+        && get(userPath(request.auth.uid)).data.role == request.auth.token.role
+        && (tokenStoreId() == null || get(userPath(request.auth.uid)).data.storeId == tokenStoreId());
+    }
+
+    function isOwnerRole() {
+      return hasActiveProfile() && request.auth.token.role == "owner";
+    }
+
+    function isEmployeeRole() {
+      return hasActiveProfile()
+        && request.auth.token.role == "employee"
+        && tokenStoreId() is string;
+    }
+
+    // Manager is bound to a single store like an employee, but sees the whole store's
+    // data (statistics/reports stay owner-only, enforced at the backend API layer).
+    function isManagerRole() {
+      return hasActiveProfile()
+        && request.auth.token.role == "manager"
+        && tokenStoreId() is string;
+    }
+
+    // Roles scoped to exactly one store (manager + employee).
+    function isStoreScopedRole() {
+      return isEmployeeRole() || isManagerRole();
+    }
+
+    function canReadOwnStore(storeId) {
+      return isOwnerRole() && resource.data.ownerId == ownerId()
+        || isStoreScopedRole() && storeId == tokenStoreId() && resource.data.ownerId == ownerId();
+    }
+
+    // Authorize store-scoped subcollection reads by PATH (storeId) + store ownership, not by
+    // per-document fields. The FE live queries (e.g. stores/{storeId}/attendances where workDate)
+    // are scoped by the path and do NOT filter ownerId/storeId, so a per-doc resource.data check
+    // would make Firestore reject the list query. Path-based auth is safe: every doc under
+    // stores/{storeId}/** belongs to that store.
+    function ownsStore(storeId) {
+      return exists(/databases/$(database)/documents/stores/$(storeId))
+        && get(/databases/$(database)/documents/stores/$(storeId)).data.ownerId == ownerId();
+    }
+
+    function canReadStoreScopedResource(storeId) {
+      return hasActiveProfile()
+        && ownsStore(storeId)
+        && (
+          isOwnerRole()
+          || (isStoreScopedRole() && storeId == tokenStoreId())
+        );
+    }
+
+    // Collection-group queries cannot rely on the /stores/{storeId}/** path match
+    // alone. The services page queries collectionGroup("services"), so it needs
+    // an explicit rule that Firestore can validate from ownerId/storeId filters.
+    function canReadServiceDocument() {
+      return hasActiveProfile()
+        && resource.data.ownerId == ownerId()
+        && resource.data.storeId is string
+        && ownsStore(resource.data.storeId)
+        && (
+          isOwnerRole()
+          || (isStoreScopedRole() && resource.data.storeId == tokenStoreId())
+        );
+    }
+
+    match /stores/{storeId} {
+      allow read: if canReadOwnStore(storeId);
+      allow write: if false;
+    }
+
+    // Attendance documents contain customer PII and are never exposed to employee
+    // clients. Employees receive their redacted calendar through the backend API.
+    match /stores/{storeId}/attendances/{attendanceId} {
+      allow read: if canReadStoreScopedResource(storeId)
+        && (isOwnerRole() || isManagerRole());
+      allow write: if false;
+    }
+
+    // Keep the generic nested read for non-attendance store resources. The first
+    // path segment is captured so attendance cannot be granted by this fallback.
+    match /stores/{storeId}/{subcollection}/{document=**} {
+      allow read: if subcollection != "attendances" && canReadStoreScopedResource(storeId);
+      allow write: if false;
+    }
+
+    match /{path=**}/services/{serviceId} {
+      allow read: if canReadServiceDocument();
+      allow write: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if hasActiveProfile()
+        && (
+          userId == request.auth.uid
+          || (isOwnerRole() && resource.data.ownerId == ownerId() && resource.data.role == "employee")
+          || (
+            isManagerRole()
+            && resource.data.ownerId == ownerId()
+            && resource.data.role == "employee"
+            && resource.data.storeId == tokenStoreId()
+          )
+        );
+      allow write: if false;
+    }
+
+    match /users/{userId}/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /audit_logs/{logId} {
+      allow read: if isOwnerRole() && resource.data.ownerId == ownerId();
+      allow write: if false;
+    }
+
+    match /admin/{document=**} {
+      allow read, write: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useI18n } from '@/lib/i18n';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import SplitText from '@/components/reactbits/SplitText';
@@ -183,7 +183,6 @@ const testimonials = [
 /* ── Main Landing Page ── */
 export default function LandingPage() {
   const { t, locale } = useI18n();
-  const router = useRouter();
   const [scrolled, setScrolled] = useState(false);
   const [contactSent, setContactSent] = useState(false);
   const [contactSending, setContactSending] = useState(false);
@@ -199,10 +198,6 @@ export default function LandingPage() {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
     setMobileMenuOpen(false);
   }, []);
-
-  const goToBooking = useCallback(() => {
-    router.push('/book');
-  }, [router]);
 
   const handleContactSubmit = useCallback((e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -232,9 +227,9 @@ export default function LandingPage() {
       {/* ═══════ NAVIGATION ═══════ */}
       <nav className={`${styles.nav} ${scrolled ? styles.navScrolled : ''}`}>
         <div className={styles.navInner}>
-          <a href="/" className={styles.logo}>
+          <Link href="/" className={styles.logo}>
             Timmo<span className={styles.logoDot} /><span className={styles.logoTextSuffix}>Booking</span>
-          </a>
+          </Link>
 
           <div className={styles.navLinks}>
             <a href="#features" onClick={(e) => { e.preventDefault(); scrollTo('features'); }} className={styles.navLink}>
@@ -252,7 +247,7 @@ export default function LandingPage() {
           </div>
 
           <div className={styles.navActions}>
-            <a href="/admin/login" className={styles.navLogin}>
+            <Link href="/admin/login" className={styles.navLogin}>
               <span className={styles.navLoginText}>{t.landing.nav.loginAdmin}</span>
               <span className={styles.navLoginIcon} title={t.landing.nav.loginAdmin}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -260,11 +255,11 @@ export default function LandingPage() {
                   <circle cx="12" cy="7" r="4"></circle>
                 </svg>
               </span>
-            </a>
+            </Link>
             <LanguageSwitcher variant="light" />
-            <a href="/book" className={styles.navCta}>
+            <Link href="/book" className={styles.navCta}>
               {t.landing.hero.ctaClient}
-            </a>
+            </Link>
           </div>
 
           <button 
@@ -306,12 +301,12 @@ export default function LandingPage() {
               <div className={styles.mobileNavLang}>
                 <LanguageSwitcher variant="light" align="left" />
               </div>
-              <a href="/admin/login" className={styles.mobileNavLink}>
+              <Link href="/admin/login" className={styles.mobileNavLink}>
                 {t.landing.nav.loginAdmin}
-              </a>
-              <a href="/book" className={styles.mobileNavCta}>
+              </Link>
+              <Link href="/book" className={styles.mobileNavCta}>
                 {t.landing.hero.ctaClient}
-              </a>
+              </Link>
             </div>
           </div>
         )}
@@ -356,14 +351,14 @@ export default function LandingPage() {
           />
 
           <div className={styles.heroActions}>
-            <a href="/book" className={styles.btnPrimary}>
+            <Link href="/book" className={styles.btnPrimary}>
               {t.landing.hero.ctaClient}
               <ArrowRightIcon />
-            </a>
-            <a href="/admin/login" className={styles.btnSecondary}>
+            </Link>
+            <Link href="/admin/login" className={styles.btnSecondary}>
               <span className={styles.btnIcon}>💼</span>
               {t.landing.hero.ctaAdmin}
-            </a>
+            </Link>
           </div>
 
           {/* Stats Row */}
@@ -555,7 +550,7 @@ export default function LandingPage() {
                     </li>
                   ))}
                 </ul>
-                <a href="/book" className={styles.pricingButton}>{t.landing.pricing.getStarted}</a>
+                <Link href="/book" className={styles.pricingButton}>{t.landing.pricing.getStarted}</Link>
               </div>
             </AnimatedContent>
 
@@ -580,7 +575,7 @@ export default function LandingPage() {
                     </li>
                   ))}
                 </ul>
-                <a href="/book" className={`${styles.pricingButton} ${styles.pricingButtonPrimary}`}>{t.landing.pricing.getStarted}</a>
+                <Link href="/book" className={`${styles.pricingButton} ${styles.pricingButtonPrimary}`}>{t.landing.pricing.getStarted}</Link>
               </div>
             </AnimatedContent>
 
@@ -619,10 +614,10 @@ export default function LandingPage() {
             <ShinyText text={t.landing.cta.titleHighlight} speed={4} className={styles.ctaShiny} />
           </h2>
           <p className={styles.ctaSubtitle}>{t.landing.cta.subtitle}</p>
-          <a href="/book" className={styles.ctaButton}>
+          <Link href="/book" className={styles.ctaButton}>
             {t.landing.cta.button}
             <ArrowRightIcon />
-          </a>
+          </Link>
           <p className={styles.ctaNote}>{t.landing.cta.note}</p>
 
           <div className={styles.ctaTrust}>
@@ -789,9 +784,9 @@ export default function LandingPage() {
             <div className={styles.footerColumn}>
               <h4>{t.landing.footer.legal}</h4>
               <ul>
-                <li><a href="/privacy">{t.landing.footer.privacy}</a></li>
-                <li><a href="/terms">{t.landing.footer.terms}</a></li>
-                <li><a href="/cookies">{t.landing.footer.cookies}</a></li>
+                <li><Link href="/privacy">{t.landing.footer.privacy}</Link></li>
+                <li><Link href="/terms">{t.landing.footer.terms}</Link></li>
+                <li><Link href="/cookies">{t.landing.footer.cookies}</Link></li>
               </ul>
             </div>
           </div>

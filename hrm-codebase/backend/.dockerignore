@@ -1,0 +1,16 @@
+.git
+.github
+.env
+.gitnexus
+.claude
+coverage
+__test__
+*.log
+dist
+node_modules
+npm-debug.log*
+Dockerfile
+README.md
+test.js
+AGENTS.md
+CLAUDE.md

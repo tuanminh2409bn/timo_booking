@@ -144,10 +144,15 @@
 .emptyIcon { font-size: 48px; display: block; margin-bottom: 12px; opacity: 0.5; }
 
 /* =========================
-   CALENDAR VIEW 
+   CALENDAR VIEW
    ========================= */
 
-.calendarView { display: flex; flex-direction: column; }
+.calendarView {
+  display: flex;
+  flex-direction: column;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
 
 /* Nav */
 .calendarNav {
@@ -215,6 +220,8 @@
   border: 1px solid #E5E7EB;
   border-radius: 14px;
   overflow: hidden;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 /* Row = flex row for header and body alignment */
@@ -314,13 +321,13 @@
   background: rgba(239, 68, 68, 0.05) !important;
 }
 
-/* Spec V1: Request column avatar */
+/* Customer requests are yellow; appointments needing reassignment are orange. */
 .requestAvatar {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: #FEF3C7;
-  border: 2px solid #D97706;
+  background: #FEF9C3;
+  border: 2px solid #EAB308;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -328,7 +335,25 @@
 }
 
 .calHeaderCellRequest {
-  background: rgba(245, 158, 11, 0.04);
+  background: rgba(234, 179, 8, 0.09);
+}
+
+.needsActionAvatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #FFEDD5;
+  border: 2px solid #F97316;
+  color: #C2410C;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.calHeaderCellNeedsAction {
+  background: rgba(249, 115, 22, 0.09);
 }
 
 .calStaffName {
@@ -495,10 +520,14 @@
 .calBlockConfirmed { background: #ECFDF5; border-left-color: #059669; }
 .calBlockConfirmed .calBlockService { color: #059669; }
 .calBlockConfirmed:hover { box-shadow: 0 4px 12px rgba(5,150,105,0.18); }
-/* Pending = Orange (matching list card orange border) */
-.calBlockPending { background: #FFFBEB; border-left-color: #D97706; }
-.calBlockPending .calBlockService { color: #D97706; }
-.calBlockPending:hover { box-shadow: 0 4px 12px rgba(217,119,6,0.18); }
+/* Request = yellow */
+.calBlockPending { background: #FEFCE8; border-left-color: #EAB308; }
+.calBlockPending .calBlockService { color: #A16207; }
+.calBlockPending:hover { box-shadow: 0 4px 12px rgba(234,179,8,0.2); }
+/* Needs owner action = orange */
+.calBlockNeedsAction { background: #FFF7ED; border-left-color: #F97316; }
+.calBlockNeedsAction .calBlockService { color: #C2410C; }
+.calBlockNeedsAction:hover { box-shadow: 0 4px 12px rgba(249,115,22,0.2); }
 /* Cancelled = Grey (matching list card grey border) */
 .calBlockCancelled { background: #F9FAFB; border-left-color: #9CA3AF; opacity: 0.6; }
 .calBlockCancelled .calBlockService { color: #9CA3AF; text-decoration: line-through; }
@@ -554,7 +583,7 @@
   .durationValue { margin-top: 0; }
   .cardRight { flex-direction: row; align-items: center; justify-content: space-between; }
   .calPopover { left: 16px !important; right: 16px !important; max-width: none; }
-  
+
   .calendarNav {
     flex-direction: column;
     align-items: flex-start;
@@ -568,6 +597,11 @@
     flex: 1;
     margin: 0 8px;
     text-align: center;
+  }
+
+  .cornerLabel {
+    font-size: 9px;
+    padding-inline: 1px;
   }
 }
 
@@ -672,8 +706,8 @@
 
 .statusDot_all { background: #9CA3AF; }
 .statusDot_confirmed { background: #059669; }
-.statusDot_pending_approval { background: #D97706; }
-.statusDot_needs_owner_action { background: #EF4444; }
+.statusDot_pending_approval { background: #EAB308; }
+.statusDot_needs_owner_action { background: #F97316; }
 .statusDot_completed { background: #2563EB; }
 .statusDot_cancelled { background: #9CA3AF; }
 
@@ -885,6 +919,7 @@
 
 .legendDotGreen { background: #059669; }
 .legendDotOrange { background: #D97706; }
+.legendDotYellow { background: #EAB308; }
 .legendDotBlue { background: #1A56DB; }
 .legendDotGrey { background: #9CA3AF; }
 .legendDotRed { background: #dc2626; }
@@ -1133,4 +1168,105 @@
   gap: 10px;
   padding: 14px 20px;
   border-top: 1px solid #E5E7EB;
+}
+
+/* ── Quick 2-tap Booking Popup ── */
+.quickBookPopup {
+  position: fixed;
+  z-index: 1100;
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.10);
+  padding: 12px;
+  min-width: 200px;
+  max-width: 240px;
+  animation: popupIn 0.15s ease;
+  transform: translateY(-8px);
+}
+
+@keyframes popupIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(-8px) scale(1); }
+}
+
+.quickBookHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.quickBookTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.quickBookClose {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #9CA3AF;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.quickBookBtns {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.quickBookBtn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 8px;
+  border: 2px solid #E5E7EB;
+  border-radius: 10px;
+  background: #F9FAFB;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.quickBookBtn:hover {
+  border-color: #6366F1;
+  background: #EEF2FF;
+  transform: translateY(-1px);
+}
+
+.quickBookBtnIcon {
+  font-size: 20px;
+}
+
+.quickBookBtnLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.quickBookBtnTime {
+  font-size: 10px;
+  color: #6B7280;
+}
+
+.quickBookDetailBtn {
+  width: 100%;
+  padding: 6px;
+  background: none;
+  border: 1px dashed #D1D5DB;
+  border-radius: 8px;
+  font-size: 11px;
+  color: #6B7280;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.quickBookDetailBtn:hover {
+  background: #F3F4F6;
+  color: #374151;
+  border-color: #9CA3AF;
 }
