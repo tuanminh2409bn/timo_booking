@@ -625,6 +625,7 @@ export const listShopEmployeesFactory = (firestoreDB: Firestore) => {
         "displayName",
         "position",
         "gender",
+        "workerType",
         "compensationModel",
         "ownerCommissionRate",
         "fixedSalary",

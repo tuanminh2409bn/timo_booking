@@ -2097,6 +2097,21 @@ describe("backend API integration: attendance and settlement", () => {
     expect(createdAttendance.updatedByUserId).toBe(createdAttendance.customerId);
   });
 
+  it("returns the persisted worker type in the public staff catalog", async () => {
+    const employee = state.users.get("staff-1");
+    if (!employee) throw new Error("staff-1 fixture missing");
+    state.users.set("staff-1", { ...employee, workerType: "assistant" });
+
+    const response = await withRequestDefaults(
+      request(app).get("/api/v1/public/stores/branch-1/staff"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.items).toContainEqual(
+      expect.objectContaining({ uid: "staff-1", workerType: "assistant" }),
+    );
+  });
+
   it("splits a public booking across main employees while sharing one booking id", async () => {
     const response = await withRequestDefaults(
       request(app)
