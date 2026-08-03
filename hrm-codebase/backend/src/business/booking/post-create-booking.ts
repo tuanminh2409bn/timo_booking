@@ -131,7 +131,11 @@ export const createAuthenticatedBooking = async (request: Request, response: Res
   );
   const invalidEmployee = payload.services.find((service) => {
     const employee = employeeMap.get(service.employeeUserId);
-    return !employee || (employee.serviceIds !== undefined && !employee.serviceIds.includes(service.sourceServiceId));
+    return !employee || (
+      employee.serviceIds !== undefined &&
+      employee.serviceIds.length > 0 &&
+      !employee.serviceIds.includes(service.sourceServiceId)
+    );
   });
   if (invalidService || invalidAddOn || invalidEmployee) {
     return response.status(400).json({

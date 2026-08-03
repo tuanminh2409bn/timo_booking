@@ -569,7 +569,7 @@ router.post(
         const employee = storeEmployeeMap.get(service.employeeUserId);
         return (
           employee === undefined ||
-          (employee.serviceIds !== undefined &&
+          (employee.serviceIds !== undefined && employee.serviceIds.length > 0 &&
             !employee.serviceIds.includes(service.sourceServiceId))
         );
       });
@@ -761,7 +761,11 @@ router.post(
           const preferredWorkerType = catalogService?.preferredWorkerType ?? "main";
           const eligibleEmployees = storeEmployees
             .filter((employee) => {
-              if (employee.serviceIds !== undefined && !employee.serviceIds.includes(sourceServiceId)) {
+              if (
+                employee.serviceIds !== undefined &&
+                employee.serviceIds.length > 0 &&
+                !employee.serviceIds.includes(sourceServiceId)
+              ) {
                 return false;
               }
               if (activeLeave.some((leave) => leave["employeeUserId"] === employee.uid)) {

@@ -161,6 +161,7 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
   }
   if (
     employee.serviceIds !== undefined &&
+    employee.serviceIds.length > 0 &&
     attendance.services.some(
       (service) => service.sourceServiceId && !employee.serviceIds?.includes(service.sourceServiceId),
     )

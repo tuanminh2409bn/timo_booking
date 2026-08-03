@@ -2049,6 +2049,10 @@ describe("backend API integration: attendance and settlement", () => {
   });
 
   it("auto-assigns an any-staff public booking and confirms it", async () => {
+    const unrestrictedEmployee = state.users.get("staff-1");
+    if (!unrestrictedEmployee) throw new Error("staff-1 fixture missing");
+    state.users.set("staff-1", { ...unrestrictedEmployee, serviceIds: [] });
+
     const createPublicBookingResponse = await withRequestDefaults(
       request(app)
         .post("/api/v1/public/stores/branch-1/bookings")
