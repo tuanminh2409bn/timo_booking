@@ -2,6 +2,7 @@
 module.exports = {
   content: [
     "./src/app/admin/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/app/customer/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/admin/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   corePlugins: {
@@ -85,5 +86,6 @@ module.exports = {
       },
     },
   },
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   plugins: [require("tailwindcss-animate")],
 }

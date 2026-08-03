@@ -5,23 +5,27 @@ import { useI18n } from '@/lib/i18n';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
 import { useRouter } from 'next/navigation';
-import { demoBranch } from '@/lib/seedData';
 import styles from './page.module.css';
+import Link from 'next/link';
 
 export default function SuccessPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { getCategoryName, getServiceName } = useServiceTranslation();
   const { state, dispatch, totals } = useBooking();
   const router = useRouter();
   const branchSlug = state.branchSlug;
 
-  const [appointmentId, setAppointmentId] = useState('APT-......');
-
+  const [mounted, setMounted] = useState(false);
   useEffect(() => {
-    setAppointmentId(`APT-${Math.random().toString(36).substring(2, 8).toUpperCase()}`);
+    setMounted(true);
   }, []);
 
+  // Use real attendance code from HRM API if available
+  const appointmentId = state.attendanceCode || 'Đang xử lý...';
+
   const isRequestMode = state.bookingMode === 'request';
+
+  if (!mounted) return null;
 
   // Build service display string from all selected services
   const serviceDisplayText = state.selectedServices
@@ -80,8 +84,8 @@ export default function SuccessPage() {
       'BEGIN:VEVENT',
       `DTSTART:${formatICS(startDate)}`,
       `DTEND:${formatICS(endDate)}`,
-      `SUMMARY:${icalSummary} - ${demoBranch.name}`,
-      `LOCATION:${demoBranch.address}`,
+      `SUMMARY:${icalSummary} - ${state.branch?.name ?? ''}`,
+      `LOCATION:${state.branch?.address ?? ''}`,
       `DESCRIPTION:Appointment ${appointmentId}`,
       'END:VEVENT',
       'END:VCALENDAR',
@@ -130,8 +134,7 @@ export default function SuccessPage() {
         <div className={styles.detailsCard}>
           {/* Service blocks */}
           {state.selectedServices.map((item, idx) => {
-            const svcDuration = item.mainService.durationMinutes
-              + item.extras.reduce((sum, e) => sum + e.durationMinutes, 0);
+            const svcDuration = item.mainService.durationMinutes;
             const staffLabel = item.selectedStaffType === 'any'
               ? t.booking.staff.anyStaff.title
               : item.selectedStaff?.name || '—';
@@ -142,8 +145,7 @@ export default function SuccessPage() {
               const [h, m] = state.selectedTime.split(':').map(Number);
               segStartMin = h * 60 + m;
               for (let j = 0; j < idx; j++) {
-                segStartMin += state.selectedServices[j].mainService.durationMinutes
-                  + state.selectedServices[j].extras.reduce((sum, e) => sum + e.durationMinutes, 0);
+                segStartMin += state.selectedServices[j].mainService.durationMinutes;
               }
             }
             const segEndMin = segStartMin + svcDuration;
@@ -171,6 +173,17 @@ export default function SuccessPage() {
                       + {item.extras.map(e => getServiceName(e.id, e.name)).join(', ')}
                     </span>
                   )}
+                  {/* Add-on note: shown when any extra is an addon type */}
+                  {item.extras.some(e => e.isAddon || e.type === 'addon') && (
+                    <div className={styles.addonNote}>
+                      ℹ️{' '}
+                      {locale === 'de'
+                        ? 'Add-on-Dienste können jederzeit durchgeführt werden – kommen Sie einfach rein!'
+                        : locale === 'vi'
+                        ? 'Dịch vụ bổ sung có thể thực hiện bất cứ lúc nào – bạn có thể đến bất kỳ lúc nào!'
+                        : 'Add-on services can be done at any time – just walk in!'}
+                    </div>
+                  )}
                   <div className={styles.serviceMetaRow}>
                     <span className={styles.serviceMetaChip}>🕐 {svcDuration} {t.common.minutes}</span>
                     <span className={styles.serviceMetaChip}>👤 {staffLabel}</span>
@@ -192,7 +205,7 @@ export default function SuccessPage() {
           </div>
           <div className={styles.detailRow}>
             <span className={styles.detailLabel}>📍 {t.booking.success.details.where}</span>
-            <span className={styles.detailValue}>{state.branch?.name || demoBranch.name}</span>
+            <span className={styles.detailValue}>{state.branch?.name ?? '—'}</span>
           </div>
           <div className={styles.detailRow}>
             <span className={styles.detailLabel}>⏱ {t.booking.services.summary.duration}</span>
@@ -219,6 +232,9 @@ export default function SuccessPage() {
           >
             {t.booking.success.actions.bookAnother}
           </button>
+          <Link href="/customer" className={`${styles.actionButton} ${styles.outlineButton}`}>
+            {locale === 'vi' ? 'Quản lý lịch của tôi' : 'Manage my bookings'}
+          </Link>
         </div>
       </div>
     </div>

@@ -1,0 +1,1393 @@
+{
+  "info": {
+    "_postman_id": "fc8bd7c0-9c58-4f73-8c0d-cdf60d7ce240",
+    "name": "NailSalonManagementSystem Backend",
+    "description": "Monitoring, auth, account, shop, employee, attendance, salary/report, correction request, notification, and negative-case API checks. Weekly report contract checks included.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test(\"response time < 2000ms\", function () {",
+          "  pm.expect(pm.response.responseTime).to.be.below(2000);",
+          "});",
+          "",
+          "pm.test(\"has request id\", function () {",
+          "  pm.expect(pm.response.headers.get(\"X-Request-Id\")).to.exist;",
+          "});",
+          "",
+          "const contentType = pm.response.headers.get(\"Content-Type\") || \"\";",
+          "if (contentType.includes(\"application/json\")) {",
+          "  pm.test(\"response is json\", function () {",
+          "    pm.expect(contentType).to.include(\"application/json\");",
+          "  });",
+          "}",
+          "",
+          "if (pm.response.code >= 400 && contentType.includes(\"application/json\")) {",
+          "  pm.test(\"error has type and message\", function () {",
+          "    const json = pm.response.json();",
+          "    pm.expect(json).to.have.property(\"type\");",
+          "    pm.expect(json).to.have.property(\"message\");",
+          "  });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "00 Monitoring",
+      "item": [
+        {
+          "name": "Health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/monitoring/health"
+          }
+        },
+        {
+          "name": "Readiness",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/monitoring/ready"
+          }
+        },
+        {
+          "name": "Metrics",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/monitoring/metrics"
+          }
+        }
+      ]
+    },
+    {
+      "name": "01 Auth Admin",
+      "item": [
+        {
+          "name": "Admin Signin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "if (json.jwtToken) pm.environment.set(\"adminJwt\", json.jwtToken);",
+                  "if (json.user?.uid) pm.environment.set(\"ownerUid\", json.user.uid);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{firebaseAdminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/admin/signin"
+          }
+        },
+        {
+          "name": "Admin Register Owner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{adminJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"owner.postman@example.com\",\n  \"name\": \"Postman Owner\",\n  \"password\": \"secret123\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/admin/register-owner"
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 Auth Owner Staff",
+      "item": [
+        {
+          "name": "Register Owner",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201, 409]); });",
+                  "if (json.uid) pm.environment.set(\"ownerUid\", json.uid);",
+                  "if (json.shopId) pm.environment.set(\"shopId\", json.shopId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"owner.local@example.com\",\n  \"name\": \"Local Owner\",\n  \"password\": \"secret123\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/register-owner"
+          }
+        },
+        {
+          "name": "Owner Signin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "if (json.jwtToken) pm.environment.set(\"ownerJwt\", json.jwtToken);",
+                  "if (json.user?.uid) pm.environment.set(\"ownerUid\", json.user.uid);",
+                  "if (json.user?.shopId) pm.environment.set(\"shopId\", json.user.shopId);",
+                  "if (json.user?.branchId) pm.environment.set(\"branchId\", json.user.branchId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{firebaseOwnerToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/signin"
+          }
+        },
+        {
+          "name": "Staff Signin",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "if (json.jwtToken) pm.environment.set(\"staffJwt\", json.jwtToken);",
+                  "if (json.user?.uid) pm.environment.set(\"staffUid\", json.user.uid);",
+                  "if (json.user?.branchId) pm.environment.set(\"branchId\", json.user.branchId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{firebaseStaffToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/signin"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/auth/logout"
+          }
+        },
+        {
+          "name": "Change Password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{firebaseOwnerToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newPassword\": \"secret1234\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/change-password"
+          }
+        },
+        {
+          "name": "Forgot Password Request OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"owner.local@example.com\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/forgot-password/request-otp"
+          }
+        },
+        {
+          "name": "Forgot Password Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json.resetToken) pm.environment.set(\"resetToken\", json.resetToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"owner.local@example.com\",\n  \"otp\": \"000000\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/forgot-password/verify-otp"
+          }
+        },
+        {
+          "name": "Forgot Password Reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"resetToken\": \"{{resetToken}}\",\n  \"password\": \"secret12345\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/forgot-password/reset-password"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 Account",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/account/profile"
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"Updated Owner\",\n  \"phone\": \"0909000000\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/account/profile"
+          }
+        },
+        {
+          "name": "Upload Avatar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fileName\": \"avatar.png\",\n  \"contentType\": \"image/png\",\n  \"base64\": \"iVBORw0KGgo=\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/account/avatar"
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 Shop Branch",
+      "item": [
+        {
+          "name": "Create Branch",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "if (json.branchId || json.id) pm.environment.set(\"branchId\", json.branchId || json.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Branch\",\n  \"code\": \"PM\",\n  \"phone\": \"0903000000\",\n  \"manager\": \"Postman Manager\",\n  \"status\": \"active\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/shop/branch"
+          }
+        },
+        {
+          "name": "List Branches",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/shop/branch"
+          }
+        },
+        {
+          "name": "Get Branch Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/shop/branch/{{branchId}}"
+          }
+        },
+        {
+          "name": "Update Branch",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Branch Updated\",\n  \"status\": \"active\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/shop/branch/{{branchId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 Shop Service",
+      "item": [
+        {
+          "name": "Upload Service Image",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fileName\": \"service.png\",\n  \"contentType\": \"image/png\",\n  \"base64\": \"iVBORw0KGgo=\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/shop/service/image"
+          }
+        },
+        {
+          "name": "Create Service",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "if (json.serviceId || json.id) pm.environment.set(\"serviceId\", json.serviceId || json.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"branchId\": \"{{branchId}}\",\n  \"name\": \"Postman Manicure\",\n  \"price\": 50,\n  \"category\": \"nail\",\n  \"durationMin\": 45,\n  \"durationMax\": 60\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/shop/service"
+          }
+        },
+        {
+          "name": "Service Bootstrap",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/shop/service/bootstrap?branchId={{branchId}}"
+          }
+        },
+        {
+          "name": "List Services",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/shop/service?branchId={{branchId}}"
+          }
+        },
+        {
+          "name": "Update Service",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"price\": 65,\n  \"durationMin\": 45,\n  \"durationMax\": 60\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/shop/service/{{serviceId}}"
+          }
+        },
+        {
+          "name": "Delete Service",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/shop/service/{{serviceId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 Employee",
+      "item": [
+        {
+          "name": "List Employees",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/employees"
+          }
+        },
+        {
+          "name": "Create Employee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "if (json.id) pm.environment.set(\"staffUid\", json.id);",
+                  "if (json.employee?.uid) pm.environment.set(\"staffUid\", json.employee.uid);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"staff.postman@example.com\",\n  \"password\": \"secret123\",\n  \"name\": \"Postman Staff\",\n  \"branchId\": \"{{branchId}}\",\n  \"role\": \"staff\",\n  \"employeeStatus\": \"active\",\n  \"compensationModel\": \"commission\",\n  \"commissionRate\": 60\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/employee/employees"
+          }
+        },
+        {
+          "name": "Get Employee Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/employees/{{staffUid}}"
+          }
+        },
+        {
+          "name": "Staff Get Self",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{staffJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/employees/{{staffUid}}"
+          }
+        },
+        {
+          "name": "Update Employee",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Postman Staff Updated\",\n  \"branchId\": \"{{branchId}}\",\n  \"role\": \"staff\",\n  \"employeeStatus\": \"active\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/employee/employees/{{staffUid}}"
+          }
+        },
+        {
+          "name": "Employee Bootstrap",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{staffJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/me/bootstrap"
+          }
+        },
+        {
+          "name": "Employee Report",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{staffJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/me/report?fromWorkDate={{workDate}}&toWorkDate={{workDate}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 Attendance",
+      "item": [
+        {
+          "name": "Attendance Bootstrap",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/attendance/bootstrap?branchId={{branchId}}&workDate={{workDate}}"
+          }
+        },
+        {
+          "name": "List Attendance",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/attendance?branchId={{branchId}}&workDate={{workDate}}"
+          }
+        },
+        {
+          "name": "Create Attendance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "if (json.id) pm.environment.set(\"attendanceId\", json.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"workDate\": \"{{workDate}}\",\n  \"startTime\": 540,\n  \"endTime\": 600,\n  \"customerName\": \"Postman Customer\",\n  \"branchId\": \"{{branchId}}\",\n  \"services\": [\n    {\n      \"id\": \"{{serviceId}}\",\n      \"sourceServiceId\": \"{{serviceId}}\",\n      \"name\": \"Postman Manicure\",\n      \"category\": \"nail\",\n      \"price\": 50,\n      \"duration\": 60,\n      \"employees\": [\n        { \"employeeId\": \"{{staffUid}}\", \"percentage\": 100 }\n      ]\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/employee/attendance"
+          }
+        },
+        {
+          "name": "Get Attendance Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/attendance/{{attendanceId}}"
+          }
+        },
+        {
+          "name": "Update Attendance",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"workDate\": \"{{workDate}}\",\n  \"startTime\": 570,\n  \"endTime\": 630,\n  \"customerName\": \"Postman Customer Updated\",\n  \"branchId\": \"{{branchId}}\",\n  \"services\": [\n    {\n      \"id\": \"{{serviceId}}\",\n      \"sourceServiceId\": \"{{serviceId}}\",\n      \"name\": \"Postman Manicure\",\n      \"category\": \"nail\",\n      \"price\": 50,\n      \"duration\": 60,\n      \"employees\": [\n        { \"employeeId\": \"{{staffUid}}\", \"percentage\": 100 }\n      ]\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/employee/attendance/{{attendanceId}}"
+          }
+        },
+        {
+          "name": "Close Attendance",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/attendance/{{attendanceId}}/close"
+          }
+        },
+        {
+          "name": "Get Attendance Session",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/session?branchId={{branchId}}&workDate={{workDate}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 Settlement Report Salary",
+      "item": [
+        {
+          "name": "Settlement Preview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/session/settlement-preview?branchId={{branchId}}&workDate={{workDate}}"
+          }
+        },
+        {
+          "name": "Close Work Day",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"branchId\": \"{{branchId}}\",\n  \"workDate\": \"{{workDate}}\",\n  \"ownerCommissionRate\": 75,\n  \"ownerDiscountCoverageRate\": 0\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/employee/session/close"
+          }
+        },
+        {
+          "name": "Owner Report Summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/report/owner-summary?fromWorkDate={{workDate}}&toWorkDate={{workDate}}"
+          }
+        },
+        {
+          "name": "Monthly Salary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/salary/monthly?branchId={{branchId}}&year={{year}}&month={{month}}"
+          }
+        },
+        {
+          "name": "Salary Bootstrap",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/salary/bootstrap?branchId={{branchId}}&year={{year}}&month={{month}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 Attendance Correction Requests",
+      "item": [
+        {
+          "name": "List Correction Requests",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{staffJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/attendance/correction-requests"
+          }
+        },
+        {
+          "name": "Create Correction Request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "if (json.id || json.request?.id) pm.environment.set(\"correctionRequestId\", json.id || json.request.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{staffJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Need to correct service allocation\",\n  \"proposedPatch\": {\n    \"customerName\": \"Corrected Customer\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/employee/attendance/{{attendanceId}}/correction-requests"
+          }
+        },
+        {
+          "name": "Cancel Correction Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{staffJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/employee/attendance/correction-requests/{{correctionRequestId}}/cancel"
+          }
+        },
+        {
+          "name": "Create Correction Request For Review",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "pm.test(\"status is success\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 201]); });",
+                  "if (json.id || json.request?.id) pm.environment.set(\"correctionRequestId\", json.id || json.request.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{staffJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Need owner review\",\n  \"proposedPatch\": {\n    \"customerName\": \"Owner Reviewed Customer\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/employee/attendance/{{attendanceId}}/correction-requests"
+          }
+        },
+        {
+          "name": "Review Correction Request",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"approved\",\n  \"reviewNote\": \"Approved from Postman\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/employee/attendance/correction-requests/{{correctionRequestId}}/review"
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 Notifications",
+      "item": [
+        {
+          "name": "Get Notifications",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/notifications"
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 Weekly Report",
+      "item": [
+        {
+          "name": "Generate Weekly Report",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201 or documented error\", function () { pm.expect(pm.response.code).to.be.oneOf([201, 400, 401, 403, 404, 409, 429]); });",
+                  "function expectErrorShape(json) {",
+                  "  pm.expect(json).to.have.property(\"type\").that.is.a(\"string\");",
+                  "  pm.expect(json).to.have.property(\"message\").that.is.a(\"string\");",
+                  "}",
+                  "function expectWeeklyReportItem(item) {",
+                  "  pm.expect(item).to.include.keys([\"id\", \"shopId\", \"branchId\", \"weekStartDate\", \"weekEndDate\", \"summary\", \"dailyMetrics\", \"employeeBreakdowns\", \"serviceBreakdowns\", \"revision\"]);",
+                  "  pm.expect(item.summary).to.include.keys([\"totalAttendances\", \"totalRevenue\", \"totalDiscount\", \"totalNetRevenue\", \"totalOwnerCommission\", \"totalEmployeeEarnings\", \"averageTicketSize\", \"workingDays\"]);",
+                  "  pm.expect(item.dailyMetrics).to.be.an(\"array\");",
+                  "  pm.expect(item.employeeBreakdowns).to.be.an(\"array\");",
+                  "  pm.expect(item.serviceBreakdowns).to.be.an(\"array\");",
+                  "}",
+                  "function persistWeeklyReportVars(item) {",
+                  "  if (!item) return;",
+                  "  if (item.id) pm.environment.set(\"weeklyReportId\", item.id);",
+                  "  if (item.branchId) pm.environment.set(\"weeklyReportBranchId\", item.branchId);",
+                  "  if (item.weekStartDate) pm.environment.set(\"weeklyReportWeekStartDate\", item.weekStartDate);",
+                  "}",
+                  "if (![204, 304].includes(pm.response.code)) {",
+                  "  const json = pm.response.json();",
+                  "  pm.test(\"response shape\", function () {",
+                  "    if (pm.response.code >= 400) {",
+                  "      expectErrorShape(json);",
+                  "    } else {",
+                  "      pm.expect(json).to.have.property(\"item\").that.is.an(\"object\");",
+                  "      expectWeeklyReportItem(json.item);",
+                  "      pm.expect(json).to.have.property(\"meta\").that.is.an(\"object\");",
+                  "    }",
+                  "  });",
+                  "  if (pm.response.code < 400) persistWeeklyReportVars(json.item);",
+                  "}",
+                  "if ([200, 201, 304].includes(pm.response.code)) {",
+                  "  pm.test(\"has ETag\", function () { pm.expect(pm.response.headers.get(\"ETag\")).to.exist; });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"branchId\": \"{{branchId}}\",\n  \"weekStartDate\": \"{{weeklyReportWeekStartDate}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/weekly-report"
+          }
+        },
+        {
+          "name": "List Weekly Reports",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200 or documented error\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 304, 400, 401, 403, 404, 429]); });",
+                  "function expectErrorShape(json) {",
+                  "  pm.expect(json).to.have.property(\"type\").that.is.a(\"string\");",
+                  "  pm.expect(json).to.have.property(\"message\").that.is.a(\"string\");",
+                  "}",
+                  "function expectWeeklyReportItem(item) {",
+                  "  pm.expect(item).to.include.keys([\"id\", \"shopId\", \"branchId\", \"weekStartDate\", \"weekEndDate\", \"summary\", \"dailyMetrics\", \"employeeBreakdowns\", \"serviceBreakdowns\", \"revision\"]);",
+                  "  pm.expect(item.summary).to.include.keys([\"totalAttendances\", \"totalRevenue\", \"totalDiscount\", \"totalNetRevenue\", \"totalOwnerCommission\", \"totalEmployeeEarnings\", \"averageTicketSize\", \"workingDays\"]);",
+                  "  pm.expect(item.dailyMetrics).to.be.an(\"array\");",
+                  "  pm.expect(item.employeeBreakdowns).to.be.an(\"array\");",
+                  "  pm.expect(item.serviceBreakdowns).to.be.an(\"array\");",
+                  "}",
+                  "function persistWeeklyReportVars(item) {",
+                  "  if (!item) return;",
+                  "  if (item.id) pm.environment.set(\"weeklyReportId\", item.id);",
+                  "  if (item.branchId) pm.environment.set(\"weeklyReportBranchId\", item.branchId);",
+                  "  if (item.weekStartDate) pm.environment.set(\"weeklyReportWeekStartDate\", item.weekStartDate);",
+                  "}",
+                  "if (![204, 304].includes(pm.response.code)) {",
+                  "  const json = pm.response.json();",
+                  "  pm.test(\"response shape\", function () {",
+                  "    if (pm.response.code >= 400) {",
+                  "      expectErrorShape(json);",
+                  "    } else {",
+                  "      pm.expect(json).to.have.property(\"items\").that.is.an(\"array\");",
+                  "      pm.expect(json).to.have.property(\"meta\").that.includes.keys([\"shopId\", \"branchId\", \"fromWeek\", \"toWeek\", \"totalCount\", \"missingWeeks\", \"expectedWeeks\"]);",
+                  "      if (json.items.length > 0) expectWeeklyReportItem(json.items[0]);",
+                  "      if (json.aggregate) pm.expect(json.aggregate).to.include.keys([\"totalAttendances\", \"totalRevenue\", \"totalDiscount\", \"totalNetRevenue\", \"totalOwnerCommission\", \"totalEmployeeEarnings\", \"averageTicketSize\", \"workingDays\"]);",
+                  "    }",
+                  "  });",
+                  "  if (pm.response.code < 400) persistWeeklyReportVars(json.items && json.items[0]);",
+                  "}",
+                  "if ([200, 304].includes(pm.response.code)) {",
+                  "  pm.test(\"has ETag\", function () { pm.expect(pm.response.headers.get(\"ETag\")).to.exist; });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/weekly-report?branchId={{branchId}}&fromWeek={{weeklyReportWeekStartDate}}&toWeek={{weeklyReportWeekStartDate}}&aggregate=true"
+          }
+        },
+        {
+          "name": "Get Weekly Report Detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200 or documented error\", function () { pm.expect(pm.response.code).to.be.oneOf([200, 400, 401, 403, 404, 409, 429]); });",
+                  "function expectErrorShape(json) {",
+                  "  pm.expect(json).to.have.property(\"type\").that.is.a(\"string\");",
+                  "  pm.expect(json).to.have.property(\"message\").that.is.a(\"string\");",
+                  "}",
+                  "function expectWeeklyReportItem(item) {",
+                  "  pm.expect(item).to.include.keys([\"id\", \"shopId\", \"branchId\", \"weekStartDate\", \"weekEndDate\", \"summary\", \"dailyMetrics\", \"employeeBreakdowns\", \"serviceBreakdowns\", \"revision\"]);",
+                  "  pm.expect(item.summary).to.include.keys([\"totalAttendances\", \"totalRevenue\", \"totalDiscount\", \"totalNetRevenue\", \"totalOwnerCommission\", \"totalEmployeeEarnings\", \"averageTicketSize\", \"workingDays\"]);",
+                  "  pm.expect(item.dailyMetrics).to.be.an(\"array\");",
+                  "  pm.expect(item.employeeBreakdowns).to.be.an(\"array\");",
+                  "  pm.expect(item.serviceBreakdowns).to.be.an(\"array\");",
+                  "}",
+                  "function persistWeeklyReportVars(item) {",
+                  "  if (!item) return;",
+                  "  if (item.id) pm.environment.set(\"weeklyReportId\", item.id);",
+                  "  if (item.branchId) pm.environment.set(\"weeklyReportBranchId\", item.branchId);",
+                  "  if (item.weekStartDate) pm.environment.set(\"weeklyReportWeekStartDate\", item.weekStartDate);",
+                  "}",
+                  "if (![204, 304].includes(pm.response.code)) {",
+                  "  const json = pm.response.json();",
+                  "  pm.test(\"response shape\", function () {",
+                  "    if (pm.response.code >= 400) {",
+                  "      expectErrorShape(json);",
+                  "    } else {",
+                  "      pm.expect(json).to.have.property(\"item\").that.is.an(\"object\");",
+                  "      expectWeeklyReportItem(json.item);",
+                  "      pm.expect(json).to.have.property(\"meta\").that.is.an(\"object\");",
+                  "    }",
+                  "  });",
+                  "  if (pm.response.code < 400) persistWeeklyReportVars(json.item);",
+                  "}",
+                  "if ([200, 201, 304].includes(pm.response.code)) {",
+                  "  pm.test(\"has ETag\", function () { pm.expect(pm.response.headers.get(\"ETag\")).to.exist; });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/weekly-report/{{weeklyReportWeekStartDate}}?branchId={{branchId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "99 Negative Cases",
+      "item": [
+        {
+          "name": "Missing Auth",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/v1/account/profile"
+          }
+        },
+        {
+          "name": "Invalid Content-Type",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "not-json"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/signin"
+          }
+        },
+        {
+          "name": "Invalid Body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/api/v1/shop/branch"
+          }
+        },
+        {
+          "name": "Forbidden Staff Access",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{staffJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Blocked Branch\",\n  \"status\": \"active\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/shop/branch"
+          }
+        },
+        {
+          "name": "Not Found ID",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/shop/service/missing-service-id"
+          }
+        },
+        {
+          "name": "Duplicate Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"owner.local@example.com\",\n  \"name\": \"Duplicate Owner\",\n  \"password\": \"secret123\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/register-owner"
+          }
+        },
+        {
+          "name": "Closed Attendance Update",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"workDate\": \"{{workDate}}\",\n  \"startTime\": 600,\n  \"endTime\": 660,\n  \"branchId\": \"{{branchId}}\",\n  \"services\": []\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/employee/attendance/{{attendanceId}}"
+          }
+        },
+        {
+          "name": "Work Day Already Closed",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"branchId\": \"{{branchId}}\",\n  \"workDate\": \"{{workDate}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/employee/session/close"
+          }
+        },
+        {
+          "name": "Invalid Discount Allocation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "{{ownerJwt}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"workDate\": \"{{workDate}}\",\n  \"startTime\": 540,\n  \"endTime\": 600,\n  \"branchId\": \"{{branchId}}\",\n  \"discount\": { \"type\": \"amount\", \"value\": 999999, \"splitMode\": \"all_assignees\" },\n  \"services\": [\n    {\n      \"id\": \"{{serviceId}}\",\n      \"sourceServiceId\": \"{{serviceId}}\",\n      \"name\": \"Postman Manicure\",\n      \"category\": \"nail\",\n      \"price\": 50,\n      \"duration\": 60,\n      \"employees\": [\n        { \"employeeId\": \"{{staffUid}}\", \"percentage\": 100 }\n      ]\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/employee/attendance"
+          }
+        }
+      ]
+    }
+  ]
+}

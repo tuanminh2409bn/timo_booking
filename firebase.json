@@ -1,7 +1,15 @@
 {
-  "firestore": {
-    "rules": "firestore.rules"
-  },
+  "firestore": [
+    {
+      "database": "timmo-prod",
+      "rules": "firestore.rules"
+    },
+    {
+      "database": "timmo-hrm-prod",
+      "rules": "hrm-codebase/backend/firestore.rules",
+      "indexes": "hrm-codebase/backend/firestore.indexes.json"
+    }
+  ],
   "hosting": {
     "public": "web/out",
     "ignore": [
@@ -11,6 +19,14 @@
     ],
     "trailingSlash": true,
     "rewrites": [
+      {
+        "source": "/api/**",
+        "run": {
+          "serviceId": "timmo-hrm-be-production",
+          "region": "europe-west4",
+          "pinTag": false
+        }
+      },
       {
         "source": "/book/*/success",
         "destination": "/book/glamour-nails-berlin/success/index.html"

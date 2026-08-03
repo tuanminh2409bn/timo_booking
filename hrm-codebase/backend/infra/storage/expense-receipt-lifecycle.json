@@ -1,0 +1,26 @@
+{
+  "rule": [
+    {
+      "action": {
+        "type": "SetStorageClass",
+        "storageClass": "NEARLINE"
+      },
+      "condition": {
+        "daysSinceCustomTime": 30,
+        "matchesPrefix": ["expense-receipts/"],
+        "matchesStorageClass": ["STANDARD"]
+      }
+    },
+    {
+      "action": {
+        "type": "SetStorageClass",
+        "storageClass": "COLDLINE"
+      },
+      "condition": {
+        "daysSinceCustomTime": 365,
+        "matchesPrefix": ["expense-receipts/"],
+        "matchesStorageClass": ["STANDARD", "NEARLINE"]
+      }
+    }
+  ]
+}

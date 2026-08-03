@@ -1,221 +1,57 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { MapPin, Store } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { useI18n } from '@/lib/i18n';
-import { collection, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
-import Link from 'next/link';
-import styles from './page.module.css';
+import {
+  fetchPlatformStores,
+  updatePlatformStore,
+  type PlatformStore,
+} from '@/lib/adminHrmApi';
 
-interface BranchItem {
-  id: string;
-  name: string;
-  slug: string;
-  address: string;
-  phone: string;
-  isActive: boolean;
-  createdAt?: string;
-  businessId: string;
-}
-
-export default function BranchesManagementPage() {
+export default function PlatformStoresPage() {
   const { user } = useAuth();
   const { locale } = useI18n();
-  const [branches, setBranches] = useState<BranchItem[]>([]);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
-  const [loading, setLoading] = useState(true);
-
-  // Sync branches from Firestore in real-time
+  const [items, setItems] = useState<PlatformStore[]>([]);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => setItems(await fetchPlatformStores()), []);
   useEffect(() => {
-    if (!user || user.role !== 'superadmin') return;
+    if (user?.role === 'superadmin') void load().catch(console.error);
+  }, [user, load]);
+  if (user?.role !== 'superadmin') return <div className="rounded-2xl bg-red-50 p-5 text-red-800">Platform admin access required.</div>;
 
-    const branchesRef = collection(db, 'branches');
-    const unsubscribe = onSnapshot(branchesRef, (snap) => {
-      const list: BranchItem[] = [];
-      snap.forEach((docSnap) => {
-        list.push({ id: docSnap.id, ...docSnap.data() } as BranchItem);
-      });
-      // Sort by name or creation time if available
-      list.sort((a, b) => a.name.localeCompare(b.name));
-      setBranches(list);
-      setLoading(false);
-    }, (err) => {
-      console.error("Error listening to branches:", err);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  if (!user || user.role !== 'superadmin') {
-    return (
-      <div className={styles.deniedContainer}>
-        <span className={styles.deniedIcon}>🔒</span>
-        <h2>{locale === 'vi' ? 'Truy cập bị từ chối' : locale === 'de' ? 'Zugriff verweigert' : 'Access Denied'}</h2>
-        <p>
-          {locale === 'vi' 
-            ? 'Bạn không có quyền xem trang này. Chỉ quản trị viên hệ thống mới có quyền truy cập.' 
-            : locale === 'de' 
-            ? 'Sie haben keine Berechtigung, diese Seite anzuzeigen. Nur Systemadministratoren haben Zugriff.'
-            : 'You do not have permission to view this page. Only system administrators have access.'}
-        </p>
-      </div>
-    );
-  }
-
-  const handleToggleActive = async (branch: BranchItem) => {
-    const nextStatus = !branch.isActive;
-    const confirmMsg = locale === 'vi'
-      ? `Bạn có chắc muốn ${nextStatus ? 'kích hoạt' : 'tạm khóa'} chi nhánh "${branch.name}"?`
-      : locale === 'de'
-      ? `Sind Sie sicher, dass Sie die Filiale "${branch.name}" ${nextStatus ? 'aktivieren' : 'deaktivieren'} möchten?`
-      : `Are you sure you want to ${nextStatus ? 'activate' : 'deactivate'} the branch "${branch.name}"?`;
-
-    if (!confirm(confirmMsg)) return;
-
+  const toggle = async (store: PlatformStore) => {
+    setBusy(true);
     try {
-      const branchRef = doc(db, 'branches', branch.id);
-      await updateDoc(branchRef, {
-        isActive: nextStatus
-      });
-    } catch (e) {
-      console.error("Error toggling branch status:", e);
-      alert(locale === 'vi' ? 'Cập nhật thất bại. Vui lòng kiểm tra phân quyền.' : 'Update failed. Please check permissions.');
-    }
+      await updatePlatformStore(store.id, store.status === 'active' ? 'disabled' : 'active');
+      await load();
+    } finally { setBusy(false); }
   };
 
-  // Filter list
-  const filteredBranches = branches.filter((b) => {
-    const matchesSearch = 
-      b.name.toLowerCase().includes(search.toLowerCase()) || 
-      b.slug.toLowerCase().includes(search.toLowerCase()) ||
-      b.address.toLowerCase().includes(search.toLowerCase());
-
-    const matchesStatus = 
-      statusFilter === 'all' || 
-      (statusFilter === 'active' && b.isActive) || 
-      (statusFilter === 'inactive' && !b.isActive);
-
-    return matchesSearch && matchesStatus;
-  });
-
   return (
-    <div className={styles.container}>
-      <div className={styles.pageHeader}>
-        <div className={styles.titleGroup}>
-          <h1 className={styles.title}>
-            {locale === 'vi' ? 'Quản Lý Chi Nhánh' : locale === 'de' ? 'Filialen verwalten' : 'Branches Management'}
-          </h1>
-          <p className={styles.subtitle}>
-            {locale === 'vi' 
-              ? 'Xem, tìm kiếm, kiểm tra và thay đổi trạng thái hoạt động của toàn bộ chi nhánh salon nail.' 
-              : locale === 'de' 
-              ? 'Anzeigen, Suchen, Überprüfen und Ändern des Betriebsstatus aller Salonfilialen.'
-              : 'View, search, audit, and toggle operation status of all nail salon branches.'}
-          </p>
-        </div>
-      </div>
-
-      {/* Controls Bar */}
-      <div className={styles.controlsBar}>
-        <div className={styles.searchBox}>
-          <span className={styles.searchIcon}>🔍</span>
-          <input
-            type="text"
-            className={styles.searchInput}
-            placeholder={locale === 'vi' ? 'Tìm theo tên tiệm, slug, địa chỉ...' : locale === 'de' ? 'Suche nach Name, Slug, Adresse...' : 'Search by name, slug, address...'}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-
-        <div className={styles.filterTabs}>
-          <button
-            className={`${styles.filterTab} ${statusFilter === 'all' ? styles.filterTabActive : ''}`}
-            onClick={() => setStatusFilter('all')}
-          >
-            {locale === 'vi' ? 'Tất cả' : locale === 'de' ? 'Alle' : 'All'} ({branches.length})
-          </button>
-          <button
-            className={`${styles.filterTab} ${statusFilter === 'active' ? styles.filterTabActive : ''}`}
-            onClick={() => setStatusFilter('active')}
-          >
-            {locale === 'vi' ? 'Đang hoạt động' : locale === 'de' ? 'Aktiv' : 'Active'} ({branches.filter(b => b.isActive).length})
-          </button>
-          <button
-            className={`${styles.filterTab} ${statusFilter === 'inactive' ? styles.filterTabActive : ''}`}
-            onClick={() => setStatusFilter('inactive')}
-          >
-            {locale === 'vi' ? 'Tạm khóa' : locale === 'de' ? 'Inaktiv' : 'Inactive'} ({branches.filter(b => !b.isActive).length})
-          </button>
-        </div>
-      </div>
-
-      {/* Branches List */}
-      <div className={styles.branchesList}>
-        {loading ? (
-          <div className={styles.loadingState}>
-            <div className={styles.spinner} />
-            <p>{locale === 'vi' ? 'Đang tải danh sách chi nhánh...' : locale === 'de' ? 'Filialliste wird geladen...' : 'Loading branches...'}</p>
-          </div>
-        ) : filteredBranches.length === 0 ? (
-          <div className={styles.emptyState}>
-            <span className={styles.emptyIcon}>🏢</span>
-            <p>{locale === 'vi' ? 'Không tìm thấy chi nhánh nào phù hợp.' : locale === 'de' ? 'Keine passenden Filialen gefunden.' : 'No branches found matching search criteria.'}</p>
-          </div>
-        ) : (
-          filteredBranches.map((branch) => (
-            <div key={branch.id} className={styles.branchCard}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <h3 className={styles.branchName}>{branch.name}</h3>
-                  <span className={styles.branchSlug}>slug: {branch.slug}</span>
-                </div>
-                <span className={`${styles.statusBadge} ${branch.isActive ? styles.badgeActive : styles.badgeInactive}`}>
-                  {branch.isActive 
-                    ? (locale === 'vi' ? 'Hoạt động' : locale === 'de' ? 'Aktiv' : 'Active') 
-                    : (locale === 'vi' ? 'Tạm khóa' : locale === 'de' ? 'Inaktiv' : 'Suspended')}
-                </span>
+    <section className="space-y-5">
+      <header>
+        <h1 className="text-2xl font-bold">{locale === 'vi' ? 'Cửa hàng hệ thống' : 'Platform stores'}</h1>
+        <p className="mt-1 text-sm text-gray-500">{items.length} stores in the current Firebase</p>
+      </header>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {items.map((store) => (
+          <article key={store.id} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><Store className="h-5 w-5" /></div>
+              <div className="min-w-0 flex-1">
+                <h2 className="truncate font-bold">{store.name}</h2>
+                <p className="mt-1 flex items-center gap-1 truncate text-sm text-gray-500"><MapPin className="h-3.5 w-3.5" /> {store.addressText || '—'}</p>
+                <p className="mt-2 truncate text-xs text-gray-400">Owner: {store.ownerId}</p>
               </div>
-
-              <div className={styles.cardBody}>
-                <div className={styles.infoRow}>
-                  <span className={styles.infoIcon}>📍</span>
-                  <span className={styles.infoText}>{branch.address || 'N/A'}</span>
-                </div>
-                <div className={styles.infoRow}>
-                  <span className={styles.infoIcon}>📞</span>
-                  <span className={styles.infoText}>{branch.phone || 'N/A'}</span>
-                </div>
-                <div className={styles.infoRow}>
-                  <span className={styles.infoIcon}>🔑</span>
-                  <span className={styles.infoText}>Biz ID: {branch.businessId}</span>
-                </div>
-              </div>
-
-              <div className={styles.cardActions}>
-                <Link 
-                  href={`/book/${branch.slug}`} 
-                  className={styles.viewBtn} 
-                  target="_blank"
-                >
-                  {locale === 'vi' ? 'Xem trang đặt lịch ↗' : locale === 'de' ? 'Buchungsseite anzeigen ↗' : 'View Booking Site ↗'}
-                </Link>
-                <button
-                  className={`${styles.actionBtn} ${branch.isActive ? styles.btnDeactivate : styles.btnActivate}`}
-                  onClick={() => handleToggleActive(branch)}
-                >
-                  {branch.isActive 
-                    ? (locale === 'vi' ? 'Khóa chi nhánh' : locale === 'de' ? 'Filiale sperren' : 'Suspend Branch')
-                    : (locale === 'vi' ? 'Kích hoạt' : locale === 'de' ? 'Aktivieren' : 'Activate Branch')}
-                </button>
-              </div>
+              <button disabled={busy} onClick={() => void toggle(store)} className={`rounded-full px-3 py-1.5 text-xs font-bold ${store.status === 'active' ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
+                {store.status}
+              </button>
             </div>
-          ))
-        )}
+          </article>
+        ))}
       </div>
-    </div>
+    </section>
   );
 }

@@ -6,8 +6,7 @@ import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
 import { hasConflict, MAX_MAIN_SERVICES, shouldSkipStaffSelection } from '@/lib/types';
 import { useRouter } from 'next/navigation';
-import { collection, onSnapshot, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
+import { fetchHrmServices, fetchHrmStaff } from '@/lib/hrmApi';
 import type { Service, ServiceCategory, Staff } from '@/lib/types';
 import styles from './page.module.css';
 
@@ -24,63 +23,99 @@ export default function ServiceSelectionPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
 
-  // Listen to categories from Firestore
+  // Fetch services & categories from HRM API
   useEffect(() => {
     if (!branchSlug) return;
-    const categoriesRef = collection(db, 'branches', branchSlug, 'categories');
-    const unsubscribe = onSnapshot(categoriesRef, (snap) => {
-      const list: ServiceCategory[] = [];
-      snap.forEach(doc => {
-        list.push(doc.data() as ServiceCategory);
-      });
-      // Sort categories by display order
-      list.sort((a, b) => a.displayOrder - b.displayOrder);
-      setCategories(list);
-      // Expand categories by default
-      setExpandedCategories(new Set(list.map(c => c.id)));
-      setLoading(false);
-    }, (e) => {
-      console.error('Error listening to categories:', e);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, [branchSlug]);
+    setLoading(true);
+    setLoadError(false);
 
-  // Listen to services from Firestore
-  useEffect(() => {
-    if (!branchSlug) return;
-    const servicesRef = collection(db, 'branches', branchSlug, 'services');
-    const unsubscribe = onSnapshot(servicesRef, (snap) => {
-      const list: Service[] = [];
-      snap.forEach(doc => {
-        list.push(doc.data() as Service);
-      });
-      // Sort services by display order
-      list.sort((a, b) => a.displayOrder - b.displayOrder);
-      setServices(list);
-    }, (e) => {
-      console.error('Error listening to services:', e);
-    });
-    return () => unsubscribe();
-  }, [branchSlug]);
+    fetchHrmServices(branchSlug)
+      .then((hrmServices) => {
+        // Map HRM services to local types
+        // Group by category (groupService field from HRM)
+        const categoryMap = new Map<string, ServiceCategory>();
+        const serviceList: Service[] = [];
+        let categoryOrder = 0;
 
-  // Fetch staff from Firestore
-  useEffect(() => {
-    if (!branchSlug) return;
-    const fetchStaff = async () => {
-      try {
-        const staffSnap = await getDocs(collection(db, 'branches', branchSlug, 'staff'));
-        if (!staffSnap.empty) {
-          setStaffList(staffSnap.docs.map(doc => doc.data() as Staff));
+        for (const hrm of hrmServices) {
+          const groupName = hrm.groupService || hrm.category || 'Other';
+          const catId = groupName.toLowerCase().replace(/\s+/g, '-');
+
+          if (!categoryMap.has(catId)) {
+            categoryMap.set(catId, {
+              id: catId,
+              branchId: branchSlug,
+              name: groupName,
+              description: '',
+              displayOrder: categoryOrder++,
+              isActive: true,
+            });
+          }
+
+          serviceList.push({
+            id: hrm.id,
+            branchId: branchSlug,
+            categoryId: catId,
+            name: hrm.name,
+            description: '',
+            durationMinutes: hrm.durationMin || hrm.durationMax || 30,
+            price: hrm.price,
+            currency: 'EUR',
+            displayOrder: serviceList.length,
+            isActive: true,
+            hasAppointments: false,
+            type: 'standard',
+            isAddon: hrm.bookingKind === 'add_on',
+            staffType: hrm.preferredWorkerType === 'assistant' ? 'junior' : 'main',
+            createdAt: '',
+          });
         }
-      } catch (e) {
-        console.error('Error fetching staff:', e);
-      }
-    };
-    fetchStaff();
+
+        const catList = Array.from(categoryMap.values());
+        catList.sort((a, b) => a.displayOrder - b.displayOrder);
+        setCategories(catList);
+        setExpandedCategories(new Set(catList.map(c => c.id)));
+
+        serviceList.sort((a, b) => a.displayOrder - b.displayOrder);
+        setServices(serviceList);
+        setLoading(false);
+      })
+      .catch((e) => {
+        console.error('Error fetching services from HRM:', e);
+        setLoadError(true);
+        setLoading(false);
+      });
+  }, [branchSlug]);
+
+  // Fetch staff from HRM API
+  useEffect(() => {
+    if (!branchSlug) return;
+
+    fetchHrmStaff(branchSlug)
+      .then((hrmStaff) => {
+        const mapped: Staff[] = hrmStaff.map((s, idx) => ({
+          id: s.uid,
+          branchId: branchSlug,
+          userUid: s.uid,
+          name: s.name,
+          initials: s.name.substring(0, 2).toUpperCase(),
+          role: 'staff' as const,
+          staffType: s.workerType === 'assistant' ? 'junior' as const : 'main' as const,
+          serviceIds: s.serviceIds || [],
+          displayOrder: idx,
+          status: 'active' as const,
+          hasAppointments: false,
+          createdAt: '',
+        }));
+        setStaffList(mapped);
+      })
+      .catch((e) => {
+        console.error('Error fetching staff from HRM:', e);
+      });
   }, [branchSlug]);
 
   // ── Localized labels ──
@@ -207,7 +242,9 @@ export default function ServiceSelectionPage() {
       dispatch({ type: 'REMOVE_CATEGORY', categoryId: category.id });
     } else {
       dispatch({ type: 'ADD_MAIN_SERVICE', category, service });
-      // DO NOT navigate — stay on page, show staff picker inline
+      if (state.branch?.publicStaffSelection === false) {
+        dispatch({ type: 'SELECT_STAFF_FOR_SERVICE', categoryId: category.id, staff: null, staffType: 'any' });
+      }
     }
   };
 
@@ -225,23 +262,13 @@ export default function ServiceSelectionPage() {
     dispatch({ type: 'SELECT_STAFF_FOR_SERVICE', categoryId, staff, staffType: 'specific' });
   };
 
-  // ── Get staff eligible for a specific service ──
-  const getStaffForService = useCallback((serviceId: string): Staff[] => {
-    // Find service data to check staffType
-    const service = services.find(s => s.id === serviceId);
-    const svcStaffType = (service as any)?.staffType || 'any';
-    
+  const getStaffForService = useCallback((_serviceId: string): Staff[] => {
+    // In a nail salon, all active staff can perform all services
+    // HRM does not assign serviceIds to employees, so we show all active staff
     return staffList.filter(
-      (s) => {
-        if (s.status !== 'active') return false;
-        if (!(s.serviceIds || []).includes(serviceId)) return false;
-        // Filter by service's required staff type
-        if (svcStaffType === 'main' && s.staffType !== 'main') return false;
-        if (svcStaffType === 'junior' && s.staffType !== 'junior') return false;
-        return true;
-      }
+      (s) => s.status === 'active' && (s.serviceIds.length === 0 || s.serviceIds.includes(_serviceId)),
     );
-  }, [staffList, services]);
+  }, [staffList]);
 
   // ── Check if skip staff selection (auto-assign categories like Pediküre) ──
   const skipStaffSelection = useMemo(() => {
@@ -251,12 +278,12 @@ export default function ServiceSelectionPage() {
   // ── Check if can continue ──
   const canContinue = useMemo(() => {
     if (state.selectedServices.length === 0) return false;
-    if (skipStaffSelection) return true;
-    // Every service must have staff selected (either 'any' or specific)
-    return state.selectedServices.every(item => 
-      item.selectedStaffType === 'any' || item.selectedStaff !== null
-    );
-  }, [state.selectedServices, skipStaffSelection]);
+    // Every service must have staff selected.
+    // We no longer skip checking requiresStaffAutoAssign because we always show the picker now.
+    return state.selectedServices.every(item => {
+      return item.selectedStaffType === 'any' || item.selectedStaff !== null;
+    });
+  }, [state.selectedServices]);
 
   // ── Handle continue ──
   const handleContinue = () => {
@@ -281,6 +308,15 @@ export default function ServiceSelectionPage() {
       <div className={styles.loading}>
         <div className={styles.spinner} />
         <p>{t.common.loading}</p>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className={styles.noResults} role="alert">
+        <div className={styles.noResultsIcon}>⚠️</div>
+        <p className={styles.noResultsText}>Không thể tải danh sách dịch vụ. Vui lòng thử lại sau.</p>
       </div>
     );
   }
@@ -393,8 +429,8 @@ export default function ServiceSelectionPage() {
                             </button>
                           </div>
 
-                          {/* ── Inline Staff Picker (only for selected service) ── */}
-                          {selected && !skipStaffSelection && (
+                          {/* ── Inline Staff Picker (always shown for selected service) ── */}
+                          {selected && state.branch?.publicStaffSelection !== false && (
                             <div className={styles.inlineStaffPicker}>
                               <div className={styles.staffPickerLabel}>
                                 {localLabels.chooseStaff}

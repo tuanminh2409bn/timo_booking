@@ -42,11 +42,11 @@ export async function seedDatabase(onProgress: (msg: string) => void) {
       const res = await createUserWithEmailAndPassword(auth, mockUser.email, password);
       uid = res.user.uid;
       onProgress(`Đã tạo mới tài khoản: ${mockUser.email}`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       // If user already exists, we cannot retrieve the UID directly from auth in client-side SDK.
       // But we can fallback to a predefined UID or assume the seeder runs on a clean DB.
       // To handle "auth/email-already-in-use", we'll warn and use a fallback or try to continue.
-      if (e.code === 'auth/email-already-in-use') {
+      if ((e as { code?: string }).code === 'auth/email-already-in-use') {
         onProgress(`Tài khoản ${mockUser.email} đã tồn tại trong Auth.`);
         // Note: For existing accounts, we will write profiles using static hash UIDs so they remain loginable.
         // We use static strings derived from emails for test stability.

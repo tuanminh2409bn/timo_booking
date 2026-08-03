@@ -1,0 +1,12 @@
+{
+  "firestore": [
+    {
+      "database": "timmo-hrm-dev",
+      "rules": "firestore.rules",
+      "indexes": "firestore.indexes.json"
+    }
+  ],
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

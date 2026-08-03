@@ -315,10 +315,11 @@ export default function GoogleRegisterModal({
       );
       
       onClose();
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      const msg = (e.message || '').toLowerCase();
-      const code = (e.code || '').toLowerCase();
+      const errorData = e as { message?: string; code?: string };
+      const msg = (errorData.message || '').toLowerCase();
+      const code = (errorData.code || '').toLowerCase();
       
       const regErrors = t?.admin?.register?.errors;
       let friendlyError = '';
@@ -332,7 +333,7 @@ export default function GoogleRegisterModal({
       } else if (code.includes('permission') || msg.includes('permission') || msg.includes('insufficient')) {
         friendlyError = regErrors?.permissionDenied || 'Permission denied.';
       } else {
-        friendlyError = regErrors?.['default'] || e.message || t?.admin?.register?.errorRegister || 'Registration failed.';
+        friendlyError = regErrors?.['default'] || errorData.message || t?.admin?.register?.errorRegister || 'Registration failed.';
       }
       
       onError(friendlyError);

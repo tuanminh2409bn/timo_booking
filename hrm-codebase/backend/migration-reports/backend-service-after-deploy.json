@@ -1,0 +1,231 @@
+﻿{
+  "apiVersion": "serving.knative.dev/v1",
+  "kind": "Service",
+  "metadata": {
+    "annotations": {
+      "run.googleapis.com/client-name": "gcloud",
+      "run.googleapis.com/client-version": "570.0.0",
+      "run.googleapis.com/ingress": "all",
+      "run.googleapis.com/ingress-status": "all",
+      "run.googleapis.com/maxScale": "20",
+      "run.googleapis.com/minScale": "1",
+      "run.googleapis.com/operation-id": "d65189b4-ff59-40e3-8635-89a22b311c9d",
+      "run.googleapis.com/urls": "[\"https://nail-salon-backend-588067454384.asia-southeast1.run.app\",\"https://nail-salon-backend-jqg7kfo5vq-as.a.run.app\"]",
+      "serving.knative.dev/creator": "hoanghaip2005@gmail.com",
+      "serving.knative.dev/lastModifier": "hoanghaip2005@gmail.com"
+    },
+    "creationTimestamp": "2026-05-06T00:43:07.765711Z",
+    "generation": 24,
+    "labels": {
+      "cloud.googleapis.com/location": "asia-southeast1",
+      "run.googleapis.com/satisfiesPzs": "true"
+    },
+    "name": "nail-salon-backend",
+    "namespace": "588067454384",
+    "resourceVersion": "AAZUdnzPJYk",
+    "selfLink": "/apis/serving.knative.dev/v1/namespaces/588067454384/services/nail-salon-backend",
+    "uid": "08b4afec-e665-4b4b-9880-5c32c723c877"
+  },
+  "spec": {
+    "template": {
+      "metadata": {
+        "annotations": {
+          "autoscaling.knative.dev/maxScale": "20",
+          "autoscaling.knative/maxScale": "20",
+          "run.googleapis.com/client-name": "gcloud",
+          "run.googleapis.com/client-version": "570.0.0",
+          "run.googleapis.com/startup-cpu-boost": "true"
+        },
+        "labels": {
+          "client.knative.dev/nonce": "xidhgbjfln",
+          "run.googleapis.com/startupProbeType": "Default"
+        }
+      },
+      "spec": {
+        "containerConcurrency": 80,
+        "containers": [
+          {
+            "env": [
+              {
+                "name": "NODE_ENV",
+                "value": "production"
+              },
+              {
+                "name": "SERVICE_PORT",
+                "value": "8080"
+              },
+              {
+                "name": "TRUST_PROXY_HOPS",
+                "value": "1"
+              },
+              {
+                "name": "GCP_PROJECT_ID",
+                "value": "thermal-highway-470815-u4"
+              },
+              {
+                "name": "FIRESTORE_DATABASE_ID",
+                "value": "defaultdatabase"
+              },
+              {
+                "name": "CORS_ALLOWED_ORIGINS",
+                "value": "https://timmo.com.vn,https://frontend-jqg7kfo5vq-as.a.run.app,https://frontend-588067454384.asia-southeast1.run.app,http://localhost:5173,http://127.0.0.1:5173"
+              },
+              {
+                "name": "FIREBASE_CLIENT_EMAIL",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "FIREBASE_CLIENT_EMAIL"
+                  }
+                }
+              },
+              {
+                "name": "FIREBASE_PRIVATE_KEY",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "FIREBASE_PRIVATE_KEY"
+                  }
+                }
+              },
+              {
+                "name": "FIREBASE_STORAGE_BUCKET",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "FIREBASE_STORAGE_BUCKET"
+                  }
+                }
+              },
+              {
+                "name": "JWT_SECRET",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "JWT_SECRET"
+                  }
+                }
+              },
+              {
+                "name": "SMTP_HOST",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "SMTP_HOST"
+                  }
+                }
+              },
+              {
+                "name": "SMTP_PORT",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "SMTP_PORT"
+                  }
+                }
+              },
+              {
+                "name": "SMTP_SECURE",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "SMTP_SECURE"
+                  }
+                }
+              },
+              {
+                "name": "SMTP_USER",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "SMTP_USER"
+                  }
+                }
+              },
+              {
+                "name": "SMTP_PASS",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "SMTP_PASS"
+                  }
+                }
+              },
+              {
+                "name": "SMTP_FROM",
+                "valueFrom": {
+                  "secretKeyRef": {
+                    "key": "latest",
+                    "name": "SMTP_FROM"
+                  }
+                }
+              }
+            ],
+            "image": "asia-southeast1-docker.pkg.dev/thermal-highway-470815-u4/nail-salon/backend:manual-20260618002758-storeid",
+            "ports": [
+              {
+                "containerPort": 8080,
+                "name": "http1"
+              }
+            ],
+            "resources": {
+              "limits": {
+                "cpu": "1",
+                "memory": "512Mi"
+              }
+            },
+            "startupProbe": {
+              "failureThreshold": 1,
+              "periodSeconds": 240,
+              "tcpSocket": {
+                "port": 8080
+              },
+              "timeoutSeconds": 240
+            }
+          }
+        ],
+        "serviceAccountName": "588067454384-compute@developer.gserviceaccount.com",
+        "timeoutSeconds": 300
+      }
+    },
+    "traffic": [
+      {
+        "latestRevision": true,
+        "percent": 100
+      }
+    ]
+  },
+  "status": {
+    "address": {
+      "url": "https://nail-salon-backend-jqg7kfo5vq-as.a.run.app"
+    },
+    "conditions": [
+      {
+        "lastTransitionTime": "2026-06-17T17:35:37.088393Z",
+        "status": "True",
+        "type": "Ready"
+      },
+      {
+        "lastTransitionTime": "2026-06-17T17:35:26.058034Z",
+        "status": "True",
+        "type": "ConfigurationsReady"
+      },
+      {
+        "lastTransitionTime": "2026-06-17T17:35:37.039439Z",
+        "status": "True",
+        "type": "RoutesReady"
+      }
+    ],
+    "latestCreatedRevisionName": "nail-salon-backend-00022-gl9",
+    "latestReadyRevisionName": "nail-salon-backend-00022-gl9",
+    "observedGeneration": 24,
+    "traffic": [
+      {
+        "latestRevision": true,
+        "percent": 100,
+        "revisionName": "nail-salon-backend-00022-gl9"
+      }
+    ],
+    "url": "https://nail-salon-backend-jqg7kfo5vq-as.a.run.app"
+  }
+}

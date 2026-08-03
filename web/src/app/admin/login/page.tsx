@@ -6,14 +6,10 @@ import { useAuth } from '@/lib/authContext';
 import { useI18n } from '@/lib/i18n';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import Link from 'next/link';
-import { auth, db } from '@/lib/firebase/config';
-import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import GoogleRegisterModal from '@/components/GoogleRegisterModal';
 import styles from './page.module.css';
 
 export default function AdminLoginPage() {
-  const { login, refreshProfile } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const { t, locale } = useI18n();
   const router = useRouter();
   
@@ -21,9 +17,6 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [googleUserForModal, setGoogleUserForModal] = useState<any>(null);
-  const [showGoogleRegisterModal, setShowGoogleRegisterModal] = useState(false);
-  const [success, setSuccess] = useState('');
 
   const handleCustomLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,11 +27,12 @@ export default function AdminLoginPage() {
     try {
       await login(email, password);
       router.push('/admin/dashboard/');
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
-      if (e.message === 'pending_superadmin' || e.message === 'pending_owner') {
+      const message = e instanceof Error ? e.message : '';
+      if (message === 'pending_superadmin' || message === 'pending_owner') {
         setError(locale === 'vi' ? 'Tài khoản của bạn đang chờ duyệt. Vui lòng liên hệ quản trị viên.' : 'Your account is pending approval. Please contact the administrator.');
-      } else if (e.message === 'rejected') {
+      } else if (message === 'rejected') {
         setError(locale === 'vi' ? 'Tài khoản của bạn đã bị từ chối.' : 'Your account has been rejected.');
       } else {
         setError(t.admin.login.errorLogin);
@@ -50,56 +44,20 @@ export default function AdminLoginPage() {
 
   const handleGoogleLogin = async () => {
     setError('');
-    setSuccess('');
     setLoading(true);
     
     try {
-      const provider = new GoogleAuthProvider();
-      const userCredential = await signInWithPopup(auth, provider);
-      const firebaseUser = userCredential.user;
-
-      // Check if user exists in Firestore
-      const userDocRef = doc(db, 'users', firebaseUser.uid);
-      const userDoc = await getDoc(userDocRef);
-
-      if (userDoc.exists()) {
-        const profile = userDoc.data() as any;
-        if (profile.approvalStatus && profile.approvalStatus !== 'approved') {
-          await auth.signOut();
-          if (profile.approvalStatus === 'rejected') {
-            setError(locale === 'vi' ? 'Tài khoản của bạn đã bị từ chối.' : 'Your account has been rejected.');
-          } else {
-            setError(locale === 'vi' ? 'Tài khoản của bạn đang chờ duyệt. Vui lòng liên hệ quản trị viên.' : 'Your account is pending approval. Please contact the administrator.');
-          }
-          setLoading(false);
-          return;
-        }
-
-        // Approved, log in
-        await refreshProfile(firebaseUser.uid);
-        router.push('/admin/dashboard/');
-      } else {
-        // Trigger register modal for first-time Google user on login page
-        setGoogleUserForModal(firebaseUser);
-        setShowGoogleRegisterModal(true);
-        setLoading(false);
-      }
-    } catch (e: any) {
+      await loginWithGoogle();
+      router.push('/admin/dashboard/');
+    } catch (e: unknown) {
       console.error(e);
-      setError(e.message || t.admin.login.errorLogin);
+      setError(e instanceof Error ? e.message : t.admin.login.errorLogin);
       setLoading(false);
     }
   };
 
   return (
     <div className={styles.container}>
-      <GoogleRegisterModal
-        isOpen={showGoogleRegisterModal}
-        onClose={() => setShowGoogleRegisterModal(false)}
-        firebaseUser={googleUserForModal}
-        onSuccess={(msg) => setSuccess(msg)}
-        onError={(msg) => setError(msg)}
-      />
       <div className={styles.loginCard}>
         <div className={styles.header}>
           <div className={styles.langWrapper}>
@@ -108,12 +66,6 @@ export default function AdminLoginPage() {
           <div className={styles.logo}>Timmo Booking</div>
           <h1 className={styles.title}>{t.admin.login.title}</h1>
         </div>
-
-        {success && (
-          <div className={styles.successBanner} style={{ backgroundColor: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', fontWeight: 500 }}>
-            <span>✓ {success}</span>
-          </div>
-        )}
 
         {error && (
           <div className={styles.errorBanner}>
@@ -148,6 +100,11 @@ export default function AdminLoginPage() {
           <button type="submit" className={styles.submitBtn} disabled={loading}>
             {loading ? t.common.loading : t.admin.login.submitBtn}
           </button>
+          <div className="mt-3 text-right">
+            <Link href="/admin/forgot-password" className="text-sm font-semibold text-blue-600 hover:underline">
+              {locale === 'vi' ? 'Quên mật khẩu?' : locale === 'de' ? 'Passwort vergessen?' : 'Forgot password?'}
+            </Link>
+          </div>
 
           <div className={styles.divider}>{t.common.or}</div>
 

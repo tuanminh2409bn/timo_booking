@@ -1,0 +1,1 @@
+﻿asia-southeast1-docker.pkg.dev/thermal-highway-470815-u4/nail-salon/frontend:manual-20260618003131-storeid

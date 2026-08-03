@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { UserProfile, UserRole } from './types';
-import { auth, db } from './firebase/config';
+import { auth } from './firebase/config';
 import { 
   signInWithEmailAndPassword, 
   signOut as firebaseSignOut, 
@@ -11,7 +11,7 @@ import {
   GoogleAuthProvider,
   signInWithPopup
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { authenticatedHrmFetch, clearHrmSession, establishHrmSession, type HrmSessionIdentity } from './hrmSession';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -53,6 +53,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setActiveBranchState(branchId);
   }, []);
 
+  const mapProfile = (data: HrmSessionIdentity): UserProfile => {
+    const role =
+      data.role === 'employee'
+        ? 'staff'
+        : data.role === 'admin'
+          ? 'superadmin'
+          : data.role;
+    const assignedBranches = typeof data.storeId === 'string'
+        ? [data.storeId]
+        : [];
+    return {
+      uid: data.uid,
+      email: data.email,
+      name: data.name,
+      role,
+      assignedBranches,
+      businessId: data.ownerId ?? null,
+      staffId: role === 'staff' ? data.uid : null,
+      phone: '',
+      createdAt: new Date(0).toISOString(),
+    };
+  };
+
+  const enrichProfileStores = async (profile: UserProfile): Promise<UserProfile> => {
+    if (profile.role === 'superadmin' || profile.assignedBranches.length > 0) return profile;
+    const response = await authenticatedHrmFetch('/api/v1/stores');
+    if (!response.ok) return profile;
+    const data = await response.json() as { stores?: Array<{ id: string }> };
+    return {
+      ...profile,
+      assignedBranches: (data.stores ?? []).map((store) => store.id),
+    };
+  };
+
   // Sync auth state with Firebase Auth
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
@@ -64,29 +98,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true);
       if (firebaseUser) {
         try {
-          // Fetch user profile from Firestore
-          const userDocRef = doc(db, 'users', firebaseUser.uid);
-          const userDoc = await getDoc(userDocRef);
-          
-          if (userDoc.exists()) {
-            const profile = userDoc.data() as UserProfile;
-            if (profile.approvalStatus && profile.approvalStatus !== 'approved') {
-              await firebaseSignOut(auth);
-              setUser(null);
-              setActiveBranchState(null);
-              setSessionCookies(null);
-            } else {
-              setUser(profile);
-              setActiveBranchState(profile.assignedBranches?.[0] || null);
-              localStorage.setItem('timmo_admin_user', JSON.stringify(profile));
-              setSessionCookies(profile.role);
-            }
-          } else {
-            console.error('User profile doc not found on Firestore for uid:', firebaseUser.uid);
-            setUser(null);
-            setActiveBranchState(null);
-            setSessionCookies(null);
-          }
+          const session = await establishHrmSession(firebaseUser);
+          let profile = mapProfile(session.user);
+          profile = await enrichProfileStores(profile);
+          setUser(profile);
+          setActiveBranchState(profile.assignedBranches?.[0] || null);
+          localStorage.setItem('timmo_admin_user', JSON.stringify(profile));
+          setSessionCookies(profile.role);
         } catch (e) {
           console.error('Error fetching user profile', e);
           setUser(null);
@@ -110,19 +128,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
       
-      const userDocRef = doc(db, 'users', firebaseUser.uid);
-      const userDoc = await getDoc(userDocRef);
-      
-      if (!userDoc.exists()) {
-        throw new Error('User profile does not exist in Firestore database.');
-      }
-      
-      const profile = userDoc.data() as UserProfile;
-      if (profile.approvalStatus && profile.approvalStatus !== 'approved') {
-        await firebaseSignOut(auth);
-        throw new Error(profile.approvalStatus);
-      }
-      
+      const session = await establishHrmSession(firebaseUser);
+      let profile = mapProfile(session.user);
+      profile = await enrichProfileStores(profile);
       setUser(profile);
       setActiveBranchState(profile.assignedBranches?.[0] || null);
       localStorage.setItem('timmo_admin_user', JSON.stringify(profile));
@@ -142,15 +150,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const userCredential = await signInWithPopup(auth, provider);
       const firebaseUser = userCredential.user;
       
-      const userDocRef = doc(db, 'users', firebaseUser.uid);
-      const userDoc = await getDoc(userDocRef);
-      
-      if (!userDoc.exists()) {
-        await firebaseSignOut(auth);
-        throw new Error('not-registered');
-      }
-      
-      const profile = userDoc.data() as UserProfile;
+      const session = await establishHrmSession(firebaseUser);
+      let profile = mapProfile(session.user);
+      profile = await enrichProfileStores(profile);
       setUser(profile);
       setActiveBranchState(profile.assignedBranches?.[0] || null);
       localStorage.setItem('timmo_admin_user', JSON.stringify(profile));
@@ -167,6 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       await firebaseSignOut(auth);
+      clearHrmSession();
       setUser(null);
       setActiveBranchState(null);
       localStorage.removeItem('timmo_admin_user');
@@ -181,9 +184,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const updateProfile = async (name: string, phone: string) => {
     if (!user) return;
     try {
+      const response = await authenticatedHrmFetch('/api/v1/account/profile', {
+        method: 'PATCH',
+        body: JSON.stringify({ name, phone }),
+      });
+      if (!response.ok) throw new Error(`Could not update profile (${response.status})`);
       const updated = { ...user, name, phone };
-      const userDocRef = doc(db, 'users', user.uid);
-      await setDoc(userDocRef, updated, { merge: true });
       setUser(updated);
       localStorage.setItem('timmo_admin_user', JSON.stringify(updated));
     } catch (e) {
@@ -194,15 +200,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = async (uid: string): Promise<UserProfile | null> => {
     try {
-      const userDocRef = doc(db, 'users', uid);
-      const userDoc = await getDoc(userDocRef);
-      if (userDoc.exists()) {
-        const profile = userDoc.data() as UserProfile;
-        setUser(profile);
-        localStorage.setItem('timmo_admin_user', JSON.stringify(profile));
-        setSessionCookies(profile.role);
-        return profile;
-      }
+      if (!auth.currentUser || auth.currentUser.uid !== uid) return null;
+      const session = await establishHrmSession(auth.currentUser);
+      let profile = mapProfile(session.user);
+      profile = await enrichProfileStores(profile);
+      setUser(profile);
+      setActiveBranchState(profile.assignedBranches?.[0] || null);
+      localStorage.setItem('timmo_admin_user', JSON.stringify(profile));
+      setSessionCookies(profile.role);
+      return profile;
     } catch (e) {
       console.error('Error refreshing profile:', e);
     }

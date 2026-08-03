@@ -4,13 +4,10 @@ import { ReactNode, useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { BookingProvider, useBooking } from '@/lib/bookingContext';
 import { useI18n, I18nProvider } from '@/lib/i18n';
-import { demoBranch } from '@/lib/seedData';
 import Stepper from '@/components/booking/Stepper';
-import BookingSummary from '@/components/booking/BookingSummary';
 import BottomBar from '@/components/booking/BottomBar';
 import styles from './layout.module.css';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
+import { fetchHrmStore } from '@/lib/hrmApi';
 import { Branch } from '@/lib/types';
 
 function BookingLayoutInner({ children }: { children: ReactNode }) {
@@ -23,6 +20,7 @@ function BookingLayoutInner({ children }: { children: ReactNode }) {
   // because Firebase rewrite serves glamour-nails-berlin HTML for all slugs,
   // and Next.js hooks return the pre-rendered slug instead of the real URL slug.
   const [branchSlug, setBranchSlug] = useState('');
+  const [storeLoadError, setStoreLoadError] = useState(false);
 
   useEffect(() => {
     const slug = window.location.pathname.split('/')[2] || '';
@@ -34,27 +32,42 @@ function BookingLayoutInner({ children }: { children: ReactNode }) {
     }
   }, [dispatch]);
 
-  // Set branch dynamically from Firestore
+  // Fetch store info from HRM API and map to local Branch type
   useEffect(() => {
     if (!branchSlug) return;
-    const docRef = doc(db, 'branches', branchSlug);
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        const branchData = { id: docSnap.id, ...docSnap.data() } as Branch;
-        dispatch({ type: 'SET_BRANCH', branch: branchData });
-      } else {
-        // Use demo branch as template but override slug/id with the actual URL slug
-        // to prevent bookings from being saved to the wrong branch
-        const fallbackBranch = { ...demoBranch, id: branchSlug, slug: branchSlug };
-        dispatch({ type: 'SET_BRANCH', branch: fallbackBranch });
-      }
-    }, (err) => {
-      console.error("Error listening to branch:", err);
-      const fallbackBranch = { ...demoBranch, id: branchSlug, slug: branchSlug };
-      dispatch({ type: 'SET_BRANCH', branch: fallbackBranch });
-    });
 
-    return () => unsubscribe();
+    setStoreLoadError(false);
+
+    fetchHrmStore(branchSlug)
+      .then((store) => {
+        const branchData: Branch = {
+          id: store.id,
+          businessId: '',
+          name: store.name,
+          // Keep the public Hosting slug in navigation. The canonical store ID
+          // (for example S-3) is data identity, not a statically exported route.
+          slug: branchSlug,
+          address: store.addressText || '',
+          phone: store.phone || '',
+          currency: 'EUR',
+          publicStaffSelection: store.publicStaffSelection,
+          minimumNoticeHours: store.minimumNoticeHours,
+          bookingWindowDays: store.bookingWindowDays,
+          graceTimeMinutes: 15,
+          slotIntervalMinutes: store.slotIntervalMinutes,
+          cancellationNoticeHours: store.cancellationNoticeHours,
+          openTime: store.openTime,
+          closeTime: store.closeTime,
+          absenceDeadlineTime: '18:00',
+          isActive: true,
+          createdAt: '',
+        };
+        dispatch({ type: 'SET_BRANCH', branch: branchData });
+      })
+      .catch((err) => {
+        console.error('Error fetching store from HRM:', err);
+        setStoreLoadError(true);
+      });
   }, [branchSlug, dispatch]);
 
   // Sync currentStep based on pathname
@@ -84,7 +97,7 @@ function BookingLayoutInner({ children }: { children: ReactNode }) {
   const handleClose = () => {
     dispatch({ type: 'RESET' });
     sessionStorage.removeItem('timmo_booking_state');
-    router.push('/');
+    window.location.href = '/';
   };
 
   const isSuccessPage = pathname.endsWith('/success');
@@ -120,7 +133,12 @@ function BookingLayoutInner({ children }: { children: ReactNode }) {
       {/* Main content */}
       <div className={styles.mainArea}>
         <main className={styles.contentColumn}>
-          {children}
+          {storeLoadError ? (
+            <div role="alert" style={{ padding: '32px 20px', textAlign: 'center' }}>
+              <h1 style={{ marginBottom: 12, fontSize: 22 }}>Không thể tải thông tin cửa hàng</h1>
+              <p>Vui lòng kiểm tra đường dẫn hoặc thử lại sau. Chưa có lịch hẹn nào được tạo.</p>
+            </div>
+          ) : children}
         </main>
       </div>
 

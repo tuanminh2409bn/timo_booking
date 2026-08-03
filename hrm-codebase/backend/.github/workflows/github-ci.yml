@@ -1,0 +1,11 @@
+name: Main pipeline
+on: [ push, workflow_dispatch, pull_request ]
+
+jobs:
+  Test:
+    uses: Tutty-Lab/timmo-auto-devops/.github/workflows/auto-devops.yml@main
+  Docker:
+    uses: Tutty-Lab/timmo-auto-devops/.github/workflows/docker.github-ci.yml@main
+  Deploy:
+    uses: Tutty-Lab/timmo-auto-devops/.github/workflows/cloudrun.github-ci.yml@main
+    needs: Docker

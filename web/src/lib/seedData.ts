@@ -14,6 +14,7 @@ export const demoBranch: Branch = {
   bookingWindowDays: 30,
   graceTimeMinutes: 30,
   slotIntervalMinutes: 30,
+  cancellationNoticeHours: 12,
   absenceDeadlineTime: '22:00',
   isActive: true,
   createdAt: '2026-01-01T00:00:00Z',

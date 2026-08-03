@@ -637,6 +637,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
 }
 
 .formLabelText {
@@ -866,8 +867,8 @@
 }
 
 .timeSelectField {
-  width: 72px; /* Fixed width prevents overflow on mobile */
-  padding: 6px 8px;
+  width: 76px;
+  padding: 6px 3px;
   border: 1px solid #E5E7EB;
   border-radius: 8px;
   font-size: 13px;
@@ -1284,6 +1285,42 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+  min-width: 0;
+}
+
+.dateInputField {
+  min-width: 0;
+  padding: 10px 34px 10px 10px;
+}
+
+@media (max-width: 420px) {
+  .hoursScheduleGrid {
+    padding: 4px 10px;
+  }
+
+  .dayScheduleRow {
+    grid-template-columns: 64px 44px minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .dayNameLabel {
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .timeInputsWrapper {
+    gap: 3px;
+  }
+
+  .timeSelectField {
+    width: 70px;
+    padding-inline: 1px;
+    font-size: 12px;
+  }
+
+  .datesInputRowGrid {
+    gap: 8px;
+  }
 }
 
 /* Branch assignment checklist */
@@ -1505,4 +1542,3 @@
 .copyBtnSuccess:hover {
   background-color: #059669 !important;
 }
-

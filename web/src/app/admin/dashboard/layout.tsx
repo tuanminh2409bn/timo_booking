@@ -1,26 +1,23 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/authContext';
 import { useI18n } from '@/lib/i18n';
 import LanguageSwitcher from '@/components/LanguageSwitcher';
 import Link from 'next/link';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
 import { getGermanDateObject } from '@/lib/timeUtils';
-import styles from './layout.module.css';
-import { Home, Calendar, Briefcase, Users, User, LogOut } from 'lucide-react';
+import { Home, Calendar, Briefcase, Users, User, LogOut, Plus } from 'lucide-react';
+import { fetchHrmStore } from '@/lib/hrmApi';
 
-// Tab icon type
-type TabDef = { name: string; path: string; iconType: 'home' | 'calendar' | 'branches' | 'accounts' };
+type TabDef = { name: string; path: string; iconType: 'home' | 'calendar' | 'customers' | 'branches' | 'accounts' };
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading, logout } = useAuth();
-  const { t, locale } = useI18n();
+  const { user, loading, logout, activeBranch } = useAuth();
+  const { locale } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
-  const [salonName, setSalonName] = useState<string>('');
+  const [resolvedSalonName, setResolvedSalonName] = useState<string>('');
   const [showProfileMenu, setShowProfileMenu] = useState(false);
 
   useEffect(() => {
@@ -28,23 +25,49 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }, [user, loading, router]);
 
   useEffect(() => {
+    if (loading || user?.role !== 'staff') return;
+    const isAllowedStaffPage =
+      pathname === '/admin/dashboard' ||
+      pathname === '/admin/dashboard/' ||
+      pathname.startsWith('/admin/dashboard/bookings');
+    if (!isAllowedStaffPage) router.replace('/admin/dashboard/');
+  }, [loading, pathname, router, user]);
+
+  useEffect(() => {
     if (!user) return;
-    if (user.role === 'superadmin') { setSalonName('Timmo Admin'); return; }
-    const branchId = user.assignedBranches?.[0];
-    if (!branchId) { setSalonName(locale === 'vi' ? 'Chưa gán chi nhánh' : 'No Branch'); return; }
-    (async () => {
-      try {
-        const snap = await getDoc(doc(db, 'branches', branchId));
-        setSalonName(snap.exists() ? snap.data().name : branchId);
-      } catch { setSalonName(branchId); }
-    })();
-  }, [user, locale]);
+    if (user.role === 'superadmin') return;
+    const branchId = activeBranch || user.assignedBranches?.[0];
+    if (!branchId) return;
+    fetchHrmStore(branchId)
+      .then((store) => setResolvedSalonName(store.name))
+      .catch(() => setResolvedSalonName(branchId));
+  }, [user, activeBranch]);
 
   if (loading || !user) {
-    return <div className={styles.loadingScreen}><div className={styles.spinner} /></div>;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div role="status" aria-live="polite" className="flex flex-col items-center gap-3 text-gray-500">
+          <div className="w-8 h-8 border-4 border-gray-200 border-t-blue-600 rounded-full animate-spin" />
+          <span className="text-sm font-medium">
+            {locale === 'vi' ? 'Đang tải dữ liệu...' : locale === 'de' ? 'Daten werden geladen...' : 'Loading data...'}
+          </span>
+        </div>
+      </div>
+    );
   }
 
   const handleLogout = async () => { await logout(); router.push('/admin/login'); };
+  const branchId = user.assignedBranches?.[0];
+  const salonName =
+    user.role === 'superadmin'
+      ? 'Timmo Admin'
+      : branchId
+        ? resolvedSalonName || branchId
+        : locale === 'vi'
+          ? 'Chưa gán chi nhánh'
+          : locale === 'de'
+            ? 'Keine Filiale zugewiesen'
+            : 'No branch assigned';
 
   const getGreeting = () => {
     const h = getGermanDateObject().getHours();
@@ -60,6 +83,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     if (['owner', 'manager', 'staff'].includes(user.role)) {
       tabs.push({ name: locale === 'vi' ? 'Lịch hẹn' : locale === 'de' ? 'Termine' : 'Bookings', path: '/admin/dashboard/bookings/', iconType: 'calendar' });
     }
+    if (['owner', 'manager'].includes(user.role)) {
+      tabs.push({ name: locale === 'vi' ? 'Khách hàng' : locale === 'de' ? 'Kunden' : 'Customers', path: '/admin/dashboard/customers/', iconType: 'customers' });
+    }
     if (user.role === 'superadmin') {
       tabs.push({ name: locale === 'vi' ? 'Chi nhánh' : locale === 'de' ? 'Filialen' : 'Branches', path: '/admin/dashboard/branches/', iconType: 'branches' });
       tabs.push({ name: locale === 'vi' ? 'Tài khoản' : locale === 'de' ? 'Konten' : 'Accounts', path: '/admin/dashboard/accounts/', iconType: 'accounts' });
@@ -68,76 +94,155 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   const tabItems = getTabItems();
-
+  const isBookingsPage = pathname.startsWith('/admin/dashboard/bookings');
   const isTabActive = (tabPath: string) => {
     if (tabPath === '/admin/dashboard/') return pathname === '/admin/dashboard/' || pathname === '/admin/dashboard';
     return pathname.startsWith(tabPath);
   };
 
-  const renderTabIcon = (iconType: string, active: boolean) => {
-    const iconClass = "w-[22px] h-[22px]";
+  const renderIcon = (iconType: string, active: boolean, className = "w-6 h-6") => {
+    const strokeWidth = active ? 2.5 : 1.8;
     switch (iconType) {
-      case 'home': return <Home className={iconClass} strokeWidth={active ? 2.2 : 1.8} />;
-      case 'calendar': return <Calendar className={iconClass} strokeWidth={active ? 2.2 : 1.8} />;
-      case 'branches': return <Briefcase className={iconClass} strokeWidth={active ? 2.2 : 1.8} />;
-      case 'accounts': return <Users className={iconClass} strokeWidth={active ? 2.2 : 1.8} />;
-      default: return <Home className={iconClass} strokeWidth={active ? 2.2 : 1.8} />;
+      case 'home': return <Home className={className} strokeWidth={strokeWidth} />;
+      case 'calendar': return <Calendar className={className} strokeWidth={strokeWidth} />;
+      case 'customers': return <Users className={className} strokeWidth={strokeWidth} />;
+      case 'branches': return <Briefcase className={className} strokeWidth={strokeWidth} />;
+      case 'accounts': return <Users className={className} strokeWidth={strokeWidth} />;
+      default: return <Home className={className} strokeWidth={strokeWidth} />;
     }
   };
 
   return (
-    <div className={styles.dashboardContainer}>
-      {/* Top Greeting Header */}
-      <header className={styles.greetingHeader}>
-        <div className={styles.greetingLeft}>
-          <div className={styles.avatar}>{user.name.substring(0, 2).toUpperCase()}</div>
-          <div className={styles.greetingText}>
-            <span className={styles.greetingLine}>{getGreeting()}, <strong>{user.name.split(' ')[0]}</strong></span>
-            {salonName && <span className={styles.salonLabel}>{salonName}</span>}
-          </div>
-        </div>
-        <div className={styles.greetingRight}>
-          <LanguageSwitcher variant="light" />
-          <div className={styles.profileWrapper}>
-            <button className={styles.profileBtn} onClick={() => setShowProfileMenu(!showProfileMenu)}>
-              <User className="w-[22px] h-[22px]" />
-            </button>
-            {showProfileMenu && (
-              <div className={styles.profileDropdown}>
-                <div className={styles.profileDropdownHeader}>
-                  <div className={styles.profileDropdownName}>{user.name}</div>
-                  <div className={styles.profileDropdownEmail}>{user.email}</div>
-                </div>
-                <div className={styles.profileDropdownDivider} />
-                <button className={`${styles.profileDropdownLogout} flex items-center`} onClick={handleLogout}>
-                  <LogOut className="w-4 h-4 mr-2" />
-                  <span>{locale === 'vi' ? 'Đăng xuất' : 'Logout'}</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
+    <div className="flex h-screen bg-gray-50 overflow-hidden text-gray-900 font-sans">
 
-      {/* Main Content */}
-      <main className={styles.contentBody}>{children}</main>
+      {/* Desktop Sidebar */}
+      <aside className="hidden md:flex flex-col w-64 bg-white border-r border-gray-100 shrink-0">
+        <div className="p-6 flex flex-col gap-1">
+          <h1 className="text-xl font-bold text-gray-900 tracking-tight">Timmo<span className="text-blue-600">Booking</span></h1>
+          <p className="text-sm text-gray-500 font-medium">{salonName}</p>
+        </div>
 
-      {/* Floating Bottom Tab Bar */}
-      <div className={styles.bottomBarWrapper}>
-        <nav className={styles.bottomTabBar}>
+        <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
           {tabItems.map((tab) => {
             const active = isTabActive(tab.path);
             return (
-              <Link key={tab.path} href={tab.path} className={`${styles.tabItem} ${active ? styles.tabItemActive : ''}`}>
-                <span className={styles.tabIconWrap}>{renderTabIcon(tab.iconType, active)}</span>
-                <span className={styles.tabLabel}>{tab.name}</span>
+              <Link
+                key={tab.path}
+                href={tab.path}
+                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${active ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
+              >
+                {renderIcon(tab.iconType, active, "w-5 h-5")}
+                <span className={`text-sm ${active ? 'font-semibold' : 'font-medium'}`}>{tab.name}</span>
               </Link>
             );
           })}
         </nav>
-      </div>
 
-      {showProfileMenu && <div className={styles.overlay} onClick={() => setShowProfileMenu(false)} />}
+        <div className="p-4 border-t border-gray-100">
+          <div className="flex items-center justify-between mb-4 px-2">
+             <LanguageSwitcher variant="light" />
+          </div>
+
+          <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-red-500 hover:bg-red-50 transition-colors">
+            <LogOut className="w-5 h-5" />
+            <span className="text-sm font-medium">
+              {locale === 'vi' ? 'Đăng xuất' : locale === 'de' ? 'Abmelden' : 'Logout'}
+            </span>
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-w-0 relative">
+
+        {/* Mobile & Desktop Header */}
+        {!isBookingsPage && <header className="sticky top-0 z-30 flex items-center justify-between px-4 py-3 bg-white/80 backdrop-blur-md border-b border-gray-100/50 md:px-8">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-blue-100 to-blue-50 flex items-center justify-center text-blue-600 font-bold text-sm shadow-sm border border-blue-100/50">
+              {user.name.substring(0, 2).toUpperCase()}
+            </div>
+            <div className="flex flex-col">
+              <span className="text-sm text-gray-600 font-medium">
+                {getGreeting()}, <strong className="text-blue-600">{user.name.split(' ')[0]}</strong>
+              </span>
+              <span className="text-xs text-gray-400 font-medium md:hidden">{salonName}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+             <div className="md:hidden">
+               <LanguageSwitcher variant="light" />
+             </div>
+
+             <div className="relative">
+               <button
+                 onClick={() => setShowProfileMenu(!showProfileMenu)}
+                 aria-label={locale === 'vi' ? 'Mở tài khoản' : locale === 'de' ? 'Konto öffnen' : 'Open account'}
+                 className="w-10 h-10 rounded-full bg-gray-50 border border-gray-200 flex items-center justify-center text-gray-600 hover:bg-gray-100 transition-colors"
+               >
+                 <User className="w-5 h-5" />
+               </button>
+
+               {showProfileMenu && (
+                 <>
+                   <div className="fixed inset-0 z-40" onClick={() => setShowProfileMenu(false)} />
+                   <div className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-gray-100 z-50 overflow-hidden origin-top-right animate-in fade-in zoom-in-95 duration-200">
+                     <div className="p-4 bg-gray-50/50">
+                       <div className="text-sm font-bold text-gray-900">{user.name}</div>
+                       <div className="text-xs text-gray-500 mt-0.5">{user.email}</div>
+                     </div>
+                     <div className="h-px bg-gray-100" />
+                     <button onClick={handleLogout} className="w-full text-left px-4 py-3 text-sm text-red-500 hover:bg-red-50 font-medium flex items-center gap-2 transition-colors">
+                       <LogOut className="w-4 h-4" />
+                       {locale === 'vi' ? 'Đăng xuất' : locale === 'de' ? 'Abmelden' : 'Logout'}
+                     </button>
+                   </div>
+                 </>
+               )}
+             </div>
+          </div>
+        </header>}
+
+        {/* Scrollable Content */}
+        <main className={`flex-1 overflow-y-auto overflow-x-hidden ${isBookingsPage ? 'p-0 pb-20 md:p-6 md:pb-6' : 'p-4 pb-24 md:p-8 md:pb-8'}`}>
+          <div className={`${isBookingsPage ? 'max-w-none' : 'max-w-5xl'} mx-auto w-full`}>
+            {children}
+          </div>
+        </main>
+
+        {/* Mobile Bottom Navigation */}
+        <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-gray-100 pb-safe shadow-[0_-4px_24px_rgba(0,0,0,0.02)]">
+          <nav className="flex items-center justify-around px-2 h-16">
+            {tabItems.map((tab, index) => {
+              const active = isTabActive(tab.path);
+              const showFab = ['owner', 'manager'].includes(user.role);
+              const isMiddle = Math.floor(tabItems.length / 2) === index;
+
+              return (
+                <React.Fragment key={tab.path}>
+                  {isMiddle && showFab && (
+                    <Link
+                      href="/admin/dashboard/bookings?new=1"
+                      aria-label={locale === 'vi' ? 'Tạo lịch hẹn' : locale === 'de' ? 'Termin erstellen' : 'Create booking'}
+                      className="relative -top-5 flex items-center justify-center w-14 h-14 rounded-full bg-blue-600 text-white shadow-lg shadow-blue-600/30 active:scale-95 transition-transform"
+                    >
+                      <Plus className="w-7 h-7" />
+                    </Link>
+                  )}
+                  <Link
+                    href={tab.path}
+                    className={`flex flex-col items-center justify-center w-full h-full gap-1 active:scale-95 transition-transform ${active ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+                  >
+                    {renderIcon(tab.iconType, active, "w-6 h-6")}
+                    <span className={`text-[10px] ${active ? 'font-bold' : 'font-medium'}`}>{tab.name}</span>
+                  </Link>
+                </React.Fragment>
+              );
+            })}
+          </nav>
+        </div>
+
+      </div>
     </div>
   );
 }

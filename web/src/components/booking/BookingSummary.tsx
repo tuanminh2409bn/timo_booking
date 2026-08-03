@@ -5,7 +5,6 @@ import { useI18n } from '@/lib/i18n';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
 import { useRouter } from 'next/navigation';
-import { demoBranch } from '@/lib/seedData';
 import styles from './BookingSummary.module.css';
 
 const STEP_PATHS = ['', '/staff', '/datetime', '/confirm'];
@@ -155,8 +154,8 @@ export default function BookingSummary() {
               <div className={styles.salonInfo}>
                 <div className={styles.salonIcon}>T</div>
                 <div className={styles.salonDetails}>
-                  <span className={styles.salonName}>{demoBranch.name}</span>
-                  <span className={styles.salonAddress}>{demoBranch.address}</span>
+                  <span className={styles.salonName}>{state.branch?.name ?? ''}</span>
+                  <span className={styles.salonAddress}>{state.branch?.address ?? ''}</span>
                 </div>
               </div>
             </>

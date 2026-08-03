@@ -12,6 +12,9 @@ export interface Branch {
   bookingWindowDays: number;
   graceTimeMinutes: number;
   slotIntervalMinutes: number;
+  cancellationNoticeHours: number;
+  openTime?: string;
+  closeTime?: string;
   absenceDeadlineTime: string;
   isActive: boolean;
   createdAt: string;
@@ -47,6 +50,7 @@ export interface Service {
   isAddon?: boolean;                             // +duration addon like "Design / Extra"
   conflictGroup?: 'gel' | 'acryl';               // inherited from category
   staffType?: 'main' | 'junior' | 'any';         // which staff type can do this
+  nameLocalized?: Record<string, string>;
   staffPriority?: 'assistant_staff' | 'main_staff' | 'conditional_assistant' | 'none'; // Spec V1: priority rule for auto-assign
   createdAt: string;
 }
@@ -187,11 +191,11 @@ export interface BookingState {
     name: string;
     phone: string;
     email: string;
-    password: string;
     notes: string;
     isReturning: boolean;
   };
   currentStep: number;
+  attendanceCode?: string;  // Real code from HRM API (e.g. BK-47)
 }
 
 // ===== COMPUTED HELPERS =====

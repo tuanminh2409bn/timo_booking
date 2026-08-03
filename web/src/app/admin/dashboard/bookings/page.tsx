@@ -4,31 +4,75 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/authContext';
 import { useI18n } from '@/lib/i18n';
-import { collection, onSnapshot, doc, updateDoc, query, where, setDoc, getDocs, deleteDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase/config';
 import { getGermanDateObject, getGermanTodayString } from '@/lib/timeUtils';
 import styles from './page.module.css';
-import { Search, List, Calendar, ChevronLeft, ChevronRight, X, Users, User, Clock, ChevronDown, Plus, Trash2 } from 'lucide-react';
+import { List, Calendar, ChevronLeft, ChevronRight, X, Users } from 'lucide-react';
 import { Button } from '@/components/admin/ui/button';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
+import {
+  fetchAdminAttendanceCalendar,
+  createAdminBooking,
+  reassignAdminAttendance,
+  updateAdminAttendanceStatus,
+  type AdminAttendanceItem,
+} from '@/lib/adminHrmApi';
+import {
+  fetchHrmAvailability,
+  fetchHrmServices,
+  fetchHrmStaff,
+  type HrmAvailability,
+  type HrmService,
+} from '@/lib/hrmApi';
+
+type BookingServiceExtra = {
+  serviceId?: string;
+  name?: string;
+};
+
+type BookingServiceItem = {
+  serviceId: string;
+  serviceName: string;
+  categoryId?: string;
+  categoryName?: string;
+  name?: string;
+  durationMinutes: number;
+  price: number;
+  extras?: BookingServiceExtra[];
+};
 
 interface FirestoreBooking {
   id: string;
   customerName: string;
   customerPhone: string;
-  services: any[];
+  services: BookingServiceItem[];
   staffId: string;
   staffName: string;
   appointmentDate: string;
   startTime: string;
   totalPrice: number;
   totalDurationMinutes: number;
-  status: 'pending_approval' | 'confirmed' | 'cancelled' | 'needs_owner_action' | 'completed';
+  status: 'pending_approval' | 'confirmed' | 'cancelled' | 'needs_owner_action' | 'completed' | 'no_show';
   createdAt: string;
 }
 
 type ViewMode = 'list' | 'calendar';
-type FilterStatus = 'all' | 'pending_approval' | 'confirmed' | 'cancelled';
+type StaffAbsence = {
+  employeeUserId: string;
+  startDate: string;
+  endDate: string;
+  allDay: boolean;
+  absenceDate: string;
+  isFullDay: boolean;
+  startTime?: string;
+  endTime?: string;
+  note?: string;
+};
+type FilterStatus =
+  | 'all'
+  | 'pending_approval'
+  | 'confirmed'
+  | 'cancelled'
+  | 'needs_owner_action';
 
 // ===== Helpers =====
 
@@ -189,7 +233,7 @@ export default function BookingsManagementPage() {
   const { getServiceName: translateService, getCategoryName: translateCategory } = useServiceTranslation();
   const [bookings, setBookings] = useState<FirestoreBooking[]>([]);
   const [realStaffList, setRealStaffList] = useState<{ id: string; name: string; status: string; serviceIds?: string[]; staffType?: string }[]>([]);
-  const [staffAbsences, setStaffAbsences] = useState<Record<string, any[]>>({});
+  const [staffAbsences, setStaffAbsences] = useState<Record<string, StaffAbsence[]>>({});
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('calendar');
@@ -197,8 +241,8 @@ export default function BookingsManagementPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [weekStart, setWeekStart] = useState(() => getStartOfWeek(getGermanDateObject()));
   const [selectedDate, setSelectedDate] = useState(() => getGermanTodayString());
-  const [popover, setPopover] = useState<{ 
-    booking: FirestoreBooking; 
+  const [popover, setPopover] = useState<{
+    booking: FirestoreBooking;
   } | null>(null);
   const [popoverAnchorEl, setPopoverAnchorEl] = useState<HTMLElement | null>(null);
 
@@ -212,103 +256,188 @@ export default function BookingsManagementPage() {
   const [newBookingNotes, setNewBookingNotes] = useState('');
   const [newBookingServices, setNewBookingServices] = useState<{categoryId: string; categoryName: string; serviceId: string; serviceName: string; duration: number; price: number}[]>([]);
   const [newBookingCreating, setNewBookingCreating] = useState(false);
-  const [allCategories, setAllCategories] = useState<any[]>([]);
-  const [allServices, setAllServices] = useState<any[]>([]);
+  // Quick 2-tap booking popup state
+  const [quickBookPopup, setQuickBookPopup] = useState<{
+    staffId: string;
+    staffName: string;
+    timeStr: string;
+    anchorRect: { top: number; left: number; bottom: number; width: number };
+    isUpward: boolean;
+  } | null>(null);
+  const [allCategories, setAllCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const [allServices, setAllServices] = useState<Array<HrmService & { categoryId: string }>>([]);
 
-  // Firestore real-time sync for Bookings
+  // Check for 'new' param in URL to open modal automatically
   useEffect(() => {
-    if (!user) return;
-    const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
-    const bookingsRef = collection(db, 'branches', branchId, 'bookings');
-    const bookingsQuery = user.role === 'staff' && user.staffId
-      ? query(bookingsRef, where('staffId', '==', user.staffId))
-      : bookingsRef;
-
-    const unsubscribe = onSnapshot(bookingsQuery, (snap) => {
-      const list: FirestoreBooking[] = [];
-      snap.forEach(doc => {
-        list.push({ id: doc.id, ...doc.data() } as FirestoreBooking);
-      });
-      list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setBookings(list);
-      setLoading(false);
-    }, () => setLoading(false));
-    return () => unsubscribe();
-  }, [user, activeBranch]);
-
-  // Firestore real-time sync for Staff List
-  useEffect(() => {
-    if (!user) return;
-    const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
-    const staffRef = collection(db, 'branches', branchId, 'staff');
-
-    const unsubscribe = onSnapshot(staffRef, (snap) => {
-      const list: { id: string; name: string; status: string; serviceIds?: string[]; staffType?: string }[] = [];
-      snap.forEach(doc => {
-        const data = doc.data();
-        list.push({
-          id: doc.id,
-          name: data.name || '',
-          status: data.status || 'active',
-          serviceIds: data.serviceIds || [],
-          staffType: data.staffType || 'main',
-        });
-      });
-      setRealStaffList(list);
-    }, (err) => console.error('Error fetching staff list:', err));
-    return () => unsubscribe();
-  }, [user, activeBranch]);
-
-  // Real-time sync for staff absences — show leave blocks on calendar
-  useEffect(() => {
-    if (!user || realStaffList.length === 0) return;
-    const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
-    const unsubscribes: (() => void)[] = [];
-
-    for (const staff of realStaffList) {
-      if (staff.status !== 'active') continue;
-      const absRef = collection(db, 'branches', branchId, 'staff', staff.id, 'absences');
-      const unsub = onSnapshot(absRef, (snap) => {
-        const absList = snap.docs.map(d => d.data());
-        setStaffAbsences(prev => ({ ...prev, [staff.id]: absList }));
-      }, (e) => console.error(`Error listening absences for ${staff.id}:`, e));
-      unsubscribes.push(unsub);
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      if (searchParams.get('new') === '1' && ['owner', 'manager'].includes(user?.role ?? '')) {
+        setShowNewBookingModal(true);
+        // Clear param so it doesn't reopen on refresh
+        window.history.replaceState({}, '', window.location.pathname);
+      }
     }
+  }, [user]);
 
-    return () => unsubscribes.forEach(u => u());
-  }, [user, activeBranch, realStaffList]);
+  const refreshCanonicalCalendar = useCallback(async () => {
+    const storeId = activeBranch || user?.assignedBranches?.[0];
+    if (!storeId) return;
+    const today = getGermanDateObject();
+    const items = await fetchAdminAttendanceCalendar(
+      storeId,
+      formatDateLocal(addDays(today, -60)),
+      formatDateLocal(addDays(today, 180)),
+    );
+    const list = items.map((item: AdminAttendanceItem): FirestoreBooking => {
+      const staffName =
+        item.services
+          .flatMap((service) => service.employees)
+          .find((employee) => employee.employeeId === item.mainAssigneeUserId)
+          ?.employeeName ?? '';
+      return {
+        id: item.id,
+        customerName: item.customerName,
+        customerPhone: item.customerPhone,
+        services: item.services.map((service) => ({
+          serviceId: service.id,
+          serviceName: service.name,
+          durationMinutes: Math.max(item.endTime - item.startTime, 1),
+          price: Number.parseFloat(service.amount) || 0,
+        })),
+        staffId: item.mainAssigneeUserId || item.employeeUserId,
+        staffName,
+        appointmentDate: item.workDate,
+        startTime: `${Math.floor(item.startTime / 60).toString().padStart(2, '0')}:${(item.startTime % 60).toString().padStart(2, '0')}`,
+        totalPrice: item.totalAmount,
+        totalDurationMinutes: Math.max(item.endTime - item.startTime, 1),
+        status: item.bookingStatus,
+        createdAt: item.workDate,
+      };
+    });
+    setBookings(list);
+  }, [activeBranch, user]);
 
-  // Fetch categories and services for walk-in booking
+  // Canonical attendance sync from the HRM backend.
   useEffect(() => {
-    if (!user || user.role === 'staff') return;
-    const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
-    
-    const unsubCats = onSnapshot(collection(db, 'branches', branchId, 'categories'), (snap) => {
-      const cats = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((c: any) => c.isActive !== false);
-      cats.sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0));
-      setAllCategories(cats);
+    if (!user) return;
+    const storeId = activeBranch || user.assignedBranches?.[0];
+    if (!storeId) {
+      setLoading(false);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    refreshCanonicalCalendar()
+      .catch((error: unknown) => {
+        console.error('Could not load canonical attendance calendar:', error);
+        if (active) setBookings([]);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user, activeBranch, refreshCanonicalCalendar]);
+
+  // Staff, services, categories and leave blocks all come from the current HRM data source.
+  useEffect(() => {
+    const storeId = activeBranch || user?.assignedBranches?.[0];
+    if (!storeId) return;
+    let active = true;
+    Promise.all([
+      fetchHrmStaff(storeId),
+      fetchHrmServices(storeId),
+      Promise.all(
+        Array.from({ length: 14 }, (_, index) =>
+          fetchHrmAvailability(storeId, formatDateLocal(addDays(getGermanDateObject(), index - 3))),
+        ),
+      ),
+    ]).then(([staff, services, availabilityDays]) => {
+      if (!active) return;
+      setRealStaffList(staff.map((item) => ({
+        id: item.uid,
+        name: item.name,
+        status: 'active',
+        serviceIds: item.serviceIds,
+        staffType: item.workerType,
+      })));
+      const mappedServices = services.map((service) => ({
+        ...service,
+        categoryId: service.category || 'other',
+      }));
+      setAllServices(mappedServices);
+      setAllCategories(
+        [...new Set(mappedServices.map((service) => service.categoryId))]
+          .map((categoryId) => ({ id: categoryId, name: categoryId })),
+      );
+      const absenceMap: Record<string, StaffAbsence[]> = {};
+      for (const day of availabilityDays) {
+        for (const absence of day.absences) {
+          absenceMap[absence.employeeUserId] = [
+            ...(absenceMap[absence.employeeUserId] ?? []),
+            {
+              ...absence,
+              absenceDate: day.date,
+              isFullDay: absence.allDay,
+            },
+          ];
+        }
+      }
+      setStaffAbsences(absenceMap);
+    }).catch((error: unknown) => {
+      console.error('Could not load HRM calendar options:', error);
     });
-    
-    const unsubSvcs = onSnapshot(collection(db, 'branches', branchId, 'services'), (snap) => {
-      const svcs = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter((s: any) => s.isActive !== false && s.type !== 'addon');
-      svcs.sort((a: any, b: any) => (a.displayOrder || 0) - (b.displayOrder || 0));
-      setAllServices(svcs);
-    });
-    
-    return () => { unsubCats(); unsubSvcs(); };
+    return () => { active = false; };
   }, [user, activeBranch]);
 
   // Handlers
   const handleApprove = async (id: string) => {
     if (!user) return;
-    const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
-    try { await updateDoc(doc(db, 'branches', branchId, 'bookings', id), { status: 'confirmed' }); } catch (e) { console.error(e); }
+    const storeId = activeBranch || user.assignedBranches?.[0];
+    if (!storeId) return;
+    try {
+      await updateAdminAttendanceStatus(storeId, id, 'confirmed');
+      setBookings((current) =>
+        current.map((booking) =>
+          booking.id === id ? { ...booking, status: 'confirmed' } : booking,
+        ),
+      );
+    } catch (error: unknown) {
+      console.error(error);
+    }
   };
 
   const handleReject = async (id: string) => {
     if (!user) return;
-    const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
-    try { await updateDoc(doc(db, 'branches', branchId, 'bookings', id), { status: 'cancelled' }); } catch (e) { console.error(e); }
+    const storeId = activeBranch || user.assignedBranches?.[0];
+    if (!storeId) return;
+    try {
+      await updateAdminAttendanceStatus(storeId, id, 'cancelled');
+      setBookings((current) =>
+        current.map((booking) =>
+          booking.id === id ? { ...booking, status: 'cancelled' } : booking,
+        ),
+      );
+    } catch (error: unknown) {
+      console.error(error);
+    }
+  };
+
+  const handleLifecycleStatus = async (
+    id: string,
+    status: 'completed' | 'no_show',
+  ) => {
+    if (!user) return;
+    const storeId = activeBranch || user.assignedBranches?.[0];
+    if (!storeId) return;
+    try {
+      await updateAdminAttendanceStatus(storeId, id, status);
+      await refreshCanonicalCalendar();
+    } catch (error: unknown) {
+      window.alert(error instanceof Error ? error.message : 'Could not update booking');
+    }
   };
 
   const handleReassignStaff = async (bookingId: string, staffId: string, staffName: string) => {
@@ -321,12 +450,12 @@ export default function BookingsManagementPage() {
 
     // 1. Check if staff is on leave on the booking date
     const absences = staffAbsences[staffId] || [];
-    const dateAbsences = absences.filter((abs: any) => abs.absenceDate === booking.appointmentDate);
-    
+    const dateAbsences = absences.filter((abs: StaffAbsence) => abs.absenceDate === booking.appointmentDate);
+
     if (dateAbsences.length > 0) {
       for (const abs of dateAbsences) {
         if (abs.isFullDay) {
-          const msg = locale === 'vi' 
+          const msg = locale === 'vi'
             ? `⚠️ ${staffName} đang nghỉ phép cả ngày ${booking.appointmentDate}. Không thể chuyển lịch sang thợ này.`
             : locale === 'de'
             ? `⚠️ ${staffName} hat am ${booking.appointmentDate} ganztägig frei. Zuweisung nicht möglich.`
@@ -359,7 +488,7 @@ export default function BookingsManagementPage() {
     }
 
     // 2. Check if staff already has a booking at the same time
-    const conflictBooking = bookings.find(b => 
+    const conflictBooking = bookings.find(b =>
       b.id !== bookingId &&
       b.staffId === staffId &&
       b.appointmentDate === booking.appointmentDate &&
@@ -385,12 +514,11 @@ export default function BookingsManagementPage() {
     }
 
     try {
-      await updateDoc(doc(db, 'branches', branchId, 'bookings', bookingId), {
-        staffId,
-        staffName
-      });
+      await reassignAdminAttendance(branchId, bookingId, staffId);
+      await refreshCanonicalCalendar();
     } catch (e) {
       console.error('Error reassigning staff:', e);
+      alert(e instanceof Error ? e.message : 'Could not reassign staff');
     }
   };
 
@@ -409,8 +537,8 @@ export default function BookingsManagementPage() {
         b.customerPhone.includes(q) ||
         b.staffName.toLowerCase().includes(q) ||
         b.services.some(s => {
-          const name = typeof s === 'object' && s !== null 
-            ? `${s.categoryName || ''} ${s.serviceName || s.name || ''}` 
+          const name = typeof s === 'object' && s !== null
+            ? `${s.categoryName || ''} ${s.serviceName || s.name || ''}`
             : String(s);
           return name.toLowerCase().includes(q);
         })
@@ -440,20 +568,24 @@ export default function BookingsManagementPage() {
 
   const [staffFilterId, setStaffFilterId] = useState<string>('all');
   const isManagerOrOwner = user?.role !== 'staff';
+  const ownStaff = useMemo(
+    () => realStaffList.find((staff) => staff.id === user?.staffId),
+    [realStaffList, user?.staffId],
+  );
 
   const dayFilteredBookings = useMemo(() => {
     let list = bookingsForRole.filter(b => b.appointmentDate === selectedDate);
-    
+
     // Filter by staff
     if (staffFilterId !== 'all') {
       list = list.filter(b => b.staffId === staffFilterId);
     }
-    
+
     // Filter by status
     if (filter !== 'all') {
       list = list.filter(b => b.status === filter);
     }
-    
+
     // Filter by search query
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -462,20 +594,20 @@ export default function BookingsManagementPage() {
         b.customerPhone.includes(q) ||
         b.staffName.toLowerCase().includes(q) ||
         b.services.some(s => {
-          const name = typeof s === 'object' && s !== null 
-            ? `${s.categoryName || ''} ${s.serviceName || s.name || ''}` 
+          const name = typeof s === 'object' && s !== null
+            ? `${s.categoryName || ''} ${s.serviceName || s.name || ''}`
             : String(s);
           return name.toLowerCase().includes(q);
         })
       );
     }
-    
+
     // Sort by start time ascending
     return list.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
   }, [bookingsForRole, selectedDate, staffFilterId, filter, searchQuery]);
 
   /** Translate a single service item: "CategoryName – ServiceName" */
-  const translateServiceItem = useCallback((s: any): string => {
+  const translateServiceItem = useCallback((s: BookingServiceItem | string): string => {
     if (typeof s === 'string') {
       // Old format: plain string like "Natur" or "Natur + Design / Extra"
       return s;
@@ -488,16 +620,16 @@ export default function BookingsManagementPage() {
       const catName = s.categoryId
         ? translateCategory(s.categoryId, s.categoryName || '')
         : (s.categoryName || '');
-      
+
       // Build extras suffix
       let extrasSuffix = '';
       if (s.extras && Array.isArray(s.extras) && s.extras.length > 0) {
-        const extrasNames = s.extras.map((e: any) => 
+        const extrasNames = s.extras.map((e: BookingServiceExtra) =>
           e.serviceId ? translateService(e.serviceId, e.name || '') : (e.name || '')
         ).join(', ');
         extrasSuffix = ` + ${extrasNames}`;
       }
-      
+
       if (catName) {
         return `${catName} – ${svcName}${extrasSuffix}`;
       }
@@ -520,9 +652,9 @@ export default function BookingsManagementPage() {
 
   const getStaffNameDisplay = useCallback((staffId: string, staffName: string): string => {
     if (
-      staffId === 'any' || 
-      staffName === 'Bất kỳ ai' || 
-      staffName?.toLowerCase() === 'any staff' || 
+      staffId === 'any' ||
+      staffName === 'Bất kỳ ai' ||
+      staffName?.toLowerCase() === 'any staff' ||
       staffName?.toLowerCase() === 'beliebiger mitarbeiter'
     ) {
       return t.admin.bookings.anyStaff || 'Bất kỳ ai';
@@ -548,15 +680,15 @@ export default function BookingsManagementPage() {
     if (staffId) {
       const staff = realStaffList.find(s => s.id === staffId);
       if (staff && staff.status !== 'active') {
-        const msg = locale === 'vi' ? `⚠️ ${staffName} đang nghỉ việc, không thể đặt lịch.` 
-          : locale === 'de' ? `⚠️ ${staffName} ist inaktiv.` 
+        const msg = locale === 'vi' ? `⚠️ ${staffName} đang nghỉ việc, không thể đặt lịch.`
+          : locale === 'de' ? `⚠️ ${staffName} ist inaktiv.`
           : `⚠️ ${staffName} is inactive.`;
         alert(msg);
         return;
       }
       // Block if staff is on leave at selected date/time
       const absences = staffAbsences[staffId] || [];
-      const dateAbsences = absences.filter((abs: any) => abs.absenceDate === selectedDate);
+      const dateAbsences = absences.filter((abs: StaffAbsence) => abs.absenceDate === selectedDate);
       for (const abs of dateAbsences) {
         if (abs.isFullDay) {
           const msg = locale === 'vi' ? `⚠️ ${staffName} nghỉ phép cả ngày ${selectedDate}.`
@@ -592,12 +724,87 @@ export default function BookingsManagementPage() {
     setShowNewBookingModal(true);
   }, [realStaffList, staffAbsences, selectedDate, locale]);
 
+  // ── Quick 2-tap booking: open small popup at slot ──
+  const openQuickBookPopup = useCallback((staffId: string, staffName: string, timeStr: string, e: React.MouseEvent) => {
+    // Same validation as openNewBookingModal
+    if (staffId) {
+      const staff = realStaffList.find(s => s.id === staffId);
+      if (staff && staff.status !== 'active') {
+        alert(locale === 'vi' ? `⚠️ ${staffName} đang nghỉ việc.` : `⚠️ ${staffName} is inactive.`);
+        return;
+      }
+      const absences = staffAbsences[staffId] || [];
+      const dateAbsences = absences.filter((abs: StaffAbsence) => abs.absenceDate === selectedDate);
+      for (const abs of dateAbsences) {
+        if (abs.isFullDay) { alert(locale === 'vi' ? `⚠️ ${staffName} nghỉ phép cả ngày.` : `⚠️ ${staffName} is on full-day leave.`); return; }
+        if (abs.startTime && abs.endTime) {
+          const absStart = abs.startTime.split(':').map(Number).reduce((h: number, m: number, i: number) => i === 0 ? h * 60 : h + m, 0);
+          const absEnd = abs.endTime.split(':').map(Number).reduce((h: number, m: number, i: number) => i === 0 ? h * 60 : h + m, 0);
+          const clickMin = timeStr.split(':').map(Number).reduce((h: number, m: number, i: number) => i === 0 ? h * 60 : h + m, 0);
+          if (clickMin >= absStart && clickMin < absEnd) { alert(locale === 'vi' ? `⚠️ ${staffName} nghỉ phép lúc ${timeStr}.` : `⚠️ On leave at ${timeStr}.`); return; }
+        }
+      }
+    }
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const isUpward = rect.bottom + 180 > window.innerHeight; // if near bottom
+    setQuickBookPopup({
+      staffId,
+      staffName,
+      timeStr,
+      anchorRect: { top: rect.top, left: rect.left, bottom: rect.bottom, width: rect.width },
+      isUpward
+    });
+  }, [realStaffList, staffAbsences, selectedDate, locale]);
+
+  // ── Quick create walk-in booking (60 or 120 min) ──
+  const handleQuickCreate = useCallback(async (durationMinutes: number) => {
+    if (!quickBookPopup || !user) return;
+    const resolvedBranchId = activeBranch || user.assignedBranches?.[0] || '';
+    if (!resolvedBranchId) return;
+    const { staffId, staffName, timeStr } = quickBookPopup;
+    setQuickBookPopup(null);
+
+    const svcName = durationMinutes === 60
+      ? (locale === 'vi' ? '1 Dịch vụ' : locale === 'de' ? '1 Dienstleistung' : '1 Service')
+      : (locale === 'vi' ? '2 Dịch vụ' : locale === 'de' ? '2 Dienstleistungen' : '2 Services');
+    const bookingPayload = {
+      customerName: locale === 'vi' ? 'Khách vãng lai' : locale === 'de' ? 'Laufkundschaft' : 'Walk-in',
+      customerPhone: '',
+      appointmentDate: selectedDate,
+      startTime: timeStr,
+      services: [{
+        name: svcName,
+        category: 'other',
+        durationMinutes,
+        price: 0,
+        employeeUserId: staffId,
+      }],
+      source: selectedDate > getGermanTodayString()
+        ? 'manual_booking' as const
+        : 'walk_in' as const,
+      notes: '',
+    };
+    try {
+      await createAdminBooking(resolvedBranchId, bookingPayload);
+      await refreshCanonicalCalendar();
+    } catch (e) {
+      console.error('Quick create error:', e);
+      alert(e instanceof Error ? e.message : (locale === 'vi' ? 'Lỗi khi tạo lịch.' : 'Error creating booking.'));
+    }
+  }, [quickBookPopup, activeBranch, user, selectedDate, locale, refreshCanonicalCalendar]);
+
   const handleCreateWalkInBooking = useCallback(async () => {
-    if (!user || newBookingServices.length === 0 || !newBookingCustomerName.trim() || !newBookingCustomerPhone.trim()) {
+    if (!user || newBookingServices.length === 0) {
       alert(t.admin.bookings.fillRequired || 'Please fill required fields');
       return;
     }
-    
+    if (user.role === 'staff' && selectedDate > getGermanTodayString()) {
+      alert(locale === 'vi'
+        ? 'Thợ chỉ được ghi nhận khách vãng lai trong ngày hiện tại hoặc ngày đã qua.'
+        : 'Staff may only record walk-ins for today or a past day.');
+      return;
+    }
+
     // --- Validation 1: Staff service compatibility ---
     if (newBookingStaffId) {
       const staff = realStaffList.find(s => s.id === newBookingStaffId);
@@ -612,22 +819,22 @@ export default function BookingsManagementPage() {
           return;
         }
       }
-      
+
       // --- Validation 2: Staff inactive ---
       if (staff && staff.status !== 'active') {
         const msg = locale === 'vi' ? `⚠️ ${staff.name} đang nghỉ việc.` : `⚠️ ${staff.name} is inactive.`;
         alert(msg);
         return;
       }
-      
+
       // --- Validation 3: Staff on leave ---
       const absences = staffAbsences[newBookingStaffId] || [];
-      const dateAbsences = absences.filter((abs: any) => abs.absenceDate === selectedDate);
+      const dateAbsences = absences.filter((abs: StaffAbsence) => abs.absenceDate === selectedDate);
       const totalDuration = newBookingServices.reduce((sum, s) => sum + s.duration, 0);
       const [startH, startM] = newBookingTime.split(':').map(Number);
       const bookStart = startH * 60 + startM;
       const bookEnd = bookStart + totalDuration;
-      
+
       for (const abs of dateAbsences) {
         if (abs.isFullDay) {
           const msg = locale === 'vi' ? `⚠️ ${newBookingStaffName} nghỉ phép cả ngày ${selectedDate}.`
@@ -648,7 +855,7 @@ export default function BookingsManagementPage() {
           }
         }
       }
-      
+
       // --- Validation 4: Time conflict with existing bookings ---
       const conflictBookings = bookings.filter(b =>
         b.staffId === newBookingStaffId &&
@@ -660,7 +867,7 @@ export default function BookingsManagementPage() {
         const cStart = cH * 60 + cM;
         const cEnd = cStart + (cb.totalDurationMinutes || 30);
         if (bookStart < cEnd && bookEnd > cStart) {
-          const msg = locale === 'vi' 
+          const msg = locale === 'vi'
             ? `⚠️ ${newBookingStaffName} đã có lịch lúc ${cb.startTime} (${cb.totalDurationMinutes}min). Bạn có muốn đặt trùng không?`
             : `⚠️ ${newBookingStaffName} has a booking at ${cb.startTime}. Overlap anyway?`;
           if (!confirm(msg)) return;
@@ -670,67 +877,31 @@ export default function BookingsManagementPage() {
     }
     setNewBookingCreating(true);
     const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
-    
+
     try {
-      const now = new Date().toISOString();
-      const baseId = `WI-${Date.now().toString(36).toUpperCase()}`;
-      const [startH, startM] = newBookingTime.split(':').map(Number);
-      let currentStartMinutes = startH * 60 + startM;
-      
-      // Create sequential bookings (one per service, like customer booking flow)
-      for (let i = 0; i < newBookingServices.length; i++) {
-        const svc = newBookingServices[i];
-        const bookingId = newBookingServices.length === 1 ? baseId : `${baseId}-${String.fromCharCode(65 + i)}`;
-        const svcStartH = Math.floor(currentStartMinutes / 60);
-        const svcStartM = currentStartMinutes % 60;
-        const svcStartTime = `${String(svcStartH).padStart(2, '0')}:${String(svcStartM).padStart(2, '0')}`;
-        const svcEndMinutes = currentStartMinutes + svc.duration;
-        const svcEndH = Math.floor(svcEndMinutes / 60);
-        const svcEndM = svcEndMinutes % 60;
-        const svcEndTime = `${String(svcEndH).padStart(2, '0')}:${String(svcEndM).padStart(2, '0')}`;
-        
-        const bookingDoc = {
-          id: bookingId,
-          parentBookingId: i === 0 ? null : baseId + '-A',
-          branchId,
-          businessId: user.businessId || '',
-          staffId: newBookingStaffId,
-          staffName: newBookingStaffName,
-          staffSelectionType: 'specific',
-          customerId: null,
-          customerName: newBookingCustomerName.trim(),
-          customerPhone: newBookingCustomerPhone.trim(),
-          customerEmail: null,
-          services: [{
-            serviceId: svc.serviceId,
-            categoryId: svc.categoryId,
-            serviceName: svc.serviceName,
-            categoryName: svc.categoryName,
-            extras: [],
-            durationMinutes: svc.duration,
-            price: svc.price,
-          }],
-          serviceIds: [svc.serviceId],
-          appointmentDate: selectedDate,
-          startTime: svcStartTime,
-          endTime: svcEndTime,
-          totalDurationMinutes: svc.duration,
-          totalPrice: svc.price,
-          status: 'confirmed',
-          source: 'walk_in',
-          notes: i === 0 ? newBookingNotes.trim() : '',
-          sequenceIndex: i,
-          totalSequenceServices: newBookingServices.length,
-          createdAt: now,
-        };
-        
-        await setDoc(doc(db, 'branches', branchId, 'bookings', bookingId), bookingDoc);
-        
-        // Next service starts after this one ends
-        currentStartMinutes = svcEndMinutes;
-      }
-      
+      await createAdminBooking(branchId, {
+        customerName: newBookingCustomerName.trim() || (
+          locale === 'vi' ? 'Khách vãng lai' : locale === 'de' ? 'Laufkundschaft' : 'Walk-in'
+        ),
+        customerPhone: newBookingCustomerPhone.trim(),
+        appointmentDate: selectedDate,
+        startTime: newBookingTime,
+        services: newBookingServices.map((service) => ({
+          sourceServiceId: service.serviceId,
+          name: service.serviceName,
+          category: service.categoryId || 'other',
+          durationMinutes: service.duration,
+          price: service.price,
+          employeeUserId: newBookingStaffId,
+        })),
+        source: user.role === 'staff'
+          ? 'walk_in'
+          : selectedDate > getGermanTodayString() ? 'manual_booking' : 'walk_in',
+        notes: newBookingNotes.trim(),
+      });
+
       setShowNewBookingModal(false);
+      await refreshCanonicalCalendar();
       alert(t.admin.bookings.bookingCreated || 'Booking created!');
     } catch (err) {
       console.error('Error creating walk-in booking:', err);
@@ -738,62 +909,7 @@ export default function BookingsManagementPage() {
     } finally {
       setNewBookingCreating(false);
     }
-  }, [user, activeBranch, newBookingServices, newBookingCustomerName, newBookingCustomerPhone, newBookingNotes, newBookingTime, newBookingStaffId, newBookingStaffName, selectedDate, t, realStaffList, staffAbsences, bookings, locale]);
-
-  // Delete all bookings and absences
-  const handleDeleteAll = useCallback(async () => {
-    if (!user || !isManagerOrOwner) return;
-    const confirmMsg = locale === 'vi' 
-      ? '⚠️ Bạn có chắc muốn XÓA TẤT CẢ lịch hẹn và nghỉ phép của thợ?\n\nHành động này KHÔNG THỂ hoàn tác!'
-      : locale === 'de' 
-      ? '⚠️ Sind Sie sicher, dass Sie ALLE Termine und Abwesenheiten löschen möchten?\n\nDiese Aktion kann NICHT rückgängig gemacht werden!'
-      : '⚠️ Are you sure you want to DELETE ALL bookings and staff absences?\n\nThis action CANNOT be undone!';
-    if (!confirm(confirmMsg)) return;
-    
-    const doubleConfirmMsg = locale === 'vi'
-      ? 'Nhập "XOA" để xác nhận xóa tất cả:'
-      : locale === 'de'
-      ? 'Geben Sie "DELETE" ein, um zu bestätigen:'
-      : 'Type "DELETE" to confirm:';
-    const typed = prompt(doubleConfirmMsg);
-    const expected = locale === 'vi' ? 'XOA' : 'DELETE';
-    if (!typed || typed.toUpperCase() !== expected) {
-      alert(locale === 'vi' ? 'Đã hủy thao tác.' : 'Operation cancelled.');
-      return;
-    }
-    
-    const branchId = activeBranch || user.assignedBranches?.[0] || 'glamour-nails-berlin';
-    
-    try {
-      // Delete all bookings
-      const bookingsSnap = await getDocs(collection(db, 'branches', branchId, 'bookings'));
-      let deletedBookings = 0;
-      for (const d of bookingsSnap.docs) {
-        await deleteDoc(doc(db, 'branches', branchId, 'bookings', d.id));
-        deletedBookings++;
-      }
-      
-      // Delete all absences for all staff
-      let deletedAbsences = 0;
-      for (const staff of realStaffList) {
-        const absSnap = await getDocs(collection(db, 'branches', branchId, 'staff', staff.id, 'absences'));
-        for (const a of absSnap.docs) {
-          await deleteDoc(doc(db, 'branches', branchId, 'staff', staff.id, 'absences', a.id));
-          deletedAbsences++;
-        }
-      }
-      
-      const successMsg = locale === 'vi'
-        ? `✅ Đã xóa ${deletedBookings} lịch hẹn và ${deletedAbsences} nghỉ phép thành công!`
-        : locale === 'de'
-        ? `✅ ${deletedBookings} Termine und ${deletedAbsences} Abwesenheiten gelöscht!`
-        : `✅ Deleted ${deletedBookings} bookings and ${deletedAbsences} absences!`;
-      alert(successMsg);
-    } catch (err) {
-      console.error('Error deleting all:', err);
-      alert('Error: ' + (err as Error).message);
-    }
-  }, [user, isManagerOrOwner, activeBranch, realStaffList, locale]);
+  }, [user, activeBranch, newBookingServices, newBookingCustomerName, newBookingCustomerPhone, newBookingNotes, newBookingTime, newBookingStaffId, newBookingStaffName, selectedDate, t, realStaffList, staffAbsences, bookings, locale, refreshCanonicalCalendar]);
 
   // Calendar
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
@@ -811,28 +927,60 @@ export default function BookingsManagementPage() {
   }, [bookingsForRole, staffFilterId]);
 
   const staffColumnsForDate = useMemo(() => {
-    if (!isManagerOrOwner) return [];
     const dayBookings = bookingsByDate[selectedDate] || [];
-    const map = new Map<string, { name: string; bookings: FirestoreBooking[]; isInactive: boolean }>();
+
+    // Employees use the same day-column calendar as the owner, but only see
+    // their own read-only column.
+    if (!isManagerOrOwner) {
+      const currentStaff = realStaffList.find((staff) => staff.id === user?.staffId);
+      if (!user?.staffId) return [];
+
+      return [{
+        id: user.staffId,
+        name:
+          currentStaff?.name ||
+          dayBookings[0]?.staffName ||
+          (locale === 'vi' ? 'Lịch của tôi' : locale === 'de' ? 'Mein Kalender' : 'My calendar'),
+        bookings: dayBookings.filter((booking) => booking.staffId === user.staffId),
+        isInactive: currentStaff ? currentStaff.status !== 'active' : false,
+        columnType: 'staff' as const,
+      }];
+    }
+
+    const map = new Map<string, {
+      name: string;
+      bookings: FirestoreBooking[];
+      isInactive: boolean;
+      columnType: 'staff' | 'request' | 'needs_action';
+    }>();
 
     // 1. Add all active staff first (sorted by name for consistent order)
     const sortedStaff = [...realStaffList].sort((a, b) => a.name.localeCompare(b.name));
 
     sortedStaff.forEach(s => {
       if (s.status === 'active') {
-        map.set(s.id, { name: s.name, bookings: [], isInactive: false });
+        map.set(s.id, {
+          name: s.name,
+          bookings: [],
+          isInactive: false,
+          columnType: 'staff',
+        });
       }
     });
 
-    // Spec V1: Request column for unassigned/pending bookings
+    // The mockup keeps customer requests and disrupted appointments out of staff columns.
     const requestColumnBookings: FirestoreBooking[] = [];
+    const needsActionColumnBookings: FirestoreBooking[] = [];
 
     // 2. Assign bookings to columns
     dayBookings.forEach(b => {
       const isUnassigned = !b.staffId || b.staffId === 'any' || b.staffId === '';
       const isPending = b.status === 'pending_approval';
+      const needsOwnerAction = b.status === 'needs_owner_action';
 
-      if (isUnassigned || isPending) {
+      if (needsOwnerAction) {
+        needsActionColumnBookings.push(b);
+      } else if (isUnassigned || isPending) {
         requestColumnBookings.push(b);
       } else {
         if (!map.has(b.staffId)) {
@@ -840,7 +988,12 @@ export default function BookingsManagementPage() {
           const staff = realStaffList.find(s => s.id === b.staffId);
           const name = staff ? staff.name : b.staffName;
           const isInactive = staff ? staff.status !== 'active' : true;
-          map.set(b.staffId, { name, bookings: [], isInactive });
+          map.set(b.staffId, {
+            name,
+            bookings: [],
+            isInactive,
+            columnType: 'staff',
+          });
         }
         map.get(b.staffId)!.bookings.push(b);
       }
@@ -857,18 +1010,31 @@ export default function BookingsManagementPage() {
       return a.name.localeCompare(b.name);
     });
 
-    // Add Request column at the end if there are pending bookings
-    if (requestColumnBookings.length > 0 || dayBookings.some(b => b.status === 'pending_approval')) {
-      staffColumns.push({
-        id: '__request__',
-        name: locale === 'vi' ? 'Yêu cầu' : locale === 'de' ? 'Anfragen' : 'Requests',
-        bookings: requestColumnBookings,
-        isInactive: false,
-      });
-    }
+    // Permanent workflow columns from the mockup. They remain visible even
+    // when empty so the owner always knows where requests and disruptions go.
+    staffColumns.push({
+      id: '__request__',
+      name: locale === 'vi' ? 'Yêu cầu' : locale === 'de' ? 'Anfragen' : 'Requests',
+      bookings: requestColumnBookings,
+      isInactive: false,
+      columnType: 'request',
+    });
+
+    staffColumns.push({
+      id: '__needs_action__',
+      name:
+        locale === 'vi'
+          ? 'Cần xử lý'
+          : locale === 'de'
+            ? 'Aktion'
+            : 'Needs action',
+      bookings: needsActionColumnBookings,
+      isInactive: false,
+      columnType: 'needs_action',
+    });
 
     return staffColumns;
-  }, [isManagerOrOwner, bookingsByDate, selectedDate, realStaffList, locale]);
+  }, [isManagerOrOwner, bookingsByDate, selectedDate, realStaffList, locale, user?.staffId]);
 
   const popoverRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -966,6 +1132,7 @@ export default function BookingsManagementPage() {
     let blockClass = styles.calBlock;
     if (booking.status === 'confirmed') blockClass += ` ${styles.calBlockConfirmed}`;
     if (booking.status === 'pending_approval') blockClass += ` ${styles.calBlockPending}`;
+    if (booking.status === 'needs_owner_action') blockClass += ` ${styles.calBlockNeedsAction}`;
     if (booking.status === 'cancelled') blockClass += ` ${styles.calBlockCancelled}`;
 
     return (
@@ -1004,16 +1171,16 @@ export default function BookingsManagementPage() {
             <Button variant="outline" size="icon" onClick={goToPrevWeek}>
               <ChevronLeft className="w-5 h-5" />
             </Button>
-            <input 
-              type="date" 
-              className={styles.datePickerInput} 
-              value={formatDateLocal(weekStart)} 
+            <input
+              type="date"
+              className={styles.datePickerInput}
+              value={formatDateLocal(weekStart)}
               onChange={(e) => {
                 if (e.target.value) {
                   const [y, m, d] = e.target.value.split('-').map(Number);
                   setWeekStart(getStartOfWeek(new Date(y, m - 1, d)));
                 }
-              }} 
+              }}
             />
             <Button variant="outline" size="icon" onClick={goToNextWeek}>
               <ChevronRight className="w-5 h-5" />
@@ -1094,9 +1261,9 @@ export default function BookingsManagementPage() {
       <div className={styles.calendarView}>
         {/* Centered Date Navigator */}
         <div className={styles.calendarNavCentered}>
-          <Button 
-            variant="outline" 
-            size="icon" 
+          <Button
+            variant="outline"
+            size="icon"
             className={styles.calNavBtn}
             onClick={() => {
               const [y, m, d] = selectedDate.split('-').map(Number);
@@ -1111,16 +1278,16 @@ export default function BookingsManagementPage() {
             <span className={styles.dateLabelText}>
               {formatDateGroupLabel(selectedDate, locale)}
             </span>
-            <input 
-              type="date" 
-              className={styles.datePickerInputHidden} 
-              value={selectedDate} 
-              onChange={(e) => setSelectedDate(e.target.value)} 
+            <input
+              type="date"
+              className={styles.datePickerInputHidden}
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
             />
           </div>
-          <Button 
-            variant="outline" 
-            size="icon" 
+          <Button
+            variant="outline"
+            size="icon"
             className={styles.calNavBtn}
             onClick={() => {
               const [y, m, d] = selectedDate.split('-').map(Number);
@@ -1134,12 +1301,15 @@ export default function BookingsManagementPage() {
 
         </div>
 
-        <div className={styles.calGrid}>
+        <div
+          className={styles.calGrid}
+          style={{ minWidth: `${Math.max(390, 56 + cols.length * 82)}px` }}
+        >
           {/* Header row - staff columns */}
           <div className={styles.calRow + ' ' + styles.calHeaderRow}>
             <div className={styles.calTimeCol}>
               <div className={styles.cornerLabel}>
-                {locale === 'vi' ? 'Nhân viên/Giờ' : locale === 'de' ? 'Mitarb./Uhr' : 'Staff/Hour'}
+                {locale === 'vi' ? 'Giờ' : locale === 'de' ? 'Zeit' : 'Time'}
               </div>
             </div>
             {cols.length === 0 ? (
@@ -1148,21 +1318,25 @@ export default function BookingsManagementPage() {
               </div>
             ) : (
               cols.map((col) => {
-                const isRequestCol = col.id === '__request__';
-                const displayName = isRequestCol ? col.name : getStaffNameDisplay(col.id, col.name);
+                const isRequestCol = col.columnType === 'request';
+                const isNeedsActionCol = col.columnType === 'needs_action';
+                const isSpecialCol = isRequestCol || isNeedsActionCol;
+                const displayName = isSpecialCol ? col.name : getStaffNameDisplay(col.id, col.name);
                 const isInactive = 'isInactive' in col && col.isInactive;
                 return (
-                  <div key={col.id} className={`${styles.calDayCol} ${styles.calHeaderCell} ${isRequestCol ? styles.calHeaderCellRequest : ''} ${isInactive ? styles.calHeaderCellInactive : ''}`}>
-                    <div className={isRequestCol ? styles.requestAvatar : isInactive ? styles.staffAvatarInactive : styles.staffAvatar}>
-                      {isRequestCol ? '📋' : displayName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
+                  <div key={col.id} className={`${styles.calDayCol} ${styles.calHeaderCell} ${isRequestCol ? styles.calHeaderCellRequest : ''} ${isNeedsActionCol ? styles.calHeaderCellNeedsAction : ''} ${isInactive ? styles.calHeaderCellInactive : ''}`}>
+                    <div className={isRequestCol ? styles.requestAvatar : isNeedsActionCol ? styles.needsActionAvatar : isInactive ? styles.staffAvatarInactive : styles.staffAvatar}>
+                      {isRequestCol ? '📋' : isNeedsActionCol ? '!' : displayName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
                     </div>
                     <span className={styles.calStaffName}>{displayName}</span>
                     <span className={styles.calStaffSubtitle}>
-                      {isRequestCol 
-                        ? (locale === 'vi' ? 'chờ duyệt' : locale === 'de' ? 'wartend' : 'pending') 
-                        : isInactive 
+                      {isRequestCol
+                        ? (locale === 'vi' ? 'chờ duyệt' : locale === 'de' ? 'wartend' : 'pending')
+                        : isNeedsActionCol
+                        ? (locale === 'vi' ? 'chờ sắp xếp' : locale === 'de' ? 'neu planen' : 'reassign')
+                        : isInactive
                         ? (locale === 'vi' ? '🔴 Nghỉ làm' : locale === 'de' ? '🔴 Inaktiv' : '🔴 Inactive')
-                        : 'employee'}
+                        : (locale === 'vi' ? 'nhân viên' : locale === 'de' ? 'Mitarbeiter' : 'employee')}
                     </span>
                   </div>
                 );
@@ -1191,16 +1365,17 @@ export default function BookingsManagementPage() {
                 cols.map((col) => {
                   const positioned = computeOverlappingLayout(col.bookings);
                   // Get absence blocks for this staff on selected date
-                  const colAbsences = (col.id !== '__request__' && staffAbsences[col.id]) 
-                    ? staffAbsences[col.id].filter((abs: any) => abs.absenceDate === selectedDate)
+                  const isStaffColumn = col.columnType === 'staff';
+                  const colAbsences = (isStaffColumn && staffAbsences[col.id])
+                    ? staffAbsences[col.id].filter((abs: StaffAbsence) => abs.absenceDate === selectedDate)
                     : [];
                   return (
-                    <div 
-                      key={col.id} 
+                    <div
+                      key={col.id}
                       className={styles.calColumn}
                     >
                       {/* Clickable time slots for walk-in booking */}
-                      {col.id !== '__request__' && isManagerOrOwner && hours.flatMap((hour) => {
+                      {isStaffColumn && isManagerOrOwner && hours.flatMap((hour) => {
                         return [0, 30].map((minOffset) => {
                           const slotMinutes = hour * 60 + minOffset;
                           const topPx = (hour - CALENDAR_START_HOUR) * HOUR_HEIGHT + (minOffset / 60) * HOUR_HEIGHT;
@@ -1212,7 +1387,7 @@ export default function BookingsManagementPage() {
                               style={{ top: `${topPx}px`, height: `${HOUR_HEIGHT / 2}px` }}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                openNewBookingModal(col.id, col.name, timeStr);
+                                openQuickBookPopup(col.id, col.name, timeStr, e);
                               }}
                               title={timeStr}
                             />
@@ -1220,7 +1395,7 @@ export default function BookingsManagementPage() {
                         });
                       })}
                       {/* Absence blocks */}
-                      {colAbsences.map((abs: any, idx: number) => {
+                      {colAbsences.map((abs: StaffAbsence, idx: number) => {
                         let absStartH: number, absStartM: number, absEndH: number, absEndM: number;
                         if (abs.isFullDay) {
                           absStartH = CALENDAR_START_HOUR; absStartM = 0;
@@ -1235,7 +1410,7 @@ export default function BookingsManagementPage() {
                         const durationMins = (absEndH * 60 + absEndM) - (absStartH * 60 + absStartM);
                         const height = (durationMins / 60) * HOUR_HEIGHT;
                         const leaveLabel = locale === 'vi' ? 'Nghỉ phép' : locale === 'de' ? 'Abwesend' : 'On leave';
-                        const timeLabel = abs.isFullDay 
+                        const timeLabel = abs.isFullDay
                           ? (locale === 'vi' ? 'Cả ngày' : locale === 'de' ? 'Ganztägig' : 'Full day')
                           : `${abs.startTime} - ${abs.endTime}`;
                         return (
@@ -1266,8 +1441,14 @@ export default function BookingsManagementPage() {
             <span className={styles.legendText}>{t.admin.bookings.statusConfirmed}</span>
           </div>
           <div className={styles.legendItem}>
-            <span className={`${styles.legendDot} ${styles.legendDotOrange}`}></span>
+            <span className={`${styles.legendDot} ${styles.legendDotYellow}`}></span>
             <span className={styles.legendText}>{t.admin.bookings.statusPending}</span>
+          </div>
+          <div className={styles.legendItem}>
+            <span className={`${styles.legendDot} ${styles.legendDotOrange}`}></span>
+            <span className={styles.legendText}>
+              {locale === 'vi' ? 'Cần xử lý' : locale === 'de' ? 'Zu bearbeiten' : 'Needs action'}
+            </span>
           </div>
           <div className={styles.legendItem}>
             <span className={`${styles.legendDot} ${styles.legendDotGrey}`}></span>
@@ -1292,6 +1473,14 @@ export default function BookingsManagementPage() {
             {locale === 'vi' ? 'Lịch hẹn' : locale === 'de' ? 'Termine' : 'Bookings'}
           </h1>
           <div className={styles.topBarRight}>
+            {user?.role === 'staff' && ownStaff && selectedDate <= getGermanTodayString() && (
+              <Button
+                variant="outline"
+                onClick={() => openNewBookingModal(ownStaff.id, ownStaff.name, '09:00')}
+              >
+                + {locale === 'vi' ? 'Khách lẻ' : 'Walk-in'}
+              </Button>
+            )}
             <Button
               variant="outline"
               size="icon"
@@ -1304,7 +1493,7 @@ export default function BookingsManagementPage() {
         </div>
       ) : (
         <div className={styles.topBar}>
-          <button 
+          <button
             className={styles.backBtn}
             onClick={() => router.push('/admin/dashboard/')}
           >
@@ -1314,15 +1503,12 @@ export default function BookingsManagementPage() {
             {locale === 'vi' ? 'Lịch hẹn' : locale === 'de' ? 'Termine' : 'Bookings'}
           </h1>
           <div className={styles.topBarRight}>
-            {isManagerOrOwner && (
+            {user?.role === 'staff' && ownStaff && selectedDate <= getGermanTodayString() && (
               <Button
                 variant="outline"
-                size="icon"
-                className={styles.toggleViewBtn + ' ' + styles.deleteAllBtn}
-                onClick={handleDeleteAll}
-                title={locale === 'vi' ? 'Xóa tất cả lịch hẹn & nghỉ phép' : locale === 'de' ? 'Alle löschen' : 'Delete all'}
+                onClick={() => openNewBookingModal(ownStaff.id, ownStaff.name, '09:00')}
               >
-                <Trash2 className="w-5 h-5" />
+                + {locale === 'vi' ? 'Khách lẻ' : 'Walk-in'}
               </Button>
             )}
             <Button
@@ -1344,9 +1530,9 @@ export default function BookingsManagementPage() {
           <div className={styles.filtersBar}>
             <div className={styles.filterHalf}>
               <Users className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
-              <select 
-                className={styles.filterSelect} 
-                value={staffFilterId} 
+              <select
+                className={styles.filterSelect}
+                value={staffFilterId}
                 onChange={(e) => setStaffFilterId(e.target.value)}
               >
                 <option value="all">{locale === 'vi' ? 'Tất cả thợ' : locale === 'de' ? 'Alle Mitarbeiter' : 'All staff'}</option>
@@ -1363,13 +1549,16 @@ export default function BookingsManagementPage() {
             <div className={styles.filterDivider}></div>
             <div className={styles.filterHalf}>
               <div className={`${styles.statusDot} ${styles[`statusDot_${filter}`]}`} />
-              <select 
-                className={styles.filterSelect} 
-                value={filter} 
+              <select
+                className={styles.filterSelect}
+                value={filter}
                 onChange={(e) => setFilter(e.target.value as FilterStatus)}
               >
                 <option value="all">{locale === 'vi' ? 'Tất cả trạng thái' : locale === 'de' ? 'Alle Status' : 'All status'}</option>
                 <option value="pending_approval">{t.admin.bookings.statusPending}</option>
+                <option value="needs_owner_action">
+                  {locale === 'vi' ? 'Cần xử lý' : locale === 'de' ? 'Zu bearbeiten' : 'Needs action'}
+                </option>
                 <option value="confirmed">{t.admin.bookings.statusConfirmed}</option>
                 <option value="cancelled">{t.admin.bookings.statusCancelled}</option>
               </select>
@@ -1378,9 +1567,9 @@ export default function BookingsManagementPage() {
 
           {/* Centered Date Navigator */}
           <div className={styles.calendarNavCentered}>
-            <Button 
-              variant="outline" 
-              size="icon" 
+            <Button
+              variant="outline"
+              size="icon"
               className={styles.calNavBtn}
               onClick={() => {
                 const [y, m, d] = selectedDate.split('-').map(Number);
@@ -1395,16 +1584,16 @@ export default function BookingsManagementPage() {
               <span className={styles.dateLabelText}>
                 {formatDateGroupLabel(selectedDate, locale)}
               </span>
-              <input 
-                type="date" 
-                className={styles.datePickerInputHidden} 
-                value={selectedDate} 
-                onChange={(e) => setSelectedDate(e.target.value)} 
+              <input
+                type="date"
+                className={styles.datePickerInputHidden}
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
               />
             </div>
-            <Button 
-              variant="outline" 
-              size="icon" 
+            <Button
+              variant="outline"
+              size="icon"
               className={styles.calNavBtn}
               onClick={() => {
                 const [y, m, d] = selectedDate.split('-').map(Number);
@@ -1426,7 +1615,8 @@ export default function BookingsManagementPage() {
               dayFilteredBookings.map(booking => {
                 let borderLeftColor = '#E5E7EB';
                 if (booking.status === 'confirmed') borderLeftColor = '#059669';
-                else if (booking.status === 'pending_approval' || booking.status === 'needs_owner_action') borderLeftColor = '#D97706';
+                else if (booking.status === 'pending_approval') borderLeftColor = '#EAB308';
+                else if (booking.status === 'needs_owner_action') borderLeftColor = '#F97316';
                 else if (booking.status === 'cancelled') borderLeftColor = '#9CA3AF';
                 else if (booking.status === 'completed') borderLeftColor = '#2563EB';
 
@@ -1436,7 +1626,7 @@ export default function BookingsManagementPage() {
                       <span className={styles.rowTime}>{booking.startTime}</span>
                       <span className={styles.rowDuration}>{booking.totalDurationMinutes} {t.common.minutes}</span>
                     </div>
-                    <div 
+                    <div
                       className={styles.bookingListItemCard}
                       style={{ borderLeft: `4px solid ${borderLeftColor}` }}
                       onMouseDown={(e) => e.stopPropagation()}
@@ -1476,7 +1666,48 @@ export default function BookingsManagementPage() {
           </div>
         </>
       ) : (
-        <>{isManagerOrOwner ? renderStaffDayCalendar() : renderWeeklyCalendar()}</>
+        <>{renderStaffDayCalendar()}</>
+      )}
+
+      {/* Quick 2-Tap Booking Popup */}
+      {isManagerOrOwner && quickBookPopup && (
+        <>
+          <div className={styles.modalOverlay} style={{ background: 'transparent' }} onClick={() => setQuickBookPopup(null)} />
+          <div
+            className={styles.quickBookPopup}
+            style={{
+              top: quickBookPopup.isUpward ? 'auto' : quickBookPopup.anchorRect.top,
+              bottom: quickBookPopup.isUpward ? (window.innerHeight - quickBookPopup.anchorRect.top) : 'auto',
+              left: quickBookPopup.anchorRect.left
+            }}
+          >
+            <div className={styles.quickBookHeader}>
+              <span className={styles.quickBookTitle}>
+                ⚡ {quickBookPopup.timeStr} · {quickBookPopup.staffName}
+              </span>
+              <button className={styles.quickBookClose} onClick={() => setQuickBookPopup(null)}>×</button>
+            </div>
+            <div className={styles.quickBookBtns}>
+              <button className={styles.quickBookBtn} onClick={() => handleQuickCreate(60)}>
+                <span className={styles.quickBookBtnIcon}>💅</span>
+                <span className={styles.quickBookBtnLabel}>
+                  {locale === 'vi' ? '1 Dịch vụ' : locale === 'de' ? '1 Dienst' : '1 Service'}
+                </span>
+                <span className={styles.quickBookBtnTime}>60 {locale === 'vi' ? 'phút' : 'min'}</span>
+              </button>
+              <button className={styles.quickBookBtn} onClick={() => handleQuickCreate(120)}>
+                <span className={styles.quickBookBtnIcon}>✨</span>
+                <span className={styles.quickBookBtnLabel}>
+                  {locale === 'vi' ? '2 Dịch vụ' : locale === 'de' ? '2 Dienste' : '2 Services'}
+                </span>
+                <span className={styles.quickBookBtnTime}>120 {locale === 'vi' ? 'phút' : 'min'}</span>
+              </button>
+            </div>
+            <button className={styles.quickBookDetailBtn} onClick={() => { setQuickBookPopup(null); openNewBookingModal(quickBookPopup.staffId, quickBookPopup.staffName, quickBookPopup.timeStr); }}>
+              {locale === 'vi' ? '+ Chi tiết' : locale === 'de' ? '+ Details' : '+ Details'}
+            </button>
+          </div>
+        </>
       )}
 
       {/* Walk-in Booking Modal */}
@@ -1500,20 +1731,21 @@ export default function BookingsManagementPage() {
                 </div>
                 <div className={styles.nbmField}>
                   <label className={styles.nbmLabel}>⏰ {t.admin.bookings.startTime || 'Start time'}</label>
-                  <input 
-                    type="time" 
+                  <input
+                    type="time"
                     className={styles.nbmInput}
-                    value={newBookingTime} 
-                    onChange={(e) => setNewBookingTime(e.target.value)} 
+                    value={newBookingTime}
+                    onChange={(e) => setNewBookingTime(e.target.value)}
                   />
                 </div>
               </div>
 
               <div className={styles.nbmField}>
                 <label className={styles.nbmLabel}>👤 {t.admin.bookings.detailStaff}</label>
-                <select 
+                <select
                   className={styles.nbmSelect}
-                  value={newBookingStaffId} 
+                  value={newBookingStaffId}
+                  disabled={user?.role === 'staff'}
                   onChange={(e) => {
                     const s = realStaffList.find(st => st.id === e.target.value);
                     setNewBookingStaffId(e.target.value);
@@ -1524,7 +1756,7 @@ export default function BookingsManagementPage() {
                     }
                   }}
                 >
-                  <option value="">{t.admin.bookings.anyStaff}</option>
+                  {user?.role !== 'staff' && <option value="">{t.admin.bookings.anyStaff}</option>}
                   {realStaffList.filter(s => s.status === 'active').map(s => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
@@ -1541,7 +1773,7 @@ export default function BookingsManagementPage() {
                       <span className={styles.nbmServiceName}>{svc.serviceName}</span>
                       <span className={styles.nbmServiceMeta}>{svc.duration} min · €{svc.price}</span>
                     </div>
-                    <button 
+                    <button
                       className={styles.nbmRemoveBtn}
                       onClick={() => setNewBookingServices(prev => prev.filter((_, i) => i !== idx))}
                     >
@@ -1555,47 +1787,47 @@ export default function BookingsManagementPage() {
                   const selectedStaff = newBookingStaffId ? realStaffList.find(s => s.id === newBookingStaffId) : null;
                   const staffServiceIds = selectedStaff?.serviceIds;
                   const hasServiceFilter = staffServiceIds && staffServiceIds.length > 0;
-                  const availableServices = hasServiceFilter 
-                    ? allServices.filter((s: any) => staffServiceIds!.includes(s.id))
+                  const availableServices = hasServiceFilter
+                    ? allServices.filter((service) => staffServiceIds.includes(service.id))
                     : allServices;
-                  
+
                   return (
                   <div className={styles.nbmAddService}>
                     {hasServiceFilter && (
                       <div className={styles.nbmFilterHint}>
-                        {locale === 'vi' ? `Chỉ hiện dịch vụ ${selectedStaff?.name} có thể làm` 
+                        {locale === 'vi' ? `Chỉ hiện dịch vụ ${selectedStaff?.name} có thể làm`
                           : locale === 'de' ? `Nur Services die ${selectedStaff?.name} kann`
                           : `Only showing services ${selectedStaff?.name} can do`}
                       </div>
                     )}
-                    <select 
+                    <select
                       className={styles.nbmSelect}
-                      value="" 
+                      value=""
                       onChange={(e) => {
                         const svcId = e.target.value;
                         if (!svcId) return;
-                        const svc = allServices.find((s: any) => s.id === svcId);
+                        const svc = allServices.find((service) => service.id === svcId);
                         if (!svc) return;
-                        const cat = allCategories.find((c: any) => c.id === svc.categoryId);
+                        const cat = allCategories.find((category) => category.id === svc.categoryId);
                         setNewBookingServices(prev => [...prev, {
                           categoryId: svc.categoryId || '',
-                          categoryName: cat?.name || svc.categoryName || '',
+                          categoryName: cat?.name || svc.category || '',
                           serviceId: svc.id,
                           serviceName: svc.name || '',
-                          duration: svc.durationMinutes || 30,
+                          duration: svc.durationMin || 30,
                           price: svc.price || 0,
                         }]);
                       }}
                     >
                       <option value="">{t.admin.bookings.addService || '+ Add service'}</option>
-                      {allCategories.map((cat: any) => {
-                        const catServices = availableServices.filter((s: any) => s.categoryId === cat.id);
+                      {allCategories.map((cat) => {
+                        const catServices = availableServices.filter((service) => service.categoryId === cat.id);
                         if (catServices.length === 0) return null;
                         return (
                           <optgroup key={cat.id} label={translateCategory(cat.id, cat.name)}>
-                            {catServices.map((s: any) => (
+                            {catServices.map((s) => (
                               <option key={s.id} value={s.id}>
-                                {translateService(s.id, s.name)} ({s.durationMinutes}min · €{s.price})
+                                {translateService(s.id, s.name)} ({s.durationMin || 30}min · €{s.price})
                               </option>
                             ))}
                           </optgroup>
@@ -1609,32 +1841,32 @@ export default function BookingsManagementPage() {
 
               {/* Customer info */}
               <div className={styles.nbmField}>
-                <label className={styles.nbmLabel}>🧑 {t.admin.bookings.customerName || 'Customer name'} *</label>
-                <input 
-                  type="text" 
+                <label className={styles.nbmLabel}>🧑 {t.admin.bookings.customerName || 'Customer name'} ({locale === 'vi' ? 'không bắt buộc' : 'optional'})</label>
+                <input
+                  type="text"
                   className={styles.nbmInput}
                   placeholder={t.admin.bookings.customerName}
-                  value={newBookingCustomerName} 
-                  onChange={(e) => setNewBookingCustomerName(e.target.value)} 
+                  value={newBookingCustomerName}
+                  onChange={(e) => setNewBookingCustomerName(e.target.value)}
                 />
               </div>
               <div className={styles.nbmField}>
-                <label className={styles.nbmLabel}>📱 {t.admin.bookings.customerPhone || 'Phone'} *</label>
-                <input 
-                  type="tel" 
+                <label className={styles.nbmLabel}>📱 {t.admin.bookings.customerPhone || 'Phone'} ({locale === 'vi' ? 'không bắt buộc' : 'optional'})</label>
+                <input
+                  type="tel"
                   className={styles.nbmInput}
                   placeholder="+49 123 456 789"
-                  value={newBookingCustomerPhone} 
-                  onChange={(e) => setNewBookingCustomerPhone(e.target.value)} 
+                  value={newBookingCustomerPhone}
+                  onChange={(e) => setNewBookingCustomerPhone(e.target.value)}
                 />
               </div>
               <div className={styles.nbmField}>
                 <label className={styles.nbmLabel}>📝 {t.admin.bookings.notes || 'Notes'}</label>
-                <textarea 
+                <textarea
                   className={styles.nbmTextarea}
                   placeholder="..."
-                  value={newBookingNotes} 
-                  onChange={(e) => setNewBookingNotes(e.target.value)} 
+                  value={newBookingNotes}
+                  onChange={(e) => setNewBookingNotes(e.target.value)}
                   rows={2}
                 />
               </div>
@@ -1671,9 +1903,9 @@ export default function BookingsManagementPage() {
               <Button variant="outline" onClick={() => setShowNewBookingModal(false)}>
                 {locale === 'vi' ? 'Hủy' : locale === 'de' ? 'Abbrechen' : 'Cancel'}
               </Button>
-              <Button 
+              <Button
                 onClick={handleCreateWalkInBooking}
-                disabled={newBookingCreating || newBookingServices.length === 0 || !newBookingCustomerName.trim() || !newBookingCustomerPhone.trim()}
+                disabled={newBookingCreating || newBookingServices.length === 0 || !newBookingStaffId}
               >
                 {newBookingCreating ? '...' : (t.admin.bookings.confirmCreate || 'Confirm booking')}
               </Button>
@@ -1685,13 +1917,13 @@ export default function BookingsManagementPage() {
       {/* Popover */}
       {popover && (
         <>
-          <div 
-            className={styles.popoverBackdrop} 
-            onClick={() => { setPopover(null); setPopoverAnchorEl(null); }} 
+          <div
+            className={styles.popoverBackdrop}
+            onClick={() => { setPopover(null); setPopoverAnchorEl(null); }}
           />
-          <div 
-            ref={popoverRef} 
-            className={styles.calPopover} 
+          <div
+            ref={popoverRef}
+            className={styles.calPopover}
             style={{ opacity: 0 }}
           >
           <div className={styles.calPopoverHeader}>
@@ -1725,7 +1957,7 @@ export default function BookingsManagementPage() {
                 <option value="any">{t.admin.bookings.anyStaff || 'Bất kỳ ai'}</option>
                 {realStaffList.map(s => {
                   const isInactive = s.status !== 'active';
-                  const label = isInactive 
+                  const label = isInactive
                     ? `🔴 ${s.name} (${locale === 'vi' ? 'Nghỉ làm' : locale === 'de' ? 'Inaktiv' : 'Inactive'})`
                     : s.name;
                   return (
@@ -1762,9 +1994,17 @@ export default function BookingsManagementPage() {
               {popover.booking.status === 'confirmed' && (
                 <div className={styles.calPopoverActions}>
                   <Button variant="outline" size="sm" className="text-gray-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200" onClick={() => { handleReject(popover.booking.id); setPopover(null); setPopoverAnchorEl(null); }}>{t.admin.bookings.btnCancel}</Button>
+                  <Button variant="outline" size="sm" onClick={() => { void handleLifecycleStatus(popover.booking.id, 'no_show'); setPopover(null); }}>{locale === 'vi' ? 'Không đến' : 'No-show'}</Button>
+                  <Button size="sm" onClick={() => { void handleLifecycleStatus(popover.booking.id, 'completed'); setPopover(null); }}>{locale === 'vi' ? 'Hoàn thành' : 'Complete'}</Button>
                 </div>
               )}
             </>
+          )}
+          {user?.role === 'staff' && popover.booking.status === 'confirmed' && popover.booking.staffId === user.staffId && (
+            <div className={styles.calPopoverActions}>
+              <Button variant="outline" size="sm" onClick={() => { void handleLifecycleStatus(popover.booking.id, 'no_show'); setPopover(null); }}>{locale === 'vi' ? 'Không đến' : 'No-show'}</Button>
+              <Button size="sm" onClick={() => { void handleLifecycleStatus(popover.booking.id, 'completed'); setPopover(null); }}>{locale === 'vi' ? 'Hoàn thành' : 'Complete'}</Button>
+            </div>
           )}
         </div>
         </>
