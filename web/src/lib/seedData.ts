@@ -649,8 +649,9 @@ export const demoServices: Service[] = [
     displayOrder: 1,
     isActive: true,
     hasAppointments: false,
-    type: 'standard',
-    staffPriority: 'assistant_staff',
+    type: 'addon',
+    isAddon: true,
+    staffPriority: 'none',
     createdAt: '2026-01-01T00:00:00Z',
   },
 

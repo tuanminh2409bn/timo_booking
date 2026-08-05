@@ -45,6 +45,7 @@ interface FirestoreBooking {
   customerName: string;
   customerPhone: string;
   services: BookingServiceItem[];
+  addOns?: BookingServiceExtra[];
   staffId: string;
   staffName: string;
   appointmentDate: string;
@@ -134,8 +135,8 @@ function formatEndTime(startTime: string, durationMinutes: number): string {
   return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
 }
 
-const CALENDAR_START_HOUR = 8;
-const CALENDAR_END_HOUR = 20;
+const DEFAULT_CALENDAR_START_HOUR = 8;
+const DEFAULT_CALENDAR_END_HOUR = 20;
 const HOUR_HEIGHT = 64;
 
 const DAY_LABELS: Record<string, string[]> = {
@@ -282,11 +283,10 @@ export default function BookingsManagementPage() {
   const refreshCanonicalCalendar = useCallback(async () => {
     const storeId = activeBranch || user?.assignedBranches?.[0];
     if (!storeId) return;
-    const today = getGermanDateObject();
     const items = await fetchAdminAttendanceCalendar(
       storeId,
-      formatDateLocal(addDays(today, -60)),
-      formatDateLocal(addDays(today, 180)),
+      selectedDate,
+      selectedDate,
     );
     const list = items.map((item: AdminAttendanceItem): FirestoreBooking => {
       const staffName =
@@ -304,6 +304,10 @@ export default function BookingsManagementPage() {
           durationMinutes: Math.max(item.endTime - item.startTime, 1),
           price: Number.parseFloat(service.amount) || 0,
         })),
+        addOns: item.addOns?.map((addOn) => ({
+          serviceId: addOn.sourceServiceId ?? addOn.id,
+          name: addOn.name,
+        })),
         staffId: item.mainAssigneeUserId || item.employeeUserId,
         staffName,
         appointmentDate: item.workDate,
@@ -315,7 +319,7 @@ export default function BookingsManagementPage() {
       };
     });
     setBookings(list);
-  }, [activeBranch, user]);
+  }, [activeBranch, selectedDate, user]);
 
   // Canonical attendance sync from the HRM backend.
   useEffect(() => {
@@ -488,7 +492,7 @@ export default function BookingsManagementPage() {
     }
 
     // 2. Check if staff already has a booking at the same time
-    const conflictBooking = bookings.find(b =>
+    const conflictBooking = booking.status === 'pending_approval' ? undefined : bookings.find(b =>
       b.id !== bookingId &&
       b.staffId === staffId &&
       b.appointmentDate === booking.appointmentDate &&
@@ -913,7 +917,28 @@ export default function BookingsManagementPage() {
 
   // Calendar
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
-  const hours = useMemo(() => Array.from({ length: CALENDAR_END_HOUR - CALENDAR_START_HOUR }, (_, i) => CALENDAR_START_HOUR + i), []);
+  const selectedDateBookings = useMemo(
+    () => bookingsForRole.filter((booking) => booking.appointmentDate === selectedDate),
+    [bookingsForRole, selectedDate],
+  );
+  const calendarStartHour = useMemo(() => selectedDateBookings.reduce((earliestHour, booking) => {
+    const { hours: bookingHour } = parseTime(booking.startTime);
+    return Math.max(0, Math.min(earliestHour, bookingHour));
+  }, DEFAULT_CALENDAR_START_HOUR), [selectedDateBookings]);
+  const calendarEndHour = useMemo(() => selectedDateBookings.reduce((latestHour, booking) => {
+    const { hours: bookingHour, minutes: bookingMinute } = parseTime(booking.startTime);
+    const bookingEndHour = Math.ceil(
+      (bookingHour * 60 + bookingMinute + Math.max(booking.totalDurationMinutes, 1)) / 60,
+    );
+    return Math.min(24, Math.max(latestHour, bookingEndHour));
+  }, DEFAULT_CALENDAR_END_HOUR), [selectedDateBookings]);
+  const hours = useMemo(
+    () => Array.from(
+      { length: calendarEndHour - calendarStartHour },
+      (_, index) => calendarStartHour + index,
+    ),
+    [calendarEndHour, calendarStartHour],
+  );
   // ===== DATA FETCHING & PROCESSING =====
 
   const today = useMemo(() => { const d = getGermanDateObject(); d.setHours(0, 0, 0, 0); return d; }, []);
@@ -1125,7 +1150,7 @@ export default function BookingsManagementPage() {
   // ===== RENDER BOOKING BLOCK =====
   const renderCalBookingBlock = (booking: FirestoreBooking, leftPercent = 0, widthPercent = 100) => {
     const { hours: startH, minutes: startM } = parseTime(booking.startTime);
-    const topOffset = (startH - CALENDAR_START_HOUR) * HOUR_HEIGHT + (startM / 60) * HOUR_HEIGHT;
+    const topOffset = (startH - calendarStartHour) * HOUR_HEIGHT + (startM / 60) * HOUR_HEIGHT;
     const height = Math.max((booking.totalDurationMinutes / 60) * HOUR_HEIGHT, 28);
     const endTime = formatEndTime(booking.startTime, booking.totalDurationMinutes);
 
@@ -1161,7 +1186,7 @@ export default function BookingsManagementPage() {
   // ===== WEEKLY CALENDAR (Staff view) =====
   const renderWeeklyCalendar = () => {
     const dayLabels = DAY_LABELS[locale] || DAY_LABELS['en'];
-    const totalHours = CALENDAR_END_HOUR - CALENDAR_START_HOUR;
+    const totalHours = calendarEndHour - calendarStartHour;
     const bodyHeight = totalHours * HOUR_HEIGHT;
 
     return (
@@ -1220,7 +1245,7 @@ export default function BookingsManagementPage() {
             {/* Time labels */}
             <div className={styles.calTimeTrack}>
               {hours.map((hour) => (
-                <div key={hour} className={styles.calTimeMark} style={{ top: `${(hour - CALENDAR_START_HOUR) * HOUR_HEIGHT}px` }}>
+                <div key={hour} className={styles.calTimeMark} style={{ top: `${(hour - calendarStartHour) * HOUR_HEIGHT}px` }}>
                   {`${String(hour).padStart(2, '0')}:00`}
                 </div>
               ))}
@@ -1228,7 +1253,7 @@ export default function BookingsManagementPage() {
 
             {/* Hour grid lines */}
             {hours.map((hour) => (
-              <div key={hour} className={styles.calGridLine} style={{ top: `${(hour - CALENDAR_START_HOUR) * HOUR_HEIGHT}px` }} />
+              <div key={hour} className={styles.calGridLine} style={{ top: `${(hour - calendarStartHour) * HOUR_HEIGHT}px` }} />
             ))}
 
             {/* Day columns with bookings */}
@@ -1254,7 +1279,7 @@ export default function BookingsManagementPage() {
   // ===== STAFF DAY CALENDAR (Manager/Owner view) =====
   const renderStaffDayCalendar = () => {
     const cols = staffColumnsForDate;
-    const totalHours = CALENDAR_END_HOUR - CALENDAR_START_HOUR;
+    const totalHours = calendarEndHour - calendarStartHour;
     const bodyHeight = totalHours * HOUR_HEIGHT;
 
     return (
@@ -1348,14 +1373,14 @@ export default function BookingsManagementPage() {
           <div className={styles.calBody} style={{ height: `${bodyHeight}px` }}>
             <div className={styles.calTimeTrack}>
               {hours.map((hour) => (
-                <div key={hour} className={styles.calTimeMark} style={{ top: `${(hour - CALENDAR_START_HOUR) * HOUR_HEIGHT}px` }}>
+                <div key={hour} className={styles.calTimeMark} style={{ top: `${(hour - calendarStartHour) * HOUR_HEIGHT}px` }}>
                   {`${String(hour).padStart(2, '0')}:00`}
                 </div>
               ))}
             </div>
 
             {hours.map((hour) => (
-              <div key={hour} className={styles.calGridLine} style={{ top: `${(hour - CALENDAR_START_HOUR) * HOUR_HEIGHT}px` }} />
+              <div key={hour} className={styles.calGridLine} style={{ top: `${(hour - calendarStartHour) * HOUR_HEIGHT}px` }} />
             ))}
 
             <div className={styles.calColumnsContainer}>
@@ -1378,7 +1403,7 @@ export default function BookingsManagementPage() {
                       {isStaffColumn && isManagerOrOwner && hours.flatMap((hour) => {
                         return [0, 30].map((minOffset) => {
                           const slotMinutes = hour * 60 + minOffset;
-                          const topPx = (hour - CALENDAR_START_HOUR) * HOUR_HEIGHT + (minOffset / 60) * HOUR_HEIGHT;
+                          const topPx = (hour - calendarStartHour) * HOUR_HEIGHT + (minOffset / 60) * HOUR_HEIGHT;
                           const timeStr = `${String(hour).padStart(2, '0')}:${String(minOffset).padStart(2, '0')}`;
                           return (
                             <div
@@ -1398,15 +1423,15 @@ export default function BookingsManagementPage() {
                       {colAbsences.map((abs: StaffAbsence, idx: number) => {
                         let absStartH: number, absStartM: number, absEndH: number, absEndM: number;
                         if (abs.isFullDay) {
-                          absStartH = CALENDAR_START_HOUR; absStartM = 0;
-                          absEndH = CALENDAR_END_HOUR; absEndM = 0;
+                          absStartH = calendarStartHour; absStartM = 0;
+                          absEndH = calendarEndHour; absEndM = 0;
                         } else if (abs.startTime && abs.endTime) {
                           [absStartH, absStartM] = abs.startTime.split(':').map(Number);
                           [absEndH, absEndM] = abs.endTime.split(':').map(Number);
                         } else {
                           return null;
                         }
-                        const topOffset = (absStartH - CALENDAR_START_HOUR) * HOUR_HEIGHT + (absStartM / 60) * HOUR_HEIGHT;
+                        const topOffset = (absStartH - calendarStartHour) * HOUR_HEIGHT + (absStartM / 60) * HOUR_HEIGHT;
                         const durationMins = (absEndH * 60 + absEndM) - (absStartH * 60 + absStartM);
                         const height = (durationMins / 60) * HOUR_HEIGHT;
                         const leaveLabel = locale === 'vi' ? 'Nghỉ phép' : locale === 'de' ? 'Abwesend' : 'On leave';
@@ -1973,6 +1998,14 @@ export default function BookingsManagementPage() {
             <div className={styles.calPopoverRow}>
               <span className={styles.calPopoverLabel}>{locale === 'vi' ? 'Khách hàng' : 'Customer'}</span>
               <span className={styles.calPopoverValue}>{popover.booking.customerName} · {popover.booking.customerPhone}</span>
+            </div>
+          )}
+          {popover.booking.addOns && popover.booking.addOns.length > 0 && (
+            <div className={styles.calPopoverRow}>
+              <span className={styles.calPopoverLabel}>Add-ons</span>
+              <span className={styles.calPopoverValue}>
+                {popover.booking.addOns.map((addOn) => addOn.name || '').join(', ')}
+              </span>
             </div>
           )}
           <div className={styles.calPopoverRow}>

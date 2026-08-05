@@ -165,6 +165,40 @@ const mainUid = users.main.uid;
 
 await writeDocument(
   hrmDatabaseId,
+  `users/${users.superadmin.uid}`,
+  {
+    uid: users.superadmin.uid,
+    email: 'admin@gmail.com',
+    ownerId: users.superadmin.uid,
+    role: 'admin',
+    active: true,
+    name: 'Demo Admin',
+    displayName: 'Demo Admin',
+    updatedAt: now,
+    updatedByUserId: users.superadmin.uid,
+  },
+  { merge: true },
+);
+
+await writeDocument(
+  hrmDatabaseId,
+  `users/${users.owner.uid}`,
+  {
+    uid: users.owner.uid,
+    email: 'chutiem@gmail.com',
+    ownerId,
+    role: 'owner',
+    active: true,
+    name: 'Chủ Tiệm',
+    displayName: 'Chủ Tiệm',
+    updatedAt: now,
+    updatedByUserId: ownerId,
+  },
+  { merge: true },
+);
+
+await writeDocument(
+  hrmDatabaseId,
   `users/${mainUid}`,
   {
     workerType: 'main',
@@ -192,7 +226,10 @@ await writeDocument(
     ownerCommissionRate: 50,
     employeeStatus: 'active',
     serviceIds: [],
-    weeklyWorkingHours: [],
+    weeklyWorkingHours: Object.fromEntries(
+      ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+        .map((day) => [day, { enabled: true, startTime: '09:00', endTime: '21:00' }]),
+    ),
     createdAt: now,
     updatedAt: now,
     createdByUserId: ownerId,

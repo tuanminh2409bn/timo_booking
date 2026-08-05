@@ -15,6 +15,8 @@ import Threads from '@/components/reactbits/Threads';
 import ScrollReveal from '@/components/reactbits/ScrollReveal';
 import styles from './page.module.css';
 
+const PUBLIC_STORE_DIRECTORY_PATH = '/book/';
+
 /* ── SVG Icon Components ── */
 function CalendarIcon() {
   return (
@@ -257,7 +259,7 @@ export default function LandingPage() {
               </span>
             </Link>
             <LanguageSwitcher variant="light" />
-            <Link href="/book" className={styles.navCta}>
+            <Link href={PUBLIC_STORE_DIRECTORY_PATH} className={styles.navCta}>
               {t.landing.hero.ctaClient}
             </Link>
           </div>
@@ -304,7 +306,7 @@ export default function LandingPage() {
               <Link href="/admin/login" className={styles.mobileNavLink}>
                 {t.landing.nav.loginAdmin}
               </Link>
-              <Link href="/book" className={styles.mobileNavCta}>
+              <Link href={PUBLIC_STORE_DIRECTORY_PATH} className={styles.mobileNavCta}>
                 {t.landing.hero.ctaClient}
               </Link>
             </div>
@@ -351,7 +353,7 @@ export default function LandingPage() {
           />
 
           <div className={styles.heroActions}>
-            <Link href="/book" className={styles.btnPrimary}>
+            <Link href={PUBLIC_STORE_DIRECTORY_PATH} className={styles.btnPrimary}>
               {t.landing.hero.ctaClient}
               <ArrowRightIcon />
             </Link>
@@ -550,7 +552,7 @@ export default function LandingPage() {
                     </li>
                   ))}
                 </ul>
-                <Link href="/book" className={styles.pricingButton}>{t.landing.pricing.getStarted}</Link>
+                <Link href="/admin/register/?plan=starter" className={styles.pricingButton}>{t.landing.pricing.getStarted}</Link>
               </div>
             </AnimatedContent>
 
@@ -575,7 +577,7 @@ export default function LandingPage() {
                     </li>
                   ))}
                 </ul>
-                <Link href="/book" className={`${styles.pricingButton} ${styles.pricingButtonPrimary}`}>{t.landing.pricing.getStarted}</Link>
+                <Link href="/admin/register/?plan=professional" className={`${styles.pricingButton} ${styles.pricingButtonPrimary}`}>{t.landing.pricing.getStarted}</Link>
               </div>
             </AnimatedContent>
 
@@ -614,7 +616,7 @@ export default function LandingPage() {
             <ShinyText text={t.landing.cta.titleHighlight} speed={4} className={styles.ctaShiny} />
           </h2>
           <p className={styles.ctaSubtitle}>{t.landing.cta.subtitle}</p>
-          <Link href="/book" className={styles.ctaButton}>
+          <Link href="/admin/register/" className={styles.ctaButton}>
             {t.landing.cta.button}
             <ArrowRightIcon />
           </Link>

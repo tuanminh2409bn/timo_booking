@@ -110,6 +110,82 @@ const bookingAddonSchema = z.object({
   price: z.number().min(0),
 });
 
+type PublicBookingEmployee = {
+  workerType?: "main" | "assistant" | undefined;
+  compensationModel?: string | undefined;
+  serviceIds?: string[] | undefined;
+  weeklyWorkingHours?: Partial<Record<
+    "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday",
+    { enabled: boolean; startTime: string; endTime: string } | undefined
+  >> | undefined;
+};
+
+type PublicBookingCatalogService = {
+  id: string;
+  category?: string | undefined;
+  preferredWorkerType?: "main" | "assistant" | undefined;
+};
+
+const resolveEmployeeWorkerType = (employee: PublicBookingEmployee): "main" | "assistant" =>
+  employee.workerType ?? (employee.compensationModel === "fixed" ? "assistant" : "main");
+
+const isAssistantPriorityService = (service: PublicBookingCatalogService): boolean =>
+  service.preferredWorkerType === "assistant" ||
+  service.category === "manicure" ||
+  service.category === "pedicure";
+
+const resolvePreferredWorkerType = (
+  service: PublicBookingCatalogService,
+): "main" | "assistant" =>
+  isAssistantPriorityService(service) ? "assistant" : "main";
+
+const canEmployeePerformBookingService = (
+  employee: PublicBookingEmployee,
+  service: PublicBookingCatalogService,
+): boolean =>
+  employee.serviceIds === undefined ||
+    employee.serviceIds.length === 0 ||
+    employee.serviceIds.includes(service.id);
+
+const BOOKING_REQUEST_LIMIT = 5;
+const WORK_DAY_KEYS = [
+  "sunday",
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+] as const;
+
+const timeStringToMinutes = (value: string): number | undefined => {
+  const match = /^(\d{2}):(\d{2})$/.exec(value);
+  if (!match) return undefined;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return hours <= 23 && minutes <= 59 ? hours * 60 + minutes : undefined;
+};
+
+const isEmployeeWorkingDuring = (
+  employee: PublicBookingEmployee,
+  workDate: string,
+  startTime: number,
+  endTime: number,
+): boolean => {
+  if (employee.weeklyWorkingHours === undefined) return true;
+
+  const dayIndex = new Date(`${workDate}T00:00:00.000Z`).getUTCDay();
+  const schedule = employee.weeklyWorkingHours[WORK_DAY_KEYS[dayIndex] ?? "sunday"];
+  if (!schedule?.enabled) return false;
+
+  const scheduleStart = timeStringToMinutes(schedule.startTime);
+  const scheduleEnd = timeStringToMinutes(schedule.endTime);
+  return scheduleStart !== undefined &&
+    scheduleEnd !== undefined &&
+    startTime >= scheduleStart &&
+    endTime <= scheduleEnd;
+};
+
 const createBookingSchema = z
   .object({
     storeId: z.string().trim().min(1),
@@ -193,6 +269,101 @@ const buildCreateBookingInput = (req: Request) => {
 // ---------------------------------------------------------------------------
 
 const router = express.Router();
+
+const publicStoreListQuerySchema = z.object({
+  q: z.string().trim().max(100).optional().default(""),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(24),
+  cursor: z.string().trim().min(1).max(200).optional(),
+});
+
+const normalizePublicStoreSearchText = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase()
+    .trim();
+
+// ---- GET /api/v1/public/stores ----
+
+router.get(
+  "/api/v1/public/stores",
+  publicReadRateLimit,
+  async (req: Request, res: Response) => {
+    try {
+      const queryResult = publicStoreListQuerySchema.safeParse(req.query);
+      if (!queryResult.success) {
+        return res.status(400).json({
+          type: "/public/stores/invalid-request",
+          message: "Invalid store directory query",
+          validation: queryResult.error.flatten().fieldErrors,
+        });
+      }
+
+      const snapshot = await firestoreAuth
+        .collection("stores")
+        .where("status", "==", "active")
+        .limit(500)
+        .get();
+
+      const searchText = normalizePublicStoreSearchText(queryResult.data.q);
+      const stores = snapshot.docs
+        .flatMap((document) => {
+          const data = document.data() as Record<string, unknown>;
+          const ownerId = typeof data["ownerId"] === "string" ? data["ownerId"].trim() : "";
+          const name = typeof data["name"] === "string" ? data["name"].trim() : "";
+          if (!ownerId || !name || data["publicBookingEnabled"] === false) return [];
+
+          const store = mapStoreDocumentToStore<StoreType>(document, ownerId);
+          const bookingSlug = store.bookingSlug?.trim() || store.id;
+          const addressText = formatStoreAddress(store);
+          const haystack = normalizePublicStoreSearchText(
+            [name, addressText, store.phone ?? ""].join(" "),
+          );
+          if (searchText && !haystack.includes(searchText)) return [];
+
+          return [{
+            id: store.id,
+            bookingSlug,
+            name,
+            address: store.address,
+            addressText,
+            phone: store.phone,
+            openTime: store.openTime,
+            closeTime: store.closeTime,
+            timezone: normalizeBusinessTimeZone(store.timezone),
+          }];
+        })
+        .sort((left, right) =>
+          left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
+        );
+
+      const cursorIndex = queryResult.data.cursor
+        ? stores.findIndex((store) => store.id === queryResult.data.cursor)
+        : -1;
+      const pageStart = cursorIndex >= 0 ? cursorIndex + 1 : 0;
+      const page = stores.slice(pageStart, pageStart + queryResult.data.limit);
+      const hasMore = pageStart + page.length < stores.length;
+
+      res.setHeader("Cache-Control", "public, max-age=30, s-maxage=60");
+      return res.status(200).json({
+        items: page,
+        meta: {
+          total: stores.length,
+          nextCursor: hasMore ? page.at(-1)?.id : undefined,
+        },
+      });
+    } catch (error) {
+      logger.error(
+        { error, route: "GET /api/v1/public/stores" },
+        "public store directory failed",
+      );
+      return res.status(500).json({
+        type: "/internal-server-error",
+        message: "Internal Server Error",
+      });
+    }
+  },
+);
 
 // ---- GET /api/v1/public/stores/:storeId ----
 
@@ -346,7 +517,7 @@ router.get(
         durationMin: service.durationMin,
         durationMax: service.durationMax,
         groupService: service.groupService,
-        preferredWorkerType: service.preferredWorkerType ?? "main",
+        preferredWorkerType: resolvePreferredWorkerType(service),
         bookingKind: service.bookingKind ?? "main",
       }));
 
@@ -503,6 +674,19 @@ router.post(
 
       const payload = parseResult.data;
 
+      if (
+        payload.bookingMode === "request" &&
+        payload.services.some(
+          (service) =>
+            (service.staffSelectionType ?? payload.staffSelectionType) === "specific",
+        )
+      ) {
+        return res.status(400).json({
+          type: "/public/stores/specific-staff-request-not-allowed",
+          message: "A request may only be created for Any staff",
+        });
+      }
+
       // 1. Resolve store
       const store = await getStoreById(payload.storeId);
 
@@ -567,11 +751,10 @@ router.post(
         }
 
         const employee = storeEmployeeMap.get(service.employeeUserId);
-        return (
-          employee === undefined ||
-          (employee.serviceIds !== undefined && employee.serviceIds.length > 0 &&
-            !employee.serviceIds.includes(service.sourceServiceId))
-        );
+        const catalogService = catalogServiceMap.get(service.sourceServiceId);
+        return employee === undefined ||
+          catalogService === undefined ||
+          !canEmployeePerformBookingService(employee, catalogService);
       });
 
       if (invalidEmployee) {
@@ -744,6 +927,33 @@ router.post(
         );
       }
 
+      const workingEmployees = storeEmployees.filter(
+        (employee) =>
+          !activeLeave.some((leave) => leave["employeeUserId"] === employee.uid) &&
+          isEmployeeWorkingDuring(
+            employee,
+            payload.appointmentDate,
+            startMinutes,
+            serviceCursor,
+          ),
+      );
+
+      if (payload.bookingMode === "request") {
+        const requestLimit = Math.min(BOOKING_REQUEST_LIMIT, workingEmployees.length);
+        const pendingRequestCount = activeAttendances.filter(
+          (attendance) =>
+            attendance["bookingStatus"] === "requested" &&
+            Number(attendance["startTime"] ?? -1) === startMinutes,
+        ).length;
+
+        if (requestLimit === 0 || pendingRequestCount >= requestLimit) {
+          return res.status(409).json({
+            type: "/public/stores/request-limit-reached",
+            message: "The request limit for this time has been reached",
+          });
+        }
+      }
+
       if (serviceSegments.some((segment) => segment.staffSelectionType === "any")) {
         const loadByEmployee = new Map<string, number>();
         for (const attendance of activeAttendances) {
@@ -758,17 +968,23 @@ router.post(
         )) {
           const sourceServiceId = segment.service.sourceServiceId;
           const catalogService = catalogServiceMap.get(sourceServiceId);
-          const preferredWorkerType = catalogService?.preferredWorkerType ?? "main";
+          const preferredWorkerType = catalogService
+            ? resolvePreferredWorkerType(catalogService)
+            : "main";
           const eligibleEmployees = storeEmployees
             .filter((employee) => {
-              if (
-                employee.serviceIds !== undefined &&
-                employee.serviceIds.length > 0 &&
-                !employee.serviceIds.includes(sourceServiceId)
-              ) {
+              if (!catalogService || !canEmployeePerformBookingService(employee, catalogService)) {
                 return false;
               }
               if (activeLeave.some((leave) => leave["employeeUserId"] === employee.uid)) {
+                return false;
+              }
+              if (!isEmployeeWorkingDuring(
+                employee,
+                payload.appointmentDate,
+                segment.startTime,
+                segment.endTime,
+              )) {
                 return false;
               }
               const overlapsExisting = activeAttendances.some((attendance) => {
@@ -786,8 +1002,8 @@ router.post(
               return !overlapsExisting && !overlapsThisBooking;
             })
             .sort((left, right) => {
-              const leftType = left.workerType ?? (left.compensationModel === "fixed" ? "assistant" : "main");
-              const rightType = right.workerType ?? (right.compensationModel === "fixed" ? "assistant" : "main");
+              const leftType = resolveEmployeeWorkerType(left);
+              const rightType = resolveEmployeeWorkerType(right);
               const typeDifference = Number(rightType === preferredWorkerType) - Number(leftType === preferredWorkerType);
               if (typeDifference !== 0) return typeDifference;
               const loadDifference = (loadByEmployee.get(left.uid) ?? 0) - (loadByEmployee.get(right.uid) ?? 0);
@@ -796,7 +1012,7 @@ router.post(
           const employee = eligibleEmployees[0];
           if (employee) {
             const employeeName = employee.name?.trim() || employee.displayName?.trim() || employee.email;
-            const workerType = employee.workerType ?? (employee.compensationModel === "fixed" ? "assistant" : "main");
+            const workerType = resolveEmployeeWorkerType(employee);
             segment.service.employees = [{
               employeeUserId: employee.uid,
               employeeName,
@@ -815,6 +1031,13 @@ router.post(
         const isAbsent = activeLeave.some(
           (leave) => leave["employeeUserId"] === employeeUserId,
         );
+        const employee = storeEmployeeMap.get(employeeUserId);
+        const isNotWorking = employee === undefined || !isEmployeeWorkingDuring(
+          employee,
+          payload.appointmentDate,
+          segment.startTime,
+          segment.endTime,
+        );
         const hasOverlap = activeAttendances.some((attendance) => {
           const assignedEmployeeId =
             attendance["mainAssigneeUserId"] ?? attendance["employeeUserId"];
@@ -824,7 +1047,7 @@ router.post(
             Number(attendance["endTime"] ?? 0) > segment.startTime
           );
         });
-        return isAbsent || hasOverlap;
+        return isAbsent || isNotWorking || hasOverlap;
       });
 
       const hasUnassignedAnySegment =

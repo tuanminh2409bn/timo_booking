@@ -126,6 +126,12 @@ export const updateShopService = async (req: Request, res: Response) => {
         ...(normalizedPayload.durationMax !== undefined && {
           durationMax: normalizedPayload.durationMax,
         }),
+        ...(normalizedPayload.preferredWorkerType !== undefined && {
+          preferredWorkerType: normalizedPayload.preferredWorkerType,
+        }),
+        ...(normalizedPayload.bookingKind !== undefined && {
+          bookingKind: normalizedPayload.bookingKind,
+        }),
         updatedByUserId: authContext.uid,
       },
       requestedStoreId,
@@ -159,6 +165,12 @@ export const updateShopService = async (req: Request, res: Response) => {
         }),
         ...(normalizedPayload.durationMax !== undefined && {
           durationMax: normalizedPayload.durationMax,
+        }),
+        ...(normalizedPayload.preferredWorkerType !== undefined && {
+          preferredWorkerType: normalizedPayload.preferredWorkerType,
+        }),
+        ...(normalizedPayload.bookingKind !== undefined && {
+          bookingKind: normalizedPayload.bookingKind,
         }),
       },
     });

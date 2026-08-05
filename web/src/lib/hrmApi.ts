@@ -35,6 +35,26 @@ export interface HrmStore {
   publicStaffSelection: boolean;
 }
 
+export interface HrmPublicStoreSummary {
+  id: string;
+  bookingSlug: string;
+  name: string;
+  phone?: string;
+  openTime?: string;
+  closeTime?: string;
+  address?: HrmStore['address'];
+  addressText?: string;
+  timezone?: string;
+}
+
+export interface HrmPublicStoreDirectoryResponse {
+  items: HrmPublicStoreSummary[];
+  meta: {
+    total: number;
+    nextCursor?: string;
+  };
+}
+
 export interface HrmStaffMember {
   uid: string;
   name: string;
@@ -122,6 +142,24 @@ export interface HrmAvailability {
 }
 
 // ===== API FUNCTIONS =====
+
+export async function fetchHrmPublicStores(options: {
+  query?: string;
+  limit?: number;
+  cursor?: string;
+} = {}): Promise<HrmPublicStoreDirectoryResponse> {
+  const params = new URLSearchParams();
+  const query = options.query?.trim();
+  if (query) params.set('q', query);
+  params.set('limit', String(options.limit ?? 24));
+  if (options.cursor) params.set('cursor', options.cursor);
+
+  const res = await fetch(`${API_BASE}/api/v1/public/stores?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch public stores: ${res.status}`);
+  }
+  return await res.json() as HrmPublicStoreDirectoryResponse;
+}
 
 /**
  * Fetch store info from HRM public API.

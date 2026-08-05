@@ -14,6 +14,7 @@ import {
   createRequestRateLimit,
 } from "../../modules/request-rate-limit.js";
 import { firestoreAuth } from "../../repository/firestore/index.js";
+import { canCustomerCancelBooking } from "./cancellation-policy.js";
 
 const COOKIE_NAME = "timmo_customer_session";
 const OTP_TTL_MS = 5 * 60_000;
@@ -294,9 +295,11 @@ router.get("/api/v1/customer/bookings", portalRateLimit, async (request, respons
       ),
       addOns: Array.isArray(booking["addOns"]) ? booking["addOns"] : [],
       startTime,
-      canCancel:
-        ["confirmed", "requested", "processing"].includes(bookingStatus) &&
-        appointmentEpoch - Date.now() >= cancellationNoticeHours * 60 * 60 * 1000,
+      canCancel: canCustomerCancelBooking({
+        bookingStatus,
+        appointmentEpoch,
+        cancellationNoticeHours,
+      }),
     };
   }));
   items.sort((left, right) => String(right.workDate).localeCompare(String(left.workDate)));
@@ -351,7 +354,11 @@ router.post(
         typeof storeData?.["timezone"] === "string" ? storeData["timezone"] : undefined,
       ),
     );
-    if (appointmentEpoch - Date.now() < cancellationNoticeHours * 60 * 60 * 1000) {
+    if (!canCustomerCancelBooking({
+      bookingStatus,
+      appointmentEpoch,
+      cancellationNoticeHours,
+    })) {
       return response.status(409).json({
         type: "/customer/cancellation-window-closed",
         message: `Bookings may only be cancelled at least ${cancellationNoticeHours} hours before the appointment`,

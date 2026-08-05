@@ -180,23 +180,18 @@ export default function ServiceSelectionPage() {
   );
 
   const isExtraSelected = useCallback(
-    (categoryId: string, serviceId: string) => {
-      const item = state.selectedServices.find((s) => s.categoryId === categoryId);
-      return item?.extras.some((e) => e.id === serviceId) ?? false;
-    },
-    [state.selectedServices]
-  );
-
-  const categoryHasMainSelected = useCallback(
-    (categoryId: string) => {
-      return state.selectedServices.some((s) => s.categoryId === categoryId);
-    },
+    (_categoryId: string, serviceId: string) =>
+      state.selectedServices.some((item) => item.extras.some((extra) => extra.id === serviceId)),
     [state.selectedServices]
   );
 
   // ── Determine disabled categories ──
   const getCategoryDisableReason = useCallback(
     (category: ServiceCategory): 'conflict' | 'max' | null => {
+      const categoryServices = services.filter((service) => service.categoryId === category.id);
+      if (categoryServices.length > 0 && categoryServices.every((service) => service.isAddon)) {
+        return null;
+      }
       // If category is already selected, it's not disabled
       if (state.selectedServices.some((s) => s.categoryId === category.id)) {
         return null;
@@ -211,7 +206,7 @@ export default function ServiceSelectionPage() {
       }
       return null;
     },
-    [state.selectedServices]
+    [services, state.selectedServices]
   );
 
   // ── Get the conflicting group name for display ──
@@ -263,12 +258,16 @@ export default function ServiceSelectionPage() {
   };
 
   const getStaffForService = useCallback((_serviceId: string): Staff[] => {
-    // In a nail salon, all active staff can perform all services
-    // HRM does not assign serviceIds to employees, so we show all active staff
+    const service = services.find((candidate) => candidate.id === _serviceId);
     return staffList.filter(
-      (s) => s.status === 'active' && (s.serviceIds.length === 0 || s.serviceIds.includes(_serviceId)),
-    );
-  }, [staffList]);
+      (s) =>
+        s.status === 'active' &&
+        (s.serviceIds.length === 0 || s.serviceIds.includes(_serviceId)),
+    ).sort((left, right) => {
+      const preferredType = service?.staffType ?? 'main';
+      return Number(right.staffType === preferredType) - Number(left.staffType === preferredType);
+    });
+  }, [services, staffList]);
 
   // ── Check if skip staff selection (auto-assign categories like Pediküre) ──
   const skipStaffSelection = useMemo(() => {
@@ -345,7 +344,6 @@ export default function ServiceSelectionPage() {
             const disableReason = getCategoryDisableReason(category);
             const isDisabled = disableReason !== null;
             const badgeText = getCategoryBadgeText(category.id);
-            const hasMain = categoryHasMainSelected(category.id);
             const selectedItem = getSelectedItem(category.id);
 
             // Split services: main services (non-addon) and extras (addon)
@@ -491,7 +489,7 @@ export default function ServiceSelectionPage() {
                     {/* Extra/addon services */}
                     {extraServices.map((service) => {
                       const selected = isExtraSelected(category.id, service.id);
-                      const addonDisabled = !hasMain;
+                      const addonDisabled = state.selectedServices.length === 0;
 
                       return (
                         <div

@@ -6,16 +6,29 @@
   font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 36px;
+}
+
+.homeLink {
+  color: #374151;
+  font-size: 14px;
+  font-weight: 650;
+  text-decoration: none;
+}
+
+.homeLink:hover {
+  color: #111827;
+}
+
 .header {
   text-align: center;
   margin-bottom: 40px;
   position: relative;
-}
-
-.langWrapper {
-  position: absolute;
-  top: 0;
-  right: 0;
 }
 
 .title {
@@ -65,6 +78,13 @@
 .searchInput:focus {
   border-color: #10b981;
   box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1);
+}
+
+.resultSummary {
+  margin: -20px 0 24px;
+  color: #6b7280;
+  font-size: 14px;
+  text-align: center;
 }
 
 /* Salon Grid */
@@ -169,6 +189,34 @@
   font-weight: 500;
 }
 
+.retryButton,
+.loadMoreButton {
+  border: 1px solid #111827;
+  border-radius: 9999px;
+  background: #111827;
+  color: #ffffff;
+  padding: 11px 22px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.retryButton:hover,
+.loadMoreButton:hover {
+  background: #1f2937;
+}
+
+.loadMoreWrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: 32px;
+}
+
+.loadMoreButton:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 /* Loading State */
 .loading {
   display: flex;
@@ -211,10 +259,7 @@
     font-size: 26px;
   }
   
-  .langWrapper {
-    position: static;
-    margin-bottom: 24px;
-    display: flex;
-    justify-content: center;
+  .topBar {
+    margin-bottom: 28px;
   }
 }

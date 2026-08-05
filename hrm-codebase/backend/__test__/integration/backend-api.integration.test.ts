@@ -1142,7 +1142,13 @@ describe("backend API integration surface", () => {
       request(app)
         .patch("/api/v1/stores/branch-1/services/service-1")
         .set("Authorization", ownerAuth)
-        .send({ price: "65", durationMin: 45, durationMax: 60 }),
+        .send({
+          price: "65",
+          durationMin: 45,
+          durationMax: 60,
+          preferredWorkerType: "assistant",
+          bookingKind: "add_on",
+        }),
     );
     expect(updateServiceResponse.status).toBe(200);
     expect(updateServiceResponse.body).toMatchObject({
@@ -1150,12 +1156,18 @@ describe("backend API integration surface", () => {
         id: "service-1",
         price: 65,
         durationMinutes: 60,
+        preferredWorkerType: "assistant",
+        bookingKind: "add_on",
       },
       meta: { storeId: "branch-1" },
     });
     expect(updateServiceResponse.body.item).not.toHaveProperty("storeId");
     expect(updateServiceResponse.body.item).not.toHaveProperty("imageUrls");
-    expect(getServiceOrThrow("service-1").price).toBe(65);
+    expect(getServiceOrThrow("service-1")).toMatchObject({
+      price: 65,
+      preferredWorkerType: "assistant",
+      bookingKind: "add_on",
+    });
 
     const deleteServiceResponse = await withRequestDefaults(
       request(app).delete("/api/v1/stores/branch-1/services/service-1").set("Authorization", ownerAuth),

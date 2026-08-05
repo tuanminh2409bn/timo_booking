@@ -5,7 +5,7 @@ import { verifyAuthorizationHeader } from "../../../modules/verify-auth-header.j
 import { canAccessStore } from "../../../helpers/role-access.js";
 import { FirestoreDataNotFoundError } from "../../../constants/firestore-error.js";
 import { isValidWorkDate } from "../../../helpers/verify-work-date.js";
-import { firestoreRepository } from "../../../repository/firestore/index.js";
+import { firestoreAuth, firestoreRepository } from "../../../repository/firestore/index.js";
 import type {
   ShopAttendanceCalendarType,
   ShopAttendanceType,
@@ -299,11 +299,30 @@ export const getAttendanceCalendar = async (req: Request, res: Response) => {
       isAttendanceAssignedToUser(attendance, authContext.uid),
     );
   }
-  const calendarAttendanceItems = attendancesWithinCallerScope.map((attendance) =>
-    toCalendarAttendanceItem(attendance, {
+  const bookingIds = [...new Set(
+    attendancesWithinCallerScope.flatMap((attendance) =>
+      attendance.bookingId ? [attendance.bookingId] : [],
+    ),
+  )];
+  const bookingAddOns = new Map<string, unknown[]>();
+  await Promise.all(bookingIds.map(async (bookingId) => {
+    const bookingDocument = await firestoreAuth
+      .collection("stores")
+      .doc(store.id)
+      .collection("bookings")
+      .doc(bookingId)
+      .get();
+    const addOns = bookingDocument.data()?.["addOns"];
+    if (Array.isArray(addOns)) bookingAddOns.set(bookingId, addOns);
+  }));
+  const calendarAttendanceItems = attendancesWithinCallerScope.map((attendance) => ({
+    ...toCalendarAttendanceItem(attendance, {
       redactCustomerInfo: authContext.role === "employee",
     }),
-  );
+    ...(attendance.bookingId && bookingAddOns.has(attendance.bookingId) && {
+      addOns: bookingAddOns.get(attendance.bookingId),
+    }),
+  }));
   const statusCounts = countByStatus(calendarAttendanceItems);
 
   setActiveAttendanceSpanAttributes({

@@ -24,7 +24,11 @@ export const establishHrmSession = async (
   firebaseUser: User,
   isPlatformAdmin = false,
 ): Promise<{ token: string; user: HrmSessionIdentity }> => {
-  const idToken = await firebaseUser.getIdToken();
+  const idTokenResult = await firebaseUser.getIdTokenResult();
+  const idToken = idTokenResult.token;
+  const claimedRole = idTokenResult.claims.role;
+  const useAdminEndpoint =
+    isPlatformAdmin || claimedRole === 'admin' || claimedRole === 'superadmin';
   const appCheckToken = await getFirebaseAppCheckToken();
   const signin = (admin: boolean) => fetch(
     `${HRM_API_BASE_URL}${admin ? '/api/v1/auth/admin-sessions' : '/api/v1/auth/signin'}`,
@@ -39,8 +43,8 @@ export const establishHrmSession = async (
       ...(admin ? {} : { body: JSON.stringify({ idToken }) }),
     },
   );
-  let response = await signin(isPlatformAdmin);
-  if (!isPlatformAdmin && response.status === 403) {
+  let response = await signin(useAdminEndpoint);
+  if (!useAdminEndpoint && (response.status === 403 || response.status >= 500)) {
     response = await signin(true);
   }
   if (!response.ok) {

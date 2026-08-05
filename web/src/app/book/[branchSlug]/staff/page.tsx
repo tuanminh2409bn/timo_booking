@@ -290,35 +290,34 @@ export default function StaffSelectionPage() {
     if (state.selectedServices.length === 0) return staffList.filter((s) => s.status === 'active');
     
     // Check service.staffType from Firestore (data-driven)
-    const requiredStaffTypes = state.selectedServices
-      .map(s => s.mainService.staffType || 'any')
-      .filter((t: string) => t !== 'any');
+    const requiredStaffTypes = [...new Set(
+      state.selectedServices
+        .map(s => s.mainService.staffType || 'any')
+        .filter((t: string) => t !== 'any')
+    )];
 
-    // Determine required staff type: if any service requires 'main', require main
-    // If any requires 'junior', require junior. Mixed = 'any' (can't satisfy both)
-    let requiredType: 'main' | 'junior' | 'any' = 'any';
-    if (requiredStaffTypes.includes('main')) {
-      requiredType = 'main';
-    } else if (requiredStaffTypes.includes('junior')) {
-      requiredType = 'junior';
-    }
+    // Staff type is a priority, not a hard eligibility boundary. Capability is
+    // determined by serviceIds; another capable type is the documented fallback.
+    let preferredType: 'main' | 'junior' | 'any' = 'any';
+    if (requiredStaffTypes.length === 1) preferredType = requiredStaffTypes[0] as 'main' | 'junior';
 
     // Fallback: hardcoded first-five-block check for services without staffType
-    if (requiredType === 'any') {
+    if (preferredType === 'any') {
       const hasFirstFiveBlock = state.selectedServices.some(s => 
         isFirstFiveBlockService(s.mainService.name) || 
         (s.mainService.nameLocalized &&
           Object.values(s.mainService.nameLocalized).some(isFirstFiveBlockService))
       );
-      if (hasFirstFiveBlock) requiredType = 'main';
+      if (hasFirstFiveBlock) preferredType = 'main';
     }
 
     const mainServiceIds = state.selectedServices.map((s) => s.mainService.id);
     return staffList.filter(
       (s) =>
         s.status === 'active' && 
-        (requiredType === 'any' || s.staffType === requiredType) &&
-        mainServiceIds.every((id) => (s.serviceIds || []).includes(id))
+        mainServiceIds.every((id) => s.serviceIds.length === 0 || s.serviceIds.includes(id))
+    ).sort((left, right) =>
+      Number(right.staffType === preferredType) - Number(left.staffType === preferredType)
     );
   }, [state.selectedServices, staffList]);
 
@@ -471,6 +470,9 @@ export default function StaffSelectionPage() {
                 (s) =>
                   s.status === 'active' &&
                   (s.serviceIds.length === 0 || s.serviceIds.includes(seg.serviceId))
+              ).sort((left, right) =>
+                Number(right.staffType === seg.requiredStaffType) -
+                Number(left.staffType === seg.requiredStaffType)
               );
 
               if (eligibleStaff.length === 0) {

@@ -64,6 +64,20 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
       message: "Target employee must be active and belong to this store",
     });
   }
+  if (
+    employee.serviceIds !== undefined &&
+    employee.serviceIds.length > 0 &&
+    attendance.services.some(
+      (service) => service.sourceServiceId && !employee.serviceIds?.includes(service.sourceServiceId),
+    )
+  ) {
+    return response.status(400).json({
+      type: "/attendance/employee-service-mismatch",
+      message: "Target employee cannot perform every service in this attendance",
+    });
+  }
+
+  const isRequestAssignment = attendance.bookingStatus === "requested";
 
   const [attendanceSnapshot, leaveSnapshot] = await Promise.all([
     firestoreAuth
@@ -79,13 +93,14 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
       .where("startDate", "<=", attendance.workDate)
       .get(),
   ]);
-  const employeeUnavailable = leaveSnapshot.docs.some((document) => {
+  const employeeOnLeave = leaveSnapshot.docs.some((document) => {
     const leave = document.data();
     return leave["ownerId"] === authContext.ownerId &&
       leave["employeeUserId"] === employee.uid &&
       typeof leave["endDate"] === "string" &&
       leave["endDate"] >= attendance.workDate;
-  }) || attendanceSnapshot.docs.some((document) => {
+  });
+  const employeeHasOverlap = attendanceSnapshot.docs.some((document) => {
     const item = document.data();
     const assignedEmployeeId = item["mainAssigneeUserId"] ?? item["employeeUserId"];
     return document.id !== attendance.id &&
@@ -96,7 +111,9 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
       Number(item["startTime"] ?? 0) < attendance.endTime &&
       Number(item["endTime"] ?? 0) > attendance.startTime;
   });
-  if (employeeUnavailable) {
+  // Spec V1: assigning a pending Request intentionally bypasses only the
+  // double-booking check. Leave and service capability remain enforced.
+  if (employeeOnLeave || (!isRequestAssignment && employeeHasOverlap)) {
     return response.status(409).json({
       type: "/attendance/reassignment-conflict",
       message: "Target employee is unavailable at this time",
@@ -140,36 +157,30 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
         ? { ...segment, employeeUserId: employee.uid }
         : segment,
     );
-    try {
-      nextReservationIds = await replaceBookingSlotReservations({
-        ownerId: authContext.ownerId,
-        storeId,
-        bookingId: attendance.bookingId,
-        workDate: attendance.workDate,
-        currentReservationIds: previousReservationIds,
-        segments: replacementSegments,
-      });
-    } catch (error) {
-      if (error instanceof BookingSlotConflictError) {
-        return response.status(409).json({
-          type: "/attendance/reassignment-conflict",
-          message: error.message,
+    if (isRequestAssignment) {
+      // Do not create a slot reservation for an owner-overridden Request; that
+      // would reintroduce the double-booking rejection that the MVP forbids.
+      nextReservationIds = previousReservationIds;
+    } else {
+      try {
+        nextReservationIds = await replaceBookingSlotReservations({
+          ownerId: authContext.ownerId,
+          storeId,
+          bookingId: attendance.bookingId,
+          workDate: attendance.workDate,
+          currentReservationIds: previousReservationIds,
+          segments: replacementSegments,
         });
+      } catch (error) {
+        if (error instanceof BookingSlotConflictError) {
+          return response.status(409).json({
+            type: "/attendance/reassignment-conflict",
+            message: error.message,
+          });
+        }
+        throw error;
       }
-      throw error;
     }
-  }
-  if (
-    employee.serviceIds !== undefined &&
-    employee.serviceIds.length > 0 &&
-    attendance.services.some(
-      (service) => service.sourceServiceId && !employee.serviceIds?.includes(service.sourceServiceId),
-    )
-  ) {
-    return response.status(400).json({
-      type: "/attendance/employee-service-mismatch",
-      message: "Target employee cannot perform every service in this attendance",
-    });
   }
 
   const employeeName = employee.name?.trim() || employee.displayName?.trim() || employee.email;
@@ -210,10 +221,17 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
     { deleteFields: ["assistantAssigneeUserId"] },
     );
     if (bookingReference && nextReservationIds) {
-      await bookingReference.update({ slotReservationIds: nextReservationIds, updatedAt: Date.now() });
+      await bookingReference.update({
+        slotReservationIds: nextReservationIds,
+        ...(isRequestAssignment && { bookingStatus: "confirmed" }),
+        updatedByType: "user",
+        updatedById: authContext.uid,
+        updatedByRole: authContext.role,
+        updatedAt: Date.now(),
+      });
     }
   } catch (error) {
-    if (attendance.bookingId && nextReservationIds) {
+    if (!isRequestAssignment && attendance.bookingId && nextReservationIds) {
       await replaceBookingSlotReservations({
         ownerId: authContext.ownerId,
         storeId,

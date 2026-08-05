@@ -136,10 +136,14 @@ function bookingReducer(state: BookingState, action: BookingAction): BookingStat
     // ── Toggle extra (Design/Extra) in a category ──
     case 'TOGGLE_EXTRA': {
       const { categoryId, extra } = action;
-      const idx = state.selectedServices.findIndex(
+      let idx = state.selectedServices.findIndex(
         (s) => s.categoryId === categoryId
       );
-      if (idx === -1) return state; // no main service in this category
+      // Spec V1: add-ons are booking-level options and do not require a main
+      // service from the same category. Store them with the first main service
+      // so the existing summary/confirmation shape remains backward-compatible.
+      if (idx === -1) idx = state.selectedServices.length > 0 ? 0 : -1;
+      if (idx === -1) return state;
 
       const current = state.selectedServices[idx];
       const hasExtra = current.extras.some((e) => e.id === extra.id);

@@ -24,6 +24,12 @@ export type AdminAttendanceItem = {
   bookingStatus: AdminAttendanceStatus;
   source: 'online_booking' | 'manual_booking' | 'walk_in';
   totalAmount: number;
+  addOns?: Array<{
+    id: string;
+    sourceServiceId?: string;
+    name: string;
+    price: number;
+  }>;
   services: Array<{
     id: string;
     name: string;
@@ -36,9 +42,23 @@ export type AdminAttendanceItem = {
 };
 
 type AttendanceCalendarResponse = {
-  items: Array<Omit<AdminAttendanceItem, 'bookingStatus'> & {
+  items: Array<Omit<AdminAttendanceItem, 'bookingStatus' | 'startTime' | 'endTime'> & {
     bookingStatus: AdminAttendanceStatus | 'requested' | 'processing';
+    startTime?: number;
+    endTime?: number;
+    date?: string;
+    endDate?: string;
   }>;
+};
+
+const resolveAttendanceMinutes = (minutes: unknown, dateTime: unknown): number => {
+  if (typeof minutes === 'number' && Number.isFinite(minutes)) return minutes;
+  if (typeof dateTime !== 'string') throw new Error('Attendance time is missing');
+
+  const match = dateTime.match(/T(\d{2}):(\d{2})/);
+  if (!match) throw new Error(`Invalid attendance time: ${dateTime}`);
+
+  return Number(match[1]) * 60 + Number(match[2]);
 };
 
 export const fetchAdminAttendanceCalendar = async (
@@ -59,6 +79,8 @@ export const fetchAdminAttendanceCalendar = async (
   const data = await response.json() as AttendanceCalendarResponse;
   return data.items.map((item) => ({
     ...item,
+    startTime: resolveAttendanceMinutes(item.startTime, item.date),
+    endTime: resolveAttendanceMinutes(item.endTime, item.endDate),
     bookingStatus: item.bookingStatus === 'requested'
       ? 'pending_approval'
       : item.bookingStatus === 'processing'
