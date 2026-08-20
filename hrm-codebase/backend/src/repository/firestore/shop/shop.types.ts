@@ -102,6 +102,8 @@ export type ShopBookingType = {
   subtotalAmount: number;
   totalAmount: number;
   bookingStatus: ShopAttendanceBookingStatus;
+  /** Immutable marker used to keep approved Requests in the Request calendar column. */
+  originatedAsRequest?: boolean;
   source: ShopAttendanceSource;
   notes?: string;
   createdByType: ShopBookingActorType;
@@ -190,6 +192,8 @@ export type ShopAttendanceType = {
   totalAmount: number;
   status: "open" | "closed";
   bookingStatus?: ShopAttendanceBookingStatus;
+  /** Immutable marker used to keep approved Requests in the Request calendar column. */
+  originatedAsRequest?: boolean;
   assigneeUserIds?: string[];
   createdAt: number;
   updatedAt: number;
@@ -246,6 +250,7 @@ export type ShopAttendanceCalendarType = Pick<
   | "totalAmount"
   | "status"
   | "bookingStatus"
+  | "originatedAsRequest"
   | "assigneeUserIds"
   | "createdAt"
   | "updatedAt"

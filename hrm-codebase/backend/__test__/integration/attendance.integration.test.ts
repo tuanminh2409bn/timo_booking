@@ -2667,7 +2667,7 @@ describe("backend API integration: attendance and settlement", () => {
     ]);
   });
 
-  it("keeps an overlapping Request pending after assignment until the owner approves it", async () => {
+  it("keeps an approved Request marked for the Request calendar column", async () => {
     const bookingPayload = (customerName: string, bookingMode: "instant" | "request") => ({
       storeId: "branch-1",
       customerName,
@@ -2706,7 +2706,10 @@ describe("backend API integration: attendance and settlement", () => {
     );
     expect(pendingRequest.status, JSON.stringify(pendingRequest.body)).toBe(201);
     const pendingAttendanceId = getCreatedAttendanceId(pendingRequest.body)!;
-    expect(getAttendanceOrThrow(pendingAttendanceId).bookingStatus).toBe("requested");
+    expect(getAttendanceOrThrow(pendingAttendanceId)).toMatchObject({
+      bookingStatus: "requested",
+      originatedAsRequest: true,
+    });
 
     const reassignment = await withRequestDefaults(
       request(app)
@@ -2719,10 +2722,14 @@ describe("backend API integration: attendance and settlement", () => {
     expect(getAttendanceOrThrow(pendingAttendanceId)).toMatchObject({
       mainAssigneeUserId: "staff-1",
       bookingStatus: "requested",
+      originatedAsRequest: true,
     });
     expect(state.bookings.get(`branch-1__${pendingRequest.body.meta.bookingId}`)?.["bookingStatus"]).toBe(
       "requested",
     );
+    expect(
+      state.bookings.get(`branch-1__${pendingRequest.body.meta.bookingId}`)?.["originatedAsRequest"],
+    ).toBe(true);
 
     const approval = await withRequestDefaults(
       request(app)
@@ -2731,10 +2738,17 @@ describe("backend API integration: attendance and settlement", () => {
         .send({ status: "confirmed" }),
     );
     expect(approval.status, JSON.stringify(approval.body)).toBe(200);
-    expect(getAttendanceOrThrow(pendingAttendanceId).bookingStatus).toBe("confirmed");
+    expect(getAttendanceOrThrow(pendingAttendanceId)).toMatchObject({
+      mainAssigneeUserId: "staff-1",
+      bookingStatus: "confirmed",
+      originatedAsRequest: true,
+    });
     expect(state.bookings.get(`branch-1__${pendingRequest.body.meta.bookingId}`)?.["bookingStatus"]).toBe(
       "confirmed",
     );
+    expect(
+      state.bookings.get(`branch-1__${pendingRequest.body.meta.bookingId}`)?.["originatedAsRequest"],
+    ).toBe(true);
 
     const employeeCancellation = await withRequestDefaults(
       request(app)

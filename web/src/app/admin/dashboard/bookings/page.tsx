@@ -65,6 +65,7 @@ interface FirestoreBooking {
   totalPrice: number;
   totalDurationMinutes: number;
   status: 'pending_approval' | 'confirmed' | 'cancelled' | 'needs_owner_action' | 'completed' | 'no_show';
+  originatedAsRequest?: boolean;
   source: 'online_booking' | 'manual_booking' | 'walk_in';
   createdAt: string;
   updatedByUserId?: string;
@@ -458,6 +459,7 @@ function mapAttendanceItemsToBookings(
         totalPrice: Number(service.amount) || 0,
         totalDurationMinutes: durationMinutes,
         status: item.bookingStatus,
+        originatedAsRequest: item.originatedAsRequest,
         source: item.source,
         createdAt: item.workDate,
         updatedByUserId: item.updatedByUserId,
@@ -1405,12 +1407,15 @@ export default function BookingsManagementPage() {
       if (!user?.staffId) return [];
 
       const ownBookings = dayBookings.filter((booking) =>
+        booking.originatedAsRequest !== true &&
         booking.status !== 'pending_approval' &&
         booking.status !== 'needs_owner_action' &&
         booking.staffId === user.staffId,
       );
       const requestBookings = dayBookings.filter((booking) =>
-        booking.status === 'pending_approval' || booking.status === 'needs_owner_action',
+        booking.originatedAsRequest === true ||
+        booking.status === 'pending_approval' ||
+        booking.status === 'needs_owner_action',
       );
       const columns: Array<{
         id: string;
@@ -1466,7 +1471,7 @@ export default function BookingsManagementPage() {
       }
     });
 
-    // Pending requests remain in Request even after an assignee is selected.
+    // Customer Requests remain in Request after assignment and approval.
     // Confirmed appointments disrupted by leave stay in their original staff
     // column with a warning so the owner can see exactly who was affected.
     const requestColumnBookings: FirestoreBooking[] = [];
@@ -1474,7 +1479,7 @@ export default function BookingsManagementPage() {
     dayBookings.forEach(b => {
       const isUnassigned = !b.staffId || b.staffId === 'any' || b.staffId === '';
       const isPending = b.status === 'pending_approval';
-      if (isUnassigned || isPending) {
+      if (isUnassigned || isPending || b.originatedAsRequest === true) {
         requestColumnBookings.push(b);
       } else {
         if (!map.has(b.staffId)) {
@@ -1685,12 +1690,21 @@ export default function BookingsManagementPage() {
         <div className={styles.calBlockTime}>{booking.startTime}–{endTime}</div>
         {(height > 48 || (
           height >= 40 &&
-          (booking.status === 'pending_approval' || booking.status === 'needs_owner_action')
-        )) && (user?.role !== 'staff' || booking.status === 'pending_approval' || booking.status === 'needs_owner_action') && (
+          (
+            booking.status === 'pending_approval' ||
+            booking.status === 'needs_owner_action' ||
+            booking.originatedAsRequest === true
+          )
+        )) && (
+          user?.role !== 'staff' ||
+          booking.status === 'pending_approval' ||
+          booking.status === 'needs_owner_action' ||
+          booking.originatedAsRequest === true
+        ) && (
           <div className={styles.calBlockCustomer}>
             {hasLeaveConflict
               ? `${locale === 'vi' ? 'Thợ gốc' : 'Original'}: ${booking.requestedStaffName || booking.conflictStaffName || getStaffNameDisplay(booking.staffId, booking.staffName)}`
-              : booking.status === 'pending_approval' && booking.staffId && booking.staffId !== 'any'
+              : booking.originatedAsRequest === true && booking.staffId && booking.staffId !== 'any'
               ? `${locale === 'vi' ? 'Thợ' : 'Staff'}: ${getStaffNameDisplay(booking.staffId, booking.staffName)}`
               : booking.status === 'needs_owner_action' && booking.proposedStaffName
                 ? `${locale === 'vi' ? 'Thợ thay' : 'Replacement'}: ${booking.proposedStaffName}`

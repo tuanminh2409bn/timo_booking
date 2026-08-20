@@ -836,6 +836,7 @@ export const listShopAttendanceCalendarByStoreDateRangeFactory = (firestoreDB: F
                     "totalAmount",
                     "status",
                     "bookingStatus",
+                    "originatedAsRequest",
                     "assigneeUserIds",
                     "createdAt",
                     "updatedAt",

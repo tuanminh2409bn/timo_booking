@@ -258,6 +258,7 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
     services,
     // A Request stays pending until the owner explicitly approves the booking.
     bookingStatus: isRequestAssignment ? "requested" as const : "confirmed" as const,
+    ...(isRequestAssignment && { originatedAsRequest: true }),
   };
   const deferredLeaveAssignment = {
     // Preserve the original column while the owner reviews the replacement.
@@ -284,6 +285,7 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
       await bookingReference.update({
         slotReservationIds: nextReservationIds,
         ...(isRequestAssignment && { bookingStatus: "requested" }),
+        ...(isRequestAssignment && { originatedAsRequest: true }),
         ...(isLeaveConflictAssignment && {
           bookingStatus: "processing",
           proposedAssigneeUserId: employee.uid,

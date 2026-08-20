@@ -190,6 +190,9 @@ export const toFrontendAttendanceItem = (
     ...(attendanceDiscountAmount > 0 && { discountAmount: attendanceDiscountAmount }),
     status: normalizedAttendance.status,
     bookingStatus: normalizedAttendance.bookingStatus ?? DEFAULT_BOOKING_STATUS,
+    ...(normalizedAttendance.originatedAsRequest !== undefined && {
+      originatedAsRequest: normalizedAttendance.originatedAsRequest,
+    }),
     createdBy: normalizedAttendance.createdBy,
     ...(normalizedAttendance.createdByType !== undefined && {
       createdByType: normalizedAttendance.createdByType,

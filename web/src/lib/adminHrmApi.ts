@@ -22,6 +22,7 @@ export type AdminAttendanceItem = {
   employeeUserId: string;
   mainAssigneeUserId: string;
   bookingStatus: AdminAttendanceStatus;
+  originatedAsRequest?: boolean;
   source: 'online_booking' | 'manual_booking' | 'walk_in';
   staffSelectionType?: 'specific' | 'any';
   requestedEmployeeUserId?: string;

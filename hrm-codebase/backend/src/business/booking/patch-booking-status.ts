@@ -113,6 +113,9 @@ export const updateBookingStatus = async (request: Request, response: Response) 
     groupedAttendances.some(
       (item) => item.bookingStatus === "processing" && item.proposedAssigneeUserId !== undefined,
     );
+  const originatedAsRequest = groupedAttendances.some(
+    (item) => item.originatedAsRequest === true || item.bookingStatus === "requested",
+  );
 
   const actor = await firestoreRepository.user.getUser(authContext.uid).catch(() => undefined);
   const actorName = actor?.name?.trim() || actor?.displayName?.trim() || actor?.email;
@@ -157,6 +160,7 @@ export const updateBookingStatus = async (request: Request, response: Response) 
       item.id,
       {
         bookingStatus,
+        ...(originatedAsRequest && { originatedAsRequest: true }),
         ...(replacementAssignee !== undefined && {
           employeeUserId: replacementAssignee.employeeUserId,
           mainAssigneeUserId: replacementAssignee.employeeUserId,
@@ -193,6 +197,7 @@ export const updateBookingStatus = async (request: Request, response: Response) 
     if (bookingDocument.exists) {
       await bookingReference.update({
         ...(requestedStatus !== "completed" && { bookingStatus }),
+        ...(originatedAsRequest && { originatedAsRequest: true }),
         ...(commitsLeaveReplacement && {
           proposedAssigneeUserId: FieldValue.delete(),
           proposedAssigneeName: FieldValue.delete(),
