@@ -155,9 +155,7 @@ const resolvePublicServiceName = (service: {
     if (withoutDuration) return withoutDuration;
   }
   const groupName = service.groupService?.trim();
-  return groupName && groupName !== service.name.trim()
-    ? `${groupName} - ${service.name.trim()}`
-    : service.name.trim();
+  return groupName || service.name.trim();
 };
 
 const canEmployeePerformBookingService = (
