@@ -66,6 +66,7 @@ export interface HrmStaffMember {
 export interface HrmService {
   id: string;
   name: string;
+  publicName?: string;
   displayName?: string;
   category?: string;
   price: number;

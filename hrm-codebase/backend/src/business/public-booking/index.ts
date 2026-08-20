@@ -140,6 +140,26 @@ const resolvePreferredWorkerType = (
 ): "main" | "assistant" =>
   isAssistantPriorityService(service) ? "assistant" : "main";
 
+// Legacy catalog rows may keep the short internal calendar label in `name`
+// while the complete German customer-facing name is stored in `description`.
+// Public booking must not expose the internal label; authenticated calendar
+// screens continue to use `displayName` from the full service catalog.
+const resolvePublicServiceName = (service: {
+  name: string;
+  description?: string | undefined;
+  groupService?: string | undefined;
+}) => {
+  const description = service.description?.trim();
+  if (description) {
+    const withoutDuration = description.replace(/\s*\(\s*\d+\s*Min\s*\)\s*$/iu, "").trim();
+    if (withoutDuration) return withoutDuration;
+  }
+  const groupName = service.groupService?.trim();
+  return groupName && groupName !== service.name.trim()
+    ? `${groupName} - ${service.name.trim()}`
+    : service.name.trim();
+};
+
 const canEmployeePerformBookingService = (
   employee: PublicBookingEmployee,
   service: PublicBookingCatalogService,
@@ -516,6 +536,7 @@ router.get(
       const items = services.map((service) => ({
         id: service.id,
         name: service.name,
+        publicName: resolvePublicServiceName(service),
         ...(service.displayName !== undefined && { displayName: service.displayName }),
         ...(service.description !== undefined && { description: service.description }),
         category: service.category,

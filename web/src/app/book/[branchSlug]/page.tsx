@@ -61,7 +61,7 @@ export default function ServiceSelectionPage() {
             id: hrm.id,
             branchId: branchSlug,
             categoryId: catId,
-            name: hrm.name,
+            name: hrm.publicName?.trim() || hrm.name,
             description: hrm.description || '',
             durationMinutes: hrm.durationMin || hrm.durationMax || 30,
             price: hrm.price,
