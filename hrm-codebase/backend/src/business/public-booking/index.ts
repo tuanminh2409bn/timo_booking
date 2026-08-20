@@ -27,6 +27,7 @@ import { mapStoreDocumentToStore } from "../../repository/firestore/store-docume
 import { getStoreIdFromUrlPath } from "../../helpers/request-store-id.js";
 import { synchronizeWorkDaySettlement } from "../employee/work-days/work-day-settlement-sync.js";
 import { normalizeCustomerPhone } from "../../helpers/customer-phone.js";
+import { leaveOverlapsAttendance } from "../employee/leave-requests/leave-request-shared.js";
 import {
   acquireBookingSlotReservations,
   BookingSlotConflictError,
@@ -147,7 +148,7 @@ const canEmployeePerformBookingService = (
     employee.serviceIds.length === 0 ||
     employee.serviceIds.includes(service.id);
 
-const BOOKING_REQUEST_LIMIT = 5;
+const BOOKING_REQUEST_LIMIT = 3;
 const WORK_DAY_KEYS = [
   "sunday",
   "monday",
@@ -195,9 +196,9 @@ const createBookingSchema = z
     appointmentDate: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, "appointmentDate must be in YYYY-MM-DD format"),
-    startTime: z.string().regex(/^\d{2}:\d{2}$/, "startTime must be in HH:mm format"),
-    endTime: z.string().regex(/^\d{2}:\d{2}$/, "endTime must be in HH:mm format"),
-    services: z.array(bookingServiceSchema).min(1).max(2),
+    startTime: z.string().regex(/^([01]\d|2[0-3]):(00|15|30|45)$/, "startTime must use a 15-minute interval"),
+    endTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "endTime must be in HH:mm format"),
+    services: z.array(bookingServiceSchema).min(1).max(3),
     addOns: z.array(bookingAddonSchema).max(20).optional().default([]),
     staffSelectionType: z.enum(["specific", "any"]),
     bookingMode: z.enum(["instant", "request"]).optional(),
@@ -452,7 +453,9 @@ router.get(
         active: true,
       });
 
-      const items = employees.map((employee) => ({
+      const items = employees
+        .filter((employee) => employee.publicBookingVisible !== false)
+        .map((employee) => ({
         uid: employee.uid,
         name:
           employee.name?.trim() ||
@@ -460,10 +463,11 @@ router.get(
           employee.email?.split("@")[0] ||
           employee.uid,
         serviceIds: employee.serviceIds,
+        publicBookingVisible: employee.publicBookingVisible ?? true,
         workerType:
           employee.workerType ??
           (employee.compensationModel === "fixed" ? "assistant" : "main"),
-      }));
+        }));
 
       return res.status(200).json({ items });
     } catch (error) {
@@ -512,6 +516,8 @@ router.get(
       const items = services.map((service) => ({
         id: service.id,
         name: service.name,
+        ...(service.displayName !== undefined && { displayName: service.displayName }),
+        ...(service.description !== undefined && { description: service.description }),
         category: service.category,
         price: service.price,
         durationMin: service.durationMin,
@@ -519,6 +525,7 @@ router.get(
         groupService: service.groupService,
         preferredWorkerType: resolvePreferredWorkerType(service),
         bookingKind: service.bookingKind ?? "main",
+        availableForBooking: service.availableForBooking ?? true,
       }));
 
       return res.status(200).json({ items });
@@ -560,7 +567,7 @@ router.get(
         });
       }
 
-      const [attendanceSnapshot, leaveSnapshot] = await Promise.all([
+      const [attendanceSnapshot, leaveSnapshot, storeEmployees] = await Promise.all([
         firestoreAuth
           .collection("stores")
           .doc(store.id)
@@ -573,6 +580,10 @@ router.get(
           .collection("employee_leave_requests")
           .where("startDate", "<=", date)
           .get(),
+        firestoreRepository.user.listShopEmployees(store.ownerId, {
+          storeId: store.id,
+          active: true,
+        }),
       ]);
 
       const busy = attendanceSnapshot.docs.flatMap((document) => {
@@ -622,10 +633,24 @@ router.get(
           startDate: String(leave["startDate"]),
           endDate: leave["endDate"],
           allDay: leave["allDay"] !== false,
+          ...(typeof leave["startTime"] === "string" && { startTime: leave["startTime"] }),
+          ...(typeof leave["endTime"] === "string" && { endTime: leave["endTime"] }),
         }];
       });
 
-      return res.status(200).json({ date, storeId: store.id, busy, absences });
+      const capacityStaff = storeEmployees.map((employee) => ({
+        uid: employee.uid,
+        serviceIds: employee.serviceIds,
+        workerType: resolveEmployeeWorkerType(employee),
+      }));
+
+      return res.status(200).json({
+        date,
+        storeId: store.id,
+        busy,
+        absences,
+        capacityStaff,
+      });
     } catch (error) {
       logger.error(
         { error, route: "GET /api/v1/public/stores/:storeId/availability" },
@@ -709,26 +734,36 @@ router.post(
       const [endH, endM] = payload.endTime.split(":").map(Number);
       const endMinutes = (endH ?? 0) * 60 + (endM ?? 0);
 
-      const [catalogServices, storeEmployees] = await Promise.all([
+      const [catalogServices, allStoreEmployees] = await Promise.all([
         firestoreRepository.shop.service.getShopServiceFactory(ownerId, store.id),
         firestoreRepository.user.listShopEmployees(ownerId, {
           storeId: store.id,
           active: true,
         }),
       ]);
+      const publicStoreEmployees = allStoreEmployees.filter(
+        (employee) => employee.publicBookingVisible !== false,
+      );
       const catalogServiceMap = new Map(catalogServices.map((service) => [service.id, service]));
-      const storeEmployeeMap = new Map(storeEmployees.map((employee) => [employee.uid, employee]));
+      const storeEmployeeMap = new Map(allStoreEmployees.map((employee) => [employee.uid, employee]));
+      const publicStoreEmployeeMap = new Map(
+        publicStoreEmployees.map((employee) => [employee.uid, employee]),
+      );
 
       const invalidService = payload.services.find(
         (service) => {
           const catalogService = catalogServiceMap.get(service.sourceServiceId);
-          return catalogService?.storeId !== store.id || catalogService.bookingKind === "add_on";
+          return catalogService?.storeId !== store.id ||
+            catalogService.bookingKind === "add_on" ||
+            catalogService.availableForBooking === false;
         },
       );
 
       const invalidAddOn = payload.addOns.find((addOn) => {
         const catalogService = catalogServiceMap.get(addOn.sourceServiceId);
-        return catalogService?.storeId !== store.id || catalogService.bookingKind !== "add_on";
+        return catalogService?.storeId !== store.id ||
+          catalogService.bookingKind !== "add_on" ||
+          catalogService.availableForBooking === false;
       });
 
       if (invalidService || invalidAddOn) {
@@ -750,7 +785,7 @@ router.post(
           return false;
         }
 
-        const employee = storeEmployeeMap.get(service.employeeUserId);
+        const employee = publicStoreEmployeeMap.get(service.employeeUserId);
         const catalogService = catalogServiceMap.get(service.sourceServiceId);
         return employee === undefined ||
           catalogService === undefined ||
@@ -794,6 +829,14 @@ router.post(
             typeof leave["endDate"] === "string" &&
             leave["endDate"] >= payload.appointmentDate,
         );
+      const isEmployeeOnLeave = (employeeUserId: string, segmentStart: number, segmentEnd: number) =>
+        activeLeave.some((leave) => leave["employeeUserId"] === employeeUserId && leaveOverlapsAttendance({
+          startDate: String(leave["startDate"]),
+          endDate: String(leave["endDate"]),
+          allDay: leave["allDay"] !== false,
+          ...(typeof leave["startTime"] === "string" && { startTime: leave["startTime"] }),
+          ...(typeof leave["endTime"] === "string" && { endTime: leave["endTime"] }),
+        }, payload.appointmentDate, segmentStart, segmentEnd));
 
       // Client-provided labels and prices are display hints only; persist canonical catalog data.
       const attendanceServices = payload.services.map((service) => {
@@ -806,7 +849,7 @@ router.post(
         const employee =
           (service.staffSelectionType ?? payload.staffSelectionType) === "specific" &&
           service.employeeUserId !== undefined
-            ? storeEmployeeMap.get(service.employeeUserId)
+            ? publicStoreEmployeeMap.get(service.employeeUserId)
             : undefined;
 
         return {
@@ -871,16 +914,26 @@ router.post(
       const serviceSegments: Array<{
         service: (typeof attendanceServices)[number];
         staffSelectionType: "specific" | "any";
+        requestedEmployeeUserId?: string;
+        requestedEmployeeName?: string;
         startTime: number;
         endTime: number;
       }> = [];
       let serviceCursor = startMinutes;
       for (const [serviceIndex, service] of attendanceServices.entries()) {
         const duration = Math.max(service.durationMax ?? service.durationMin ?? 1, 1);
+        const staffSelectionType =
+          payload.services[serviceIndex]?.staffSelectionType ?? payload.staffSelectionType;
+        const requestedEmployee = staffSelectionType === "specific"
+          ? service.employees[0]
+          : undefined;
         serviceSegments.push({
           service,
-          staffSelectionType:
-            payload.services[serviceIndex]?.staffSelectionType ?? payload.staffSelectionType,
+          staffSelectionType,
+          ...(requestedEmployee !== undefined && {
+            requestedEmployeeUserId: requestedEmployee.employeeUserId,
+            requestedEmployeeName: requestedEmployee.employeeName,
+          }),
           startTime: serviceCursor,
           endTime: serviceCursor + duration,
         });
@@ -927,9 +980,9 @@ router.post(
         );
       }
 
-      const workingEmployees = storeEmployees.filter(
+      const workingEmployees = allStoreEmployees.filter(
         (employee) =>
-          !activeLeave.some((leave) => leave["employeeUserId"] === employee.uid) &&
+          !isEmployeeOnLeave(employee.uid, startMinutes, serviceCursor) &&
           isEmployeeWorkingDuring(
             employee,
             payload.appointmentDate,
@@ -940,11 +993,25 @@ router.post(
 
       if (payload.bookingMode === "request") {
         const requestLimit = Math.min(BOOKING_REQUEST_LIMIT, workingEmployees.length);
-        const pendingRequestCount = activeAttendances.filter(
-          (attendance) =>
-            attendance["bookingStatus"] === "requested" &&
-            Number(attendance["startTime"] ?? -1) === startMinutes,
-        ).length;
+        const pendingRequestBookingIds = new Set(
+          activeAttendances
+            .filter(
+              (attendance) =>
+                attendance["bookingStatus"] === "requested" &&
+                Number(attendance["startTime"] ?? 0) < serviceCursor &&
+                Number(attendance["endTime"] ?? 0) > startMinutes,
+            )
+            .map((attendance) =>
+              typeof attendance["bookingId"] === "string"
+                ? attendance["bookingId"]
+                : [
+                    attendance["customerId"] ?? attendance["customerPhone"] ?? "customer",
+                    attendance["startTime"] ?? "start",
+                    attendance["endTime"] ?? "end",
+                  ].join(":"),
+            ),
+        );
+        const pendingRequestCount = pendingRequestBookingIds.size;
 
         if (requestLimit === 0 || pendingRequestCount >= requestLimit) {
           return res.status(409).json({
@@ -954,14 +1021,34 @@ router.post(
         }
       }
 
-      if (serviceSegments.some((segment) => segment.staffSelectionType === "any")) {
+      if (
+        payload.bookingMode !== "request" &&
+        serviceSegments.some((segment) => segment.staffSelectionType === "any")
+      ) {
         const loadByEmployee = new Map<string, number>();
+        const busyIntervalsByEmployee = new Map<string, Array<{ start: number; end: number }>>();
         for (const attendance of activeAttendances) {
           const employeeUserId = attendance["mainAssigneeUserId"] ?? attendance["employeeUserId"];
           if (typeof employeeUserId === "string") {
             loadByEmployee.set(employeeUserId, (loadByEmployee.get(employeeUserId) ?? 0) + 1);
+            const intervals = busyIntervalsByEmployee.get(employeeUserId) ?? [];
+            intervals.push({
+              start: Number(attendance["startTime"] ?? 0),
+              end: Number(attendance["endTime"] ?? 0),
+            });
+            busyIntervalsByEmployee.set(employeeUserId, intervals);
           }
         }
+        const gapScore = (employeeUserId: string, segmentStart: number, segmentEnd: number) => {
+          const intervals = (busyIntervalsByEmployee.get(employeeUserId) ?? [])
+            .slice()
+            .sort((left, right) => left.start - right.start);
+          const previousEnd = intervals.filter((item) => item.end <= segmentStart).at(-1)?.end;
+          const nextStart = intervals.find((item) => item.start >= segmentEnd)?.start;
+          if (previousEnd === undefined && nextStart === undefined) return 1_440;
+          return (previousEnd === undefined ? 720 : segmentStart - previousEnd) +
+            (nextStart === undefined ? 720 : nextStart - segmentEnd);
+        };
 
         for (const segment of serviceSegments.filter(
           (candidate) => candidate.staffSelectionType === "any",
@@ -971,12 +1058,12 @@ router.post(
           const preferredWorkerType = catalogService
             ? resolvePreferredWorkerType(catalogService)
             : "main";
-          const eligibleEmployees = storeEmployees
+          const eligibleEmployees = allStoreEmployees
             .filter((employee) => {
               if (!catalogService || !canEmployeePerformBookingService(employee, catalogService)) {
                 return false;
               }
-              if (activeLeave.some((leave) => leave["employeeUserId"] === employee.uid)) {
+              if (isEmployeeOnLeave(employee.uid, segment.startTime, segment.endTime)) {
                 return false;
               }
               if (!isEmployeeWorkingDuring(
@@ -1006,8 +1093,14 @@ router.post(
               const rightType = resolveEmployeeWorkerType(right);
               const typeDifference = Number(rightType === preferredWorkerType) - Number(leftType === preferredWorkerType);
               if (typeDifference !== 0) return typeDifference;
+              // 19/08 acceptance rule: spread appointments across the whole
+              // day before trying to optimise the visual gap around the slot.
               const loadDifference = (loadByEmployee.get(left.uid) ?? 0) - (loadByEmployee.get(right.uid) ?? 0);
-              return loadDifference !== 0 ? loadDifference : left.uid.localeCompare(right.uid);
+              if (loadDifference !== 0) return loadDifference;
+              const gapDifference = gapScore(left.uid, segment.startTime, segment.endTime) -
+                gapScore(right.uid, segment.startTime, segment.endTime);
+              if (gapDifference !== 0) return gapDifference;
+              return left.uid.localeCompare(right.uid);
             });
           const employee = eligibleEmployees[0];
           if (employee) {
@@ -1021,6 +1114,9 @@ router.post(
               workerType,
             }];
             loadByEmployee.set(employee.uid, (loadByEmployee.get(employee.uid) ?? 0) + 1);
+            const intervals = busyIntervalsByEmployee.get(employee.uid) ?? [];
+            intervals.push({ start: segment.startTime, end: segment.endTime });
+            busyIntervalsByEmployee.set(employee.uid, intervals);
           }
         }
       }
@@ -1028,9 +1124,7 @@ router.post(
       const conflictedSegments = serviceSegments.filter((segment) => {
         const employeeUserId = segment.service.employees[0]?.employeeUserId;
         if (!employeeUserId) return false;
-        const isAbsent = activeLeave.some(
-          (leave) => leave["employeeUserId"] === employeeUserId,
-        );
+        const isAbsent = isEmployeeOnLeave(employeeUserId, segment.startTime, segment.endTime);
         const employee = storeEmployeeMap.get(employeeUserId);
         const isNotWorking = employee === undefined || !isEmployeeWorkingDuring(
           employee,
@@ -1064,13 +1158,15 @@ router.post(
       }
 
       if (payload.bookingMode === "request") {
-        for (const segment of conflictedSegments) {
-          segment.service.employees = [];
-        }
+        // A Request always stays unassigned until the owner explicitly assigns
+        // every service. Do not let the instant-booking auto-assignment leak
+        // an employee into one segment before approval.
+        for (const segment of serviceSegments) segment.service.employees = [];
       }
 
-      // Services performed by different main employees become separate attendance
-      // records while keeping the same booking id.
+      // Consecutive main services assigned to the same employee are one
+      // calendar block. A change of employee starts a new segment while all
+      // segments retain the same bookingId for booking-level actions.
       const storeWorkDateKey = createStoreWorkDateKey(store.id, payload.appointmentDate);
       const bookingId = randomUUID();
       const bookingCode = `BK-${bookingId.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
@@ -1087,14 +1183,18 @@ router.post(
             : [];
         }),
       });
-      const serviceGroups = new Map<string, typeof serviceSegments>();
-      for (const segment of serviceSegments) {
-        const groupKey = segment.service.employees[0]?.employeeUserId ?? "__unassigned__";
-        serviceGroups.set(groupKey, [...(serviceGroups.get(groupKey) ?? []), segment]);
-      }
+      const serviceGroups = serviceSegments.reduce<typeof serviceSegments[]>((groups, segment) => {
+        const previous = groups.at(-1);
+        const previousEmployeeId = previous?.at(-1)?.service.employees[0]?.employeeUserId;
+        const employeeId = segment.service.employees[0]?.employeeUserId;
+        if (previous && employeeId && previousEmployeeId === employeeId) previous.push(segment);
+        else groups.push([segment]);
+        return groups;
+      }, []);
 
       const createdAttendances: ShopAttendanceType[] = [];
-      for (const groupedSegments of serviceGroups.values()) {
+      let sharedAttendanceCode: string | undefined;
+      for (const groupedSegments of serviceGroups) {
         const firstSegment = groupedSegments[0];
         const lastSegment = groupedSegments.at(-1);
         if (!firstSegment || !lastSegment) continue;
@@ -1127,9 +1227,10 @@ router.post(
         }));
         const attendanceDocumentData: Omit<
           ShopAttendanceType,
-          "id" | "attendanceCode" | "ownerId" | "createdAt" | "updatedAt"
+          "id" | "ownerId" | "createdAt" | "updatedAt"
         > = {
           bookingId,
+          ...(sharedAttendanceCode !== undefined && { attendanceCode: sharedAttendanceCode }),
           storeId: store.id,
           storeName,
           storeWorkDateKey,
@@ -1143,6 +1244,13 @@ router.post(
           ...(customer !== undefined && { customerId: customer.id }),
           ...(payload.notes !== undefined && { note: payload.notes }),
           bookingSource: payload.source,
+          staffSelectionType: firstSegment.staffSelectionType,
+          ...(firstSegment.requestedEmployeeUserId !== undefined && {
+            requestedEmployeeUserId: firstSegment.requestedEmployeeUserId,
+          }),
+          ...(firstSegment.requestedEmployeeName !== undefined && {
+            requestedEmployeeName: firstSegment.requestedEmployeeName,
+          }),
           assignees,
           services,
           subtotalAmount,
@@ -1163,12 +1271,12 @@ router.post(
           }),
         };
 
-        createdAttendances.push(
-          await firestoreRepository.shop.attendance.createShopAttendance(
-            ownerId,
-            attendanceDocumentData,
-          ),
+        const createdAttendance = await firestoreRepository.shop.attendance.createShopAttendance(
+          ownerId,
+          attendanceDocumentData,
         );
+        sharedAttendanceCode ??= createdAttendance.attendanceCode;
+        createdAttendances.push(createdAttendance);
       }
 
       const addOns: ShopBookingAddonType[] = payload.addOns.map((addOn) => {

@@ -8,6 +8,7 @@ import {
   type HrmPublicStoreSummary,
 } from '@/lib/hrmApi';
 import { useI18n } from '@/lib/i18n';
+import { ArrowLeft, Clock3, MapPin, Phone, Search } from 'lucide-react';
 import styles from './page.module.css';
 
 export default function BookLandingPage() {
@@ -116,7 +117,7 @@ export default function BookLandingPage() {
   return (
     <div className={styles.container}>
       <div className={styles.topBar}>
-        <Link href="/" className={styles.homeLink}>← {copy.home}</Link>
+        <Link href="/" className={styles.homeLink}><ArrowLeft size={17} /> {copy.home}</Link>
         <LanguageSwitcher variant="light" />
       </div>
       <header className={styles.header}>
@@ -125,7 +126,7 @@ export default function BookLandingPage() {
       </header>
 
       <div className={styles.searchContainer}>
-        <span className={styles.searchIcon}>⌕</span>
+        <span className={styles.searchIcon}><Search size={18} /></span>
         <input
           type="search"
           className={styles.searchInput}
@@ -167,18 +168,18 @@ export default function BookLandingPage() {
                   <h2 className={styles.salonName}>{store.name}</h2>
                   <div className={styles.detailsList}>
                     <div className={styles.detailItem}>
-                      <span className={styles.icon}>⌖</span>
+                      <span className={styles.icon}><MapPin size={16} /></span>
                       <span>{store.addressText || copy.addressMissing}</span>
                     </div>
                     {store.openTime && store.closeTime && (
                       <div className={styles.detailItem}>
-                        <span className={styles.icon}>◷</span>
+                        <span className={styles.icon}><Clock3 size={16} /></span>
                         <span>{copy.hours}: {store.openTime}–{store.closeTime}</span>
                       </div>
                     )}
                     {store.phone && (
                       <div className={styles.detailItem}>
-                        <span className={styles.icon}>☎</span>
+                        <span className={styles.icon}><Phone size={16} /></span>
                         <span>{store.phone}</span>
                       </div>
                     )}

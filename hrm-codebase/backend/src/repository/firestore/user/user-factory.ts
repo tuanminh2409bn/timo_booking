@@ -80,6 +80,7 @@ const EMPLOYEE_CACHE_INVALIDATION_FIELDS = new Set([
   "hourlyRate",
   "weeklyWorkingHours",
   "serviceIds",
+  "publicBookingVisible",
 ]);
 
 const invalidateEmployeeCaches = async (ownerId: string) => {
@@ -226,6 +227,7 @@ const parseUserDocument = (uid: string, rawData: unknown): UserType | undefined 
     hourlyRate: data["hourlyRate"] as number | undefined,
     weeklyWorkingHours: data["weeklyWorkingHours"] as EmployeeWeeklyWorkingHours | undefined,
     serviceIds: data["serviceIds"] as string[] | undefined,
+    publicBookingVisible: data["publicBookingVisible"] as boolean | undefined,
   };
 
   return storeScopedUser;
@@ -276,6 +278,7 @@ export type ShopEmployeePresentationItem = Pick<
   | "hourlyRate"
   | "weeklyWorkingHours"
   | "serviceIds"
+  | "publicBookingVisible"
 > & {
   name: string;
   label: string;
@@ -300,6 +303,7 @@ export type ShopEmployeeListItem = Pick<
   | "hourlyRate"
   | "weeklyWorkingHours"
   | "serviceIds"
+  | "publicBookingVisible"
   | "lastLoginAt"
   | "createdAt"
   | "updatedAt"
@@ -632,6 +636,7 @@ export const listShopEmployeesFactory = (firestoreDB: Firestore) => {
         "hourlyRate",
         "weeklyWorkingHours",
         "serviceIds",
+        "publicBookingVisible",
         "lastLoginAt",
         "createdAt",
         "updatedAt",

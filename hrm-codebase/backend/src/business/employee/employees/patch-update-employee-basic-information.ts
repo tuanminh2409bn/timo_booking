@@ -120,6 +120,7 @@ export const updateEmployeeBasicInformation = async (req: Request, res: Response
     hourlyRate?: number;
     ownerCommissionRate?: number;
     workerType?: EmployeeUserType["workerType"];
+    publicBookingVisible?: boolean;
   } = {};
 
   if (normalizedCompensation.hourlyRate !== undefined) {
@@ -145,6 +146,10 @@ export const updateEmployeeBasicInformation = async (req: Request, res: Response
 
   if (basicInformationParseResult.data.workerType !== undefined) {
     changedFields.workerType = basicInformationParseResult.data.workerType;
+  }
+
+  if (basicInformationParseResult.data.publicBookingVisible !== undefined) {
+    changedFields.publicBookingVisible = basicInformationParseResult.data.publicBookingVisible;
   }
 
   // Firebase Auth profile chỉ đổi displayName (khi đổi name). Khoá/mở đăng nhập (disabled) nay do

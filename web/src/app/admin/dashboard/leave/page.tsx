@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { CalendarOff, Plus, Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { HrmButton, HrmCard, HrmEmptyState, HrmInput, HrmPageHeader } from '@/components/hrm-ui';
 import { useAuth } from '@/lib/authContext';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -9,14 +11,17 @@ import {
   deleteEmployeeLeave,
   fetchAdminEmployees,
   fetchEmployeeLeave,
+  previewEmployeeLeave,
   type AdminEmployee,
   type AdminLeaveRequest,
 } from '@/lib/adminHrmApi';
 import { getGermanTodayString } from '@/lib/timeUtils';
+import { getAdminBackTarget, getRequestedEmployeeId } from '@/lib/adminNavigation';
 
 export default function LeaveSettingsPage() {
   const { user, activeBranch } = useAuth();
   const { locale } = useI18n();
+  const router = useRouter();
   const storeId = activeBranch || user?.assignedBranches?.[0];
   const [employees, setEmployees] = useState<AdminEmployee[]>([]);
   const [employeeId, setEmployeeId] = useState('');
@@ -24,6 +29,9 @@ export default function LeaveSettingsPage() {
   const [startDate, setStartDate] = useState(getGermanTodayString());
   const [endDate, setEndDate] = useState(getGermanTodayString());
   const [reason, setReason] = useState('');
+  const [allDay, setAllDay] = useState(true);
+  const [startTime, setStartTime] = useState('09:00');
+  const [endTime, setEndTime] = useState('10:00');
   const [busy, setBusy] = useState(false);
 
   const loadLeave = useCallback(async (targetEmployeeId: string) => {
@@ -40,9 +48,12 @@ export default function LeaveSettingsPage() {
       .then((result) => {
         const activeEmployees = result.filter((employee) => employee.active);
         setEmployees(activeEmployees);
-        const firstId = activeEmployees[0]?.id ?? '';
-        setEmployeeId(firstId);
-        return loadLeave(firstId);
+        const requestedEmployeeId = getRequestedEmployeeId();
+        const initialEmployeeId = activeEmployees.some((employee) => employee.id === requestedEmployeeId)
+          ? requestedEmployeeId
+          : activeEmployees[0]?.id ?? '';
+        setEmployeeId(initialEmployeeId);
+        return loadLeave(initialEmployeeId);
       })
       .catch((error: unknown) => console.error(error));
   }, [storeId, user, loadLeave]);
@@ -63,12 +74,21 @@ export default function LeaveSettingsPage() {
     if (!storeId || !employeeId || !reason.trim() || startDate > endDate) return;
     setBusy(true);
     try {
-      await createEmployeeLeave(storeId, employeeId, {
+      const payload = {
         startDate,
-        endDate,
-        allDay: true,
+        endDate: allDay ? endDate : startDate,
+        allDay,
+        ...(!allDay && { startTime, endTime }),
         reason: reason.trim(),
-      });
+      };
+      const preview = await previewEmployeeLeave(storeId, employeeId, payload);
+      if (preview.conflictCount > 0) {
+        const details = locale === 'vi'
+          ? `${preview.conflictCount} lịch bị ảnh hưởng (${preview.automaticCount} lịch có thể tự xếp lại, ${preview.manualCount} lịch cần chủ xử lý). Vẫn tạo đơn nghỉ?`
+          : `${preview.conflictCount} bookings are affected. Create leave anyway?`;
+        if (!window.confirm(details)) return;
+      }
+      await createEmployeeLeave(storeId, employeeId, payload);
       setReason('');
       await loadLeave(employeeId);
     } catch (error: unknown) {
@@ -90,19 +110,19 @@ export default function LeaveSettingsPage() {
   };
 
   return (
-    <section className="space-y-5">
-      <header>
-        <h1 className="text-2xl font-bold text-gray-950">
-          {locale === 'vi' ? 'Nghỉ phép của thợ' : locale === 'de' ? 'Mitarbeiterurlaub' : 'Employee leave'}
-        </h1>
-        <p className="mt-1 text-sm text-gray-500">
+    <section className="mx-auto max-w-2xl space-y-4">
+      <HrmPageHeader
+        className="-mx-4 -mt-4 md:mx-0 md:mt-0 md:rounded-xl"
+        title={locale === 'vi' ? 'Nghỉ phép của thợ' : locale === 'de' ? 'Mitarbeiterurlaub' : 'Employee leave'}
+        onBack={() => router.push(getAdminBackTarget())}
+      />
+        <p className="text-sm leading-6 text-gray-500">
           {locale === 'vi'
             ? 'Ngày nghỉ sẽ tự động khóa thợ trên lịch đặt hẹn.'
             : 'Leave automatically blocks the employee in booking availability.'}
         </p>
-      </header>
 
-      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+      <HrmCard className="p-4">
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="text-sm font-semibold text-gray-700">
             {locale === 'vi' ? 'Chọn thợ' : 'Employee'}
@@ -119,53 +139,54 @@ export default function LeaveSettingsPage() {
               ))}
             </select>
           </label>
+          <div className="flex items-center justify-between rounded-xl border border-gray-200 px-3 py-2.5 sm:col-span-2">
+            <span className="text-sm font-semibold text-gray-700">{locale === 'vi' ? 'Nghỉ cả ngày' : 'All day'}</span>
+            <button type="button" onClick={() => setAllDay((value) => !value)} className={`relative h-6 w-10 rounded-full ${allDay ? 'bg-[var(--hrm-blue-700)]' : 'bg-slate-200'}`}><span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow ${allDay ? 'left-[18px]' : 'left-0.5'}`} /></button>
+          </div>
+          {!allDay && <><label className="text-sm font-semibold text-gray-700">{locale === 'vi' ? 'Từ giờ' : 'Start time'}<HrmInput type="time" step="900" value={startTime} onChange={(event) => setStartTime(event.target.value)} className="mt-1.5 font-normal" /></label><label className="text-sm font-semibold text-gray-700">{locale === 'vi' ? 'Đến giờ' : 'End time'}<HrmInput type="time" step="900" value={endTime} onChange={(event) => setEndTime(event.target.value)} className="mt-1.5 font-normal" /></label></>}
           <label className="text-sm font-semibold text-gray-700">
             {locale === 'vi' ? 'Lý do' : 'Reason'}
-            <input
+            <HrmInput
               value={reason}
               onChange={(event) => setReason(event.target.value)}
-              className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 font-normal outline-none focus:border-blue-500"
+              className="mt-1.5 font-normal"
             />
           </label>
           <label className="text-sm font-semibold text-gray-700">
             {locale === 'vi' ? 'Từ ngày' : 'From'}
-            <input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 font-normal" />
+            <HrmInput type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="mt-1.5 font-normal" />
           </label>
           <label className="text-sm font-semibold text-gray-700">
             {locale === 'vi' ? 'Đến ngày' : 'To'}
-            <input type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 font-normal" />
+            <HrmInput type="date" min={startDate} value={endDate} onChange={(event) => setEndDate(event.target.value)} className="mt-1.5 font-normal" />
           </label>
         </div>
-        <button
-          type="button"
-          disabled={busy || !employeeId || !reason.trim() || startDate > endDate}
+        <HrmButton
+          disabled={busy || !employeeId || !reason.trim() || startDate > endDate || (!allDay && startTime >= endTime)}
           onClick={() => void create()}
-          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-50 sm:w-auto"
+          className="mt-4 min-h-11 w-full rounded-xl px-4 text-sm font-bold sm:w-auto"
         >
           <Plus className="h-4 w-4" />
           {locale === 'vi' ? 'Thêm ngày nghỉ' : 'Add leave'}
-        </button>
-      </div>
+        </HrmButton>
+      </HrmCard>
 
       <div className="space-y-3">
         {items.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center text-gray-500">
-            <CalendarOff className="mx-auto mb-2 h-7 w-7" />
-            {locale === 'vi' ? 'Thợ này chưa có ngày nghỉ.' : 'No leave recorded.'}
-          </div>
+          <HrmEmptyState icon={<CalendarOff className="h-7 w-7" />} title={locale === 'vi' ? 'Thợ này chưa có ngày nghỉ.' : 'No leave recorded.'} />
         ) : items.map((item) => (
-          <article key={item.id} className="flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-50 text-orange-600">
+          <HrmCard key={item.id} className="flex items-center gap-3 p-4">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--hrm-blue-50)] text-[var(--hrm-blue-700)]">
               <CalendarOff className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-semibold text-gray-950">{item.startDate} → {item.endDate}</p>
+              <p className="font-semibold text-gray-950">{item.startDate} → {item.endDate}{item.allDay ? '' : ` · ${item.startTime}–${item.endTime}`}</p>
               <p className="truncate text-sm text-gray-500">{item.reason}</p>
             </div>
-            <button type="button" disabled={busy} onClick={() => void remove(item)} className="rounded-xl bg-red-50 p-2.5 text-red-600 disabled:opacity-50">
+            <button type="button" disabled={busy} onClick={() => void remove(item)} className="rounded-xl bg-gray-50 p-2.5 text-gray-400 hover:text-red-600 disabled:opacity-50">
               <Trash2 className="h-4 w-4" />
             </button>
-          </article>
+          </HrmCard>
         ))}
       </div>
     </section>

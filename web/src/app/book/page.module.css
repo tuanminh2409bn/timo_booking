@@ -1,8 +1,9 @@
 .container {
-  max-width: 1000px;
+  min-height: 100dvh;
+  max-width: 1120px;
   margin: 0 auto;
   padding: 48px 24px;
-  animation: fadeIn 0.4s ease-out;
+  background: var(--hrm-page-bg);
   font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
@@ -11,37 +12,41 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 36px;
+  min-height: 44px;
+  margin-bottom: 32px;
 }
 
 .homeLink {
-  color: #374151;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--hrm-muted);
   font-size: 14px;
   font-weight: 650;
   text-decoration: none;
 }
 
 .homeLink:hover {
-  color: #111827;
+  color: var(--hrm-blue-700);
 }
 
 .header {
   text-align: center;
-  margin-bottom: 40px;
+  margin-bottom: 28px;
   position: relative;
 }
 
 .title {
   font-size: 32px;
   font-weight: 800;
-  color: #111827;
+  color: var(--hrm-text);
   margin: 0 0 8px 0;
   letter-spacing: -0.5px;
 }
 
 .subtitle {
   font-size: 16px;
-  color: #4b5563;
+  color: var(--hrm-muted);
   margin: 0;
 }
 
@@ -49,7 +54,7 @@
 .searchContainer {
   position: relative;
   max-width: 600px;
-  margin: 0 auto 40px auto;
+  margin: 0 auto 32px auto;
 }
 
 .searchIcon {
@@ -64,11 +69,12 @@
 
 .searchInput {
   width: 100%;
-  padding: 14px 16px 14px 48px;
+  min-height: 44px;
+  padding: 11px 16px 11px 48px;
   border-radius: 9999px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--hrm-control-border);
   background-color: #ffffff;
-  color: #111827;
+  color: var(--hrm-text);
   font-size: 15px;
   outline: none;
   transition: all 0.2s ease;
@@ -76,13 +82,13 @@
 }
 
 .searchInput:focus {
-  border-color: #10b981;
-  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1);
+  border-color: var(--hrm-blue-400);
+  box-shadow: 0 0 0 3px var(--hrm-blue-100);
 }
 
 .resultSummary {
   margin: -20px 0 24px;
-  color: #6b7280;
+  color: var(--hrm-muted);
   font-size: 14px;
   text-align: center;
 }
@@ -96,20 +102,19 @@
 
 .card {
   background-color: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  padding: 28px;
+  border: 1px solid var(--hrm-border);
+  border-radius: var(--hrm-radius-card);
+  padding: 24px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  box-shadow: var(--hrm-shadow-card);
 }
 
 .card:hover {
-  border-color: #d1d5db;
-  transform: translateY(-2px);
-  box-shadow: 0 12px 20px -8px rgba(0, 0, 0, 0.08);
+  border-color: var(--hrm-blue-100);
+  box-shadow: 0 10px 24px rgba(15, 98, 254, 0.10);
 }
 
 .cardBody {
@@ -122,7 +127,7 @@
 .salonName {
   font-size: 20px;
   font-weight: 700;
-  color: #111827;
+  color: var(--hrm-text);
   margin: 0;
   letter-spacing: -0.3px;
 }
@@ -138,12 +143,12 @@
   align-items: flex-start;
   gap: 10px;
   font-size: 13px;
-  color: #4b5563;
+  color: var(--hrm-muted);
   line-height: 1.4;
 }
 
 .icon {
-  font-size: 14px;
+  color: var(--hrm-blue-700);
   flex-shrink: 0;
   margin-top: 2px;
 }
@@ -151,9 +156,10 @@
 .bookBtn {
   width: 100%;
   padding: 12px;
-  border-radius: 8px;
-  border: 1px solid #111827;
-  background-color: #111827;
+  min-height: 44px;
+  border-radius: var(--hrm-radius-control);
+  border: 1px solid var(--hrm-blue-700);
+  background-color: var(--hrm-blue-700);
   color: #ffffff;
   font-size: 14px;
   font-weight: 700;
@@ -164,9 +170,9 @@
 }
 
 .bookBtn:hover {
-  background-color: #1f2937;
-  border-color: #1f2937;
-  box-shadow: 0 4px 12px rgba(17, 24, 39, 0.12);
+  background-color: var(--hrm-blue-800);
+  border-color: var(--hrm-blue-800);
+  box-shadow: 0 4px 12px rgba(15, 98, 254, 0.18);
 }
 
 /* Empty State */
@@ -174,9 +180,9 @@
   text-align: center;
   padding: 80px 24px;
   background-color: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 16px;
-  color: #6b7280;
+  border: 1px solid var(--hrm-border);
+  border-radius: var(--hrm-radius-card);
+  color: var(--hrm-muted);
 }
 
 .noResultsIcon {
@@ -191,9 +197,10 @@
 
 .retryButton,
 .loadMoreButton {
-  border: 1px solid #111827;
-  border-radius: 9999px;
-  background: #111827;
+  min-height: 44px;
+  border: 1px solid var(--hrm-blue-700);
+  border-radius: var(--hrm-radius-control);
+  background: var(--hrm-blue-700);
   color: #ffffff;
   padding: 11px 22px;
   font-size: 14px;
@@ -203,7 +210,7 @@
 
 .retryButton:hover,
 .loadMoreButton:hover {
-  background: #1f2937;
+  background: var(--hrm-blue-800);
 }
 
 .loadMoreWrapper {
@@ -224,7 +231,7 @@
   align-items: center;
   justify-content: center;
   padding: 120px 24px;
-  color: #6b7280;
+  color: var(--hrm-muted);
 }
 
 .spinner {
@@ -232,7 +239,7 @@
   height: 40px;
   border: 3px solid rgba(0, 0, 0, 0.08);
   border-radius: 50%;
-  border-top-color: #111827;
+  border-top-color: var(--hrm-blue-700);
   animation: spin 1s ease-in-out infinite;
   margin-bottom: 16px;
 }
@@ -252,7 +259,7 @@
   }
   
   .container {
-    padding: 32px 16px;
+    padding: 20px 16px 32px;
   }
   
   .title {
@@ -260,6 +267,14 @@
   }
   
   .topBar {
-    margin-bottom: 28px;
+    margin-bottom: 20px;
+  }
+
+  .homeLink {
+    max-width: 220px;
+  }
+
+  .card {
+    padding: 20px;
   }
 }

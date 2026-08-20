@@ -93,6 +93,7 @@ export const createShopEmployeeSchema = z
     fixedSalary: moneyNumberSchema.optional(),
     hourlyRate: moneyNumberSchema.optional(),
     serviceIds: serviceIdsSchema.optional(),
+    publicBookingVisible: z.boolean().optional().default(true),
     weeklyWorkingHours: employeeWeeklyWorkingHoursSchema.optional(),
   })
   .superRefine((employeeInput, ctx) => {
@@ -132,6 +133,7 @@ export const updateEmployeeProfileSchema = z.object({
   ownerCommissionRate: percentNumberSchema.optional(),
   fixedSalary: moneyNumberSchema.optional(),
   hourlyRate: moneyNumberSchema.optional(),
+  publicBookingVisible: z.boolean().optional(),
 });
 
 // Bật/tắt trạng thái làm việc (cho nghỉ / nhận lại) — tách riêng khỏi PATCH hồ sơ vì đây là hành

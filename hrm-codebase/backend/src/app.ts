@@ -55,6 +55,9 @@ const resolveCorsOrigin = (): string[] => {
   const bookingOrigins: string[] = [
     "https://aqueous-thought-498514-m3.web.app",
     "https://aqueous-thought-498514-m3.firebaseapp.com",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://[::1]:3000",
   ];
 
   const raw = process.env["CORS_ALLOWED_ORIGINS"];

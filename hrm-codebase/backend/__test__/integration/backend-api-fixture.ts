@@ -1725,15 +1725,15 @@ vi.mock("../../src/repository/firestore/index.js", () => ({
           ownerId: string,
           input: Omit<
             ShopAttendanceType,
-            "id" | "attendanceCode" | "ownerId" | "createdAt" | "updatedAt"
+            "id" | "ownerId" | "createdAt" | "updatedAt"
           >,
         ) => {
           const attendanceId = `attendance-created-${++state.nextIds.attendance}`;
           const createdAttendance: ShopAttendanceType = {
             id: attendanceId,
-            attendanceCode: `CC-${state.nextIds.attendance}`,
             ownerId,
             ...input,
+            attendanceCode: input.attendanceCode ?? `CC-${state.nextIds.attendance}`,
             createdAt: Date.now(),
             updatedAt: Date.now(),
           };

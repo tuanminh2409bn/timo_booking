@@ -18,6 +18,7 @@ import type {
   ShopBookingType,
 } from "../../repository/firestore/shop/shop.types.js";
 import { synchronizeWorkDaySettlement } from "../employee/work-days/work-day-settlement-sync.js";
+import { leaveOverlapsAttendance } from "../employee/leave-requests/leave-request-shared.js";
 import {
   acquireBookingSlotReservations,
   BookingSlotConflictError,
@@ -25,7 +26,7 @@ import {
 } from "./slot-reservations.js";
 
 const serviceSchema = z.object({
-  sourceServiceId: z.string().trim().min(1),
+  sourceServiceId: z.string().trim().min(1).optional(),
   name: z.string().trim().min(1).max(100),
   category: z.string().trim().min(1).max(50).optional(),
   durationMinutes: z.number().int().positive().max(720),
@@ -42,11 +43,20 @@ const payloadSchema = z.object({
   customerPhone: z.string().trim().max(30).optional().default(""),
   customerEmail: z.string().trim().email().max(100).optional(),
   appointmentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  startTime: z.string().regex(/^\d{2}:\d{2}$/),
-  services: z.array(serviceSchema).min(1).max(2),
+  startTime: z.string().regex(/^([01]\d|2[0-3]):(00|15|30|45)$/),
+  services: z.array(serviceSchema).min(1).max(3),
   addOns: z.array(addOnSchema).max(20).optional().default([]),
   source: z.enum(["manual_booking", "walk_in"]),
+  quickBooking: z.boolean().optional().default(false),
   notes: z.string().trim().max(500).optional(),
+}).superRefine((payload, context) => {
+  if (!payload.quickBooking && payload.services.some((service) => !service.sourceServiceId)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["services"],
+      message: "A catalog service is required",
+    });
+  }
 });
 
 export const createAuthenticatedBooking = async (request: Request, response: Response) => {
@@ -74,6 +84,7 @@ export const createAuthenticatedBooking = async (request: Request, response: Res
   const payload = parsed.data;
   if (authContext.role === "employee") {
     if (
+      payload.quickBooking ||
       payload.source !== "walk_in" ||
       payload.services.some((service) => service.employeeUserId !== authContext.uid)
     ) {
@@ -123,6 +134,7 @@ export const createAuthenticatedBooking = async (request: Request, response: Res
   const serviceMap = new Map(catalogServices.map((service) => [service.id, service]));
   const employeeMap = new Map(employees.map((employee) => [employee.uid, employee]));
   const invalidService = payload.services.find((service) => {
+    if (!service.sourceServiceId) return !payload.quickBooking;
     const catalogService = serviceMap.get(service.sourceServiceId);
     return !catalogService || catalogService.bookingKind === "add_on";
   });
@@ -132,6 +144,7 @@ export const createAuthenticatedBooking = async (request: Request, response: Res
   const invalidEmployee = payload.services.find((service) => {
     const employee = employeeMap.get(service.employeeUserId);
     return !employee || (
+      service.sourceServiceId !== undefined &&
       employee.serviceIds !== undefined &&
       employee.serviceIds.length > 0 &&
       !employee.serviceIds.includes(service.sourceServiceId)
@@ -177,9 +190,16 @@ export const createAuthenticatedBooking = async (request: Request, response: Res
   const [startHour, startMinute] = payload.startTime.split(":").map(Number);
   let cursor = (startHour ?? 0) * 60 + (startMinute ?? 0);
   const segments = payload.services.map((input) => {
-    const catalogService = serviceMap.get(input.sourceServiceId);
-    if (!catalogService) throw new TypeError("Validated service is missing from the catalog");
-    const duration = Math.max(catalogService.durationMax ?? catalogService.durationMin ?? input.durationMinutes, 1);
+    const catalogService = input.sourceServiceId
+      ? serviceMap.get(input.sourceServiceId)
+      : undefined;
+    if (input.sourceServiceId && !catalogService) {
+      throw new TypeError("Validated service is missing from the catalog");
+    }
+    const duration = Math.max(
+      catalogService?.durationMax ?? catalogService?.durationMin ?? input.durationMinutes,
+      1,
+    );
     const segment = { input, catalogService, startTime: cursor, endTime: cursor + duration };
     cursor = segment.endTime;
     return segment;
@@ -205,7 +225,14 @@ export const createAuthenticatedBooking = async (request: Request, response: Res
       return leave["ownerId"] === authContext.ownerId &&
         leave["employeeUserId"] === employeeUserId &&
         typeof leave["endDate"] === "string" &&
-        leave["endDate"] >= payload.appointmentDate;
+        leave["endDate"] >= payload.appointmentDate &&
+        leaveOverlapsAttendance({
+          startDate: String(leave["startDate"]),
+          endDate: leave["endDate"],
+          allDay: leave["allDay"] !== false,
+          ...(typeof leave["startTime"] === "string" && { startTime: leave["startTime"] }),
+          ...(typeof leave["endTime"] === "string" && { endTime: leave["endTime"] }),
+        }, payload.appointmentDate, segment.startTime, segment.endTime);
     });
     const hasOverlap = existingAttendanceSnapshot.docs.some((document) => {
       const attendance = document.data();
@@ -225,13 +252,17 @@ export const createAuthenticatedBooking = async (request: Request, response: Res
       message: "The selected employee is unavailable at this time",
     });
   }
-  const grouped = new Map<string, typeof segments>();
-  for (const segment of segments) {
-    grouped.set(segment.input.employeeUserId, [
-      ...(grouped.get(segment.input.employeeUserId) ?? []),
-      segment,
-    ]);
-  }
+  // Consecutive services handled by the same employee appear as one calendar
+  // block. Different employees remain separate segments under one bookingId.
+  const grouped = segments.reduce<typeof segments[]>((groups, segment) => {
+    const previous = groups.at(-1);
+    if (previous?.at(-1)?.input.employeeUserId === segment.input.employeeUserId) {
+      previous.push(segment);
+    } else {
+      groups.push([segment]);
+    }
+    return groups;
+  }, []);
 
   const bookingId = randomUUID();
   const bookingCode = `BK-${bookingId.replaceAll("-", "").slice(0, 8).toUpperCase()}`;
@@ -248,7 +279,9 @@ export const createAuthenticatedBooking = async (request: Request, response: Res
     })),
   });
   const attendanceItems: ShopAttendanceType[] = [];
-  for (const [employeeUserId, employeeSegments] of grouped.entries()) {
+  for (const employeeSegments of grouped) {
+    const employeeUserId = employeeSegments[0]?.input.employeeUserId;
+    if (!employeeUserId) continue;
     const employee = employeeMap.get(employeeUserId);
     const first = employeeSegments[0];
     const last = employeeSegments.at(-1);
@@ -256,18 +289,31 @@ export const createAuthenticatedBooking = async (request: Request, response: Res
     const employeeName = employee.name?.trim() || employee.displayName?.trim() || employee.email;
     const workerType = employee.workerType ??
       (employee.compensationModel === "fixed" ? "assistant" : "main");
-    const services = employeeSegments.map(({ catalogService }) => ({
-      ...catalogService,
-      id: randomUUID(),
-      sourceServiceId: catalogService.id,
-      employees: [{
-        employeeUserId,
-        employeeName,
-        workerType,
-        percentage: 100,
-        shareAmount: catalogService.price,
-      }],
-    }));
+    const services = employeeSegments.map(({ input, catalogService }) => {
+      const servicePrice = catalogService?.price ?? input.price;
+      return {
+        ...(catalogService ?? {
+          ownerId: authContext.ownerId,
+          storeId,
+          type: "custom" as const,
+          name: input.name,
+          category: "other" as const,
+          price: servicePrice,
+          durationMin: input.durationMinutes,
+          durationMax: input.durationMinutes,
+          bookingKind: "main" as const,
+        }),
+        id: randomUUID(),
+        ...(catalogService && { sourceServiceId: catalogService.id }),
+        employees: [{
+          employeeUserId,
+          employeeName,
+          workerType,
+          percentage: 100,
+          shareAmount: servicePrice,
+        }],
+      };
+    });
     const subtotalAmount = sumMoney(services.map((service) => service.price));
     const attendanceData: Omit<
       ShopAttendanceType,
@@ -289,6 +335,7 @@ export const createAuthenticatedBooking = async (request: Request, response: Res
       ...(normalizedCustomerPhone && { customerPhone: normalizedCustomerPhone }),
       ...(payload.notes !== undefined && { note: payload.notes }),
       bookingSource: payload.source,
+      staffSelectionType: "specific",
       assignees: [{
         employeeUserId,
         employeeName,

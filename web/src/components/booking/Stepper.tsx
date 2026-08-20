@@ -37,8 +37,6 @@ export default function Stepper() {
         const stepNumber = index + 1;
         const isActive = stepNumber === state.currentStep;
         const isCompleted = stepNumber < state.currentStep;
-        const isPending = stepNumber > state.currentStep;
-
         return (
           <div key={step.key} className={styles.step}>
             <button

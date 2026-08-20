@@ -208,6 +208,21 @@ describe("backend API integration: attendance and settlement", () => {
         }),
       ]),
     );
+
+    const globalSearchResponse = await withRequestDefaults(
+      request(app)
+        .get("/api/v1/stores/branch-1/attendances/search")
+        .query({ q: createResponse.body.item.attendanceCode })
+        .set("Authorization", ownerAuth),
+    );
+    expect(globalSearchResponse.status, JSON.stringify(globalSearchResponse.body)).toBe(200);
+    expect(globalSearchResponse.body.items).toContainEqual(
+      expect.objectContaining({
+        id: createdAttendanceId,
+        attendanceCode: createResponse.body.item.attendanceCode,
+        workDate: "2099-06-15",
+      }),
+    );
   });
 
   it("creates manager future bookings and employee walk-ins with actor metadata", async () => {
@@ -289,6 +304,172 @@ describe("backend API integration: attendance and settlement", () => {
       updatedByUserId: "staff-1",
       updatedByRole: "employee",
     });
+  });
+
+  it("groups consecutive authenticated services for one employee and keeps add-ons off the calendar", async () => {
+    const mainService = state.services.get("service-1");
+    if (!mainService) throw new Error("service-1 fixture missing");
+    state.services.set("service-1-second", {
+      ...mainService,
+      id: "service-1-second",
+      name: "Second main service",
+      durationMin: 30,
+      durationMax: 30,
+    });
+    state.services.set("authenticated-removal-addon", {
+      ...mainService,
+      id: "authenticated-removal-addon",
+      name: "Ablösung",
+      bookingKind: "add_on",
+      durationMin: 15,
+      durationMax: 15,
+    });
+    const employee = state.users.get("staff-1");
+    if (!employee) throw new Error("staff-1 fixture missing");
+    state.users.set("staff-1", { ...employee, serviceIds: [] });
+
+    const response = await withRequestDefaults(
+      request(app)
+        .post("/api/v1/stores/branch-1/bookings")
+        .set("Authorization", ownerSessionHeader())
+        .send({
+          customerName: "Authenticated add-on regression",
+          customerPhone: "+49123456009",
+          appointmentDate: "2099-06-23",
+          startTime: "09:00",
+          source: "manual_booking",
+          services: [
+            {
+              sourceServiceId: "service-1",
+              name: "First main service",
+              durationMinutes: 60,
+              price: 50,
+              employeeUserId: "staff-1",
+            },
+            {
+              sourceServiceId: "service-1-second",
+              name: "Second main service",
+              durationMinutes: 30,
+              price: 30,
+              employeeUserId: "staff-1",
+            },
+          ],
+          addOns: [
+            {
+              sourceServiceId: "authenticated-removal-addon",
+              name: "Ablösung",
+              price: 15,
+            },
+          ],
+        }),
+    );
+
+    expect(response.status, JSON.stringify(response.body)).toBe(201);
+    expect(response.body.item.attendances).toEqual([
+      expect.objectContaining({
+        startTime: 540,
+        endTime: 630,
+      }),
+    ]);
+    expect(
+      getAttendanceOrThrow(response.body.item.attendances[0].id).services,
+    ).toEqual([
+      expect.objectContaining({ sourceServiceId: "service-1" }),
+      expect.objectContaining({ sourceServiceId: "service-1-second" }),
+    ]);
+    expect(
+      state.bookings.get(`branch-1__${response.body.item.bookingId}`)?.["addOns"],
+    ).toEqual([
+      expect.objectContaining({
+        sourceServiceId: "authenticated-removal-addon",
+        name: "Ablösung",
+      }),
+    ]);
+  });
+
+  it("creates owner quick bookings without inventing a catalog service", async () => {
+    const response = await withRequestDefaults(
+      request(app)
+        .post("/api/v1/stores/branch-1/bookings")
+        .set("Authorization", ownerSessionHeader())
+        .send({
+          customerName: "Walk-in",
+          appointmentDate: "2099-06-24",
+          startTime: "11:00",
+          source: "manual_booking",
+          quickBooking: true,
+          services: [{
+            name: "1 Service",
+            category: "other",
+            durationMinutes: 60,
+            price: 0,
+            employeeUserId: "staff-1",
+          }],
+        }),
+    );
+
+    expect(response.status, JSON.stringify(response.body)).toBe(201);
+    const attendanceId = response.body.item.attendances[0].id as string;
+    expect(getAttendanceOrThrow(attendanceId)).toMatchObject({
+      startTime: 660,
+      endTime: 720,
+      totalAmount: 0,
+      bookingStatus: "confirmed",
+    });
+    expect(getAttendanceOrThrow(attendanceId).services).toEqual([
+      expect.objectContaining({
+        name: "1 Service",
+        type: "custom",
+        durationMin: 60,
+        durationMax: 60,
+      }),
+    ]);
+    expect(getAttendanceOrThrow(attendanceId).services[0]?.sourceServiceId).toBeUndefined();
+  });
+
+  it("rejects catalog-free services unless the request is an owner quick booking", async () => {
+    const missingQuickFlagResponse = await withRequestDefaults(
+      request(app)
+        .post("/api/v1/stores/branch-1/bookings")
+        .set("Authorization", ownerSessionHeader())
+        .send({
+          customerName: "Invalid manual booking",
+          appointmentDate: "2099-06-25",
+          startTime: "11:00",
+          source: "manual_booking",
+          services: [{
+            name: "Missing catalog service",
+            durationMinutes: 60,
+            price: 0,
+            employeeUserId: "staff-1",
+          }],
+        }),
+    );
+    expect(missingQuickFlagResponse.status).toBe(400);
+
+    const employeeQuickResponse = await withRequestDefaults(
+      request(app)
+        .post("/api/v1/stores/branch-1/bookings")
+        .set("Authorization", ownerSessionHeader({
+          uid: "staff-1",
+          role: "employee",
+          storeId: "branch-1",
+        }))
+        .send({
+          customerName: "Forbidden employee quick booking",
+          appointmentDate: "2026-07-20",
+          startTime: "11:00",
+          source: "walk_in",
+          quickBooking: true,
+          services: [{
+            name: "1 Service",
+            durationMinutes: 60,
+            price: 0,
+            employeeUserId: "staff-1",
+          }],
+        }),
+    );
+    expect(employeeQuickResponse.status).toBe(403);
   });
 
   it("forces manual booking status to confirmed and lets patch cancel it", async () => {
@@ -823,6 +1004,14 @@ describe("backend API integration: attendance and settlement", () => {
   });
 
   it("enforces main and assistant permissions before the work day is closed", async () => {
+    // Keep this authorization scenario inside the employee seven-day edit
+    // window. A fixed calendar date makes the permission assertion start
+    // failing as time passes, even though the rule itself remains correct.
+    const recentWorkDate = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const recentStart = `${recentWorkDate}T09:00:00.000Z`;
+    const recentEnd = `${recentWorkDate}T10:00:00.000Z`;
     const ownerAuth = ownerSessionHeader();
     const mainAuth = ownerSessionHeader({
       uid: "staff-1",
@@ -860,8 +1049,8 @@ describe("backend API integration: attendance and settlement", () => {
       mainAssigneeUserId: "staff-1",
       assistantAssigneeUserId: "staff-lead-1",
       employeeUserId: "staff-1",
-      workDate: "2026-07-27",
-      storeWorkDateKey: "branch-1__2026-07-27",
+      workDate: recentWorkDate,
+      storeWorkDateKey: `branch-1__${recentWorkDate}`,
       createdBy: "owner-1",
       createdByType: "owner",
       createdByUserId: "owner-1",
@@ -877,8 +1066,8 @@ describe("backend API integration: attendance and settlement", () => {
     });
 
     const requestBody = {
-      date: "2026-07-27T09:00:00.000Z",
-      endDate: "2026-07-27T10:00:00.000Z",
+      date: recentStart,
+      endDate: recentEnd,
       mainAssigneeUserId: "staff-1",
       assistantAssigneeUserId: "staff-lead-1",
       note: "Updated attendance",
@@ -2097,6 +2286,52 @@ describe("backend API integration: attendance and settlement", () => {
     expect(createdAttendance.updatedByUserId).toBe(createdAttendance.customerId);
   });
 
+  it("balances any-staff bookings by whole-day load before optimising gaps", async () => {
+    for (const employeeUserId of ["staff-1", "staff-lead-1"]) {
+      const employee = state.users.get(employeeUserId);
+      if (!employee) throw new Error(`${employeeUserId} fixture missing`);
+      state.users.set(employeeUserId, {
+        ...employee,
+        workerType: "main",
+        serviceIds: [],
+      });
+    }
+
+    const createBooking = (customerName: string, startTime: string, endTime: string) =>
+      withRequestDefaults(
+        request(app)
+          .post("/api/v1/public/stores/branch-1/bookings")
+          .send({
+            storeId: "branch-1",
+            customerName,
+            customerPhone: `+49123456${customerName.length}89`,
+            appointmentDate: "2026-05-09",
+            startTime,
+            endTime,
+            staffSelectionType: "any",
+            services: [
+              {
+                sourceServiceId: "service-1",
+                name: "Classic Manicure",
+                category: "nail",
+                durationMinutes: 60,
+                price: 50,
+              },
+            ],
+          }),
+      );
+
+    const first = await createBooking("Fair load one", "09:00", "10:00");
+    const second = await createBooking("Fair load two", "10:00", "11:00");
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(second.status, JSON.stringify(second.body)).toBe(201);
+
+    const assignedEmployees = [first, second].map((response) =>
+      getAttendanceOrThrow(getCreatedAttendanceId(response.body)!).mainAssigneeUserId,
+    );
+    expect(new Set(assignedEmployees)).toEqual(new Set(["staff-1", "staff-lead-1"]));
+  });
+
   it("returns the persisted worker type in the public staff catalog", async () => {
     const employee = state.users.get("staff-1");
     if (!employee) throw new Error("staff-1 fixture missing");
@@ -2109,6 +2344,32 @@ describe("backend API integration: attendance and settlement", () => {
     expect(response.status).toBe(200);
     expect(response.body.items).toContainEqual(
       expect.objectContaining({ uid: "staff-1", workerType: "assistant" }),
+    );
+  });
+
+  it("keeps hidden active employees out of the picker but includes them in booking capacity", async () => {
+    const employee = state.users.get("staff-1");
+    if (!employee) throw new Error("staff-1 fixture missing");
+    state.users.set("staff-1", {
+      ...employee,
+      publicBookingVisible: false,
+      serviceIds: [],
+    });
+
+    const [staffResponse, availabilityResponse] = await Promise.all([
+      withRequestDefaults(request(app).get("/api/v1/public/stores/branch-1/staff")),
+      withRequestDefaults(
+        request(app).get("/api/v1/public/stores/branch-1/availability?date=2026-05-12"),
+      ),
+    ]);
+
+    expect(staffResponse.status).toBe(200);
+    expect(staffResponse.body.items).not.toContainEqual(
+      expect.objectContaining({ uid: "staff-1" }),
+    );
+    expect(availabilityResponse.status).toBe(200);
+    expect(availabilityResponse.body.capacityStaff).toContainEqual(
+      expect.objectContaining({ uid: "staff-1" }),
     );
   });
 
@@ -2180,6 +2441,9 @@ describe("backend API integration: attendance and settlement", () => {
             ...overrides,
           }),
       );
+
+    const invalidMinuteBooking = await createBooking({ startTime: "09:10" });
+    expect(invalidMinuteBooking.status, JSON.stringify(invalidMinuteBooking.body)).toBe(400);
 
     const manicureBooking = await createBooking();
     expect(manicureBooking.status, JSON.stringify(manicureBooking.body)).toBe(201);
@@ -2308,6 +2572,18 @@ describe("backend API integration: attendance and settlement", () => {
 
     expect(firstRequest.status, JSON.stringify(firstRequest.body)).toBe(201);
     expect(secondRequest.status, JSON.stringify(secondRequest.body)).toBe(201);
+    const firstRequestAttendances = Array.from(state.attendances.values()).filter(
+      (attendance) => attendance.bookingId === firstRequest.body.meta.bookingId,
+    );
+    expect(firstRequestAttendances).not.toHaveLength(0);
+    expect(
+      firstRequestAttendances.every(
+        (attendance) =>
+          attendance.bookingStatus === "requested" &&
+          attendance.mainAssigneeUserId === undefined &&
+          attendance.employeeUserId === undefined,
+      ),
+    ).toBe(true);
     expect(overLimitRequest.status).toBe(409);
     expect(overLimitRequest.body.type).toBe("/public/stores/request-limit-reached");
 
@@ -2342,9 +2618,56 @@ describe("backend API integration: attendance and settlement", () => {
       id: addonAttendance.id,
       addOns: [expect.objectContaining({ name: "Ablösung", sourceServiceId: "removal-addon" })],
     }));
+
+    const twoMainServicesWithAddon = await createBooking({
+      customerPhone: "+49123456774",
+      startTime: "16:00",
+      endTime: "17:45",
+      services: [
+        {
+          sourceServiceId: "manicure-service",
+          name: "Basic Manicure",
+          category: "manicure",
+          durationMinutes: 60,
+          price: 50,
+        },
+        {
+          sourceServiceId: "pedicure-service",
+          name: "Basic Pedicure",
+          category: "pedicure",
+          durationMinutes: 45,
+          price: 40,
+        },
+      ],
+      addOns: [{ sourceServiceId: "removal-addon", name: "Ablösung", price: 50 }],
+    });
+    expect(
+      twoMainServicesWithAddon.status,
+      JSON.stringify(twoMainServicesWithAddon.body),
+    ).toBe(201);
+    expect(twoMainServicesWithAddon.body.items).toEqual([
+      expect.objectContaining({ startTime: 960, endTime: 1065 }),
+    ]);
+    expect(
+      getAttendanceOrThrow(twoMainServicesWithAddon.body.items[0].id).services,
+    ).toEqual([
+      expect.objectContaining({ sourceServiceId: "manicure-service" }),
+      expect.objectContaining({ sourceServiceId: "pedicure-service" }),
+    ]);
+    expect(
+      state.bookings.get(
+        `branch-1__${twoMainServicesWithAddon.body.meta.bookingId}`,
+      )?.["addOns"],
+    ).toEqual([
+      expect.objectContaining({
+        sourceServiceId: "removal-addon",
+        name: "Ablösung",
+        price: 50,
+      }),
+    ]);
   });
 
-  it("lets an owner assign an overlapping Request and synchronizes the booking status", async () => {
+  it("keeps an overlapping Request pending after assignment until the owner approves it", async () => {
     const bookingPayload = (customerName: string, bookingMode: "instant" | "request") => ({
       storeId: "branch-1",
       customerName,
@@ -2395,11 +2718,110 @@ describe("backend API integration: attendance and settlement", () => {
     expect(reassignment.status, JSON.stringify(reassignment.body)).toBe(200);
     expect(getAttendanceOrThrow(pendingAttendanceId)).toMatchObject({
       mainAssigneeUserId: "staff-1",
-      bookingStatus: "confirmed",
+      bookingStatus: "requested",
     });
+    expect(state.bookings.get(`branch-1__${pendingRequest.body.meta.bookingId}`)?.["bookingStatus"]).toBe(
+      "requested",
+    );
+
+    const approval = await withRequestDefaults(
+      request(app)
+        .patch(`/api/v1/stores/branch-1/attendances/${pendingAttendanceId}/status`)
+        .set("Authorization", ownerSessionHeader())
+        .send({ status: "confirmed" }),
+    );
+    expect(approval.status, JSON.stringify(approval.body)).toBe(200);
+    expect(getAttendanceOrThrow(pendingAttendanceId).bookingStatus).toBe("confirmed");
     expect(state.bookings.get(`branch-1__${pendingRequest.body.meta.bookingId}`)?.["bookingStatus"]).toBe(
       "confirmed",
     );
+
+    const employeeCancellation = await withRequestDefaults(
+      request(app)
+        .patch(`/api/v1/stores/branch-1/attendances/${pendingAttendanceId}/status`)
+        .set("Authorization", ownerSessionHeader({
+          uid: "staff-1",
+          role: "employee",
+          storeId: "branch-1",
+        }))
+        .send({ status: "cancelled" }),
+    );
+    expect(employeeCancellation.status, JSON.stringify(employeeCancellation.body)).toBe(200);
+    expect(getAttendanceOrThrow(pendingAttendanceId)).toMatchObject({
+      bookingStatus: "cancelled",
+      updatedByUserId: "staff-1",
+      updatedByRole: "employee",
+      updatedByName: "Staff One",
+    });
+  });
+
+  it("shows unassigned store Requests to employees and lets only one employee claim them", async () => {
+    const pendingRequest = await withRequestDefaults(
+      request(app)
+        .post("/api/v1/public/stores/branch-1/bookings")
+        .send({
+          storeId: "branch-1",
+          customerName: "Shared employee Request",
+          customerPhone: "+49123456801",
+          appointmentDate: "2026-05-14",
+          startTime: "15:00",
+          endTime: "16:00",
+          staffSelectionType: "any",
+          bookingMode: "request",
+          services: [{
+            sourceServiceId: "service-1",
+            name: "Classic Manicure",
+            category: "nail",
+            durationMinutes: 60,
+            price: 50,
+          }],
+        }),
+    );
+    expect(pendingRequest.status, JSON.stringify(pendingRequest.body)).toBe(201);
+    const attendanceId = getCreatedAttendanceId(pendingRequest.body)!;
+    const staffAuth = ownerSessionHeader({
+      uid: "staff-1",
+      role: "employee",
+      storeId: "branch-1",
+    });
+
+    const calendar = await withRequestDefaults(
+      request(app)
+        .get("/api/v1/stores/branch-1/attendances/calendar")
+        .query({ view: "day", workDate: "2026-05-14" })
+        .set("Authorization", staffAuth),
+    );
+    expect(calendar.status, JSON.stringify(calendar.body)).toBe(200);
+    expect(calendar.body.items).toContainEqual(expect.objectContaining({
+      id: attendanceId,
+      bookingStatus: "requested",
+      customerName: "",
+      customerPhone: "",
+    }));
+
+    const claim = await withRequestDefaults(
+      request(app)
+        .patch(`/api/v1/stores/branch-1/attendances/${attendanceId}/reassign`)
+        .set("Authorization", staffAuth)
+        .send({ employeeUserId: "staff-1" }),
+    );
+    expect(claim.status, JSON.stringify(claim.body)).toBe(200);
+    expect(getAttendanceOrThrow(attendanceId)).toMatchObject({
+      mainAssigneeUserId: "staff-1",
+      bookingStatus: "requested",
+    });
+
+    const secondClaim = await withRequestDefaults(
+      request(app)
+        .patch(`/api/v1/stores/branch-1/attendances/${attendanceId}/reassign`)
+        .set("Authorization", ownerSessionHeader({
+          uid: "staff-lead-1",
+          role: "employee",
+          storeId: "branch-1",
+        }))
+        .send({ employeeUserId: "staff-lead-1" }),
+    );
+    expect(secondClaim.status).toBe(409);
   });
 
   it("lists only active stores in the public booking directory", async () => {
@@ -2471,6 +2893,16 @@ describe("backend API integration: attendance and settlement", () => {
     expect(new Set(bookingAttendances.map((attendance) => attendance.mainAssigneeUserId))).toEqual(
       new Set(["staff-1", "staff-lead-1"]),
     );
+    expect(new Set(bookingAttendances.map((attendance) => attendance.attendanceCode)).size).toBe(1);
+    expect(bookingAttendances).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        requestedEmployeeUserId: "staff-1",
+        requestedEmployeeName: "Staff One",
+      }),
+      expect.objectContaining({
+        requestedEmployeeUserId: "staff-lead-1",
+      }),
+    ]));
   });
 
   it("keeps per-service any-staff assignment authoritative in a mixed booking", async () => {

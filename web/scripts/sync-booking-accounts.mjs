@@ -110,6 +110,7 @@ const accountDefinitions = [
     key: 'superadmin',
     email: 'admin@gmail.com',
     displayName: 'Demo Admin',
+    claims: { role: 'admin' },
   },
   {
     key: 'owner',

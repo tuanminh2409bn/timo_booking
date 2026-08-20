@@ -158,11 +158,17 @@ export const toFrontendAttendanceItem = (
         1,
       );
       const servicePrice = roundCurrency(currentService.price);
+      // Legacy predefined attendances stored the catalog id directly in `id`.
+      // Keep that fallback so a later catalog rename is reflected for old and new bookings.
+      const sourceServiceId = currentService.sourceServiceId
+        ?? (currentService.type === "predefined" ? currentService.id : undefined);
 
       return {
         id: currentService.id,
         type: currentService.type,
-        ...(currentService.type === "predefined" && { sourceServiceId: currentService.id }),
+        ...(sourceServiceId !== undefined && {
+          sourceServiceId,
+        }),
         name: currentService.name,
         durationMin: currentService.durationMin ?? fallbackDurationMinutes,
         durationMax:
@@ -200,11 +206,38 @@ export const toFrontendAttendanceItem = (
     ...(normalizedAttendance.updatedByRole !== undefined && {
       updatedByRole: normalizedAttendance.updatedByRole,
     }),
+    ...(normalizedAttendance.updatedByName !== undefined && {
+      updatedByName: normalizedAttendance.updatedByName,
+    }),
     ...(normalizedAttendance.updatedAt !== undefined && {
       updatedAt: normalizedAttendance.updatedAt,
     }),
     ...(normalizedAttendance.bookingSource !== undefined && {
       bookingSource: normalizedAttendance.bookingSource,
+    }),
+    ...(normalizedAttendance.staffSelectionType !== undefined && {
+      staffSelectionType: normalizedAttendance.staffSelectionType,
+    }),
+    ...(normalizedAttendance.requestedEmployeeUserId !== undefined && {
+      requestedEmployeeUserId: normalizedAttendance.requestedEmployeeUserId,
+    }),
+    ...(normalizedAttendance.requestedEmployeeName !== undefined && {
+      requestedEmployeeName: normalizedAttendance.requestedEmployeeName,
+    }),
+    ...(normalizedAttendance.conflictEmployeeUserId !== undefined && {
+      conflictEmployeeUserId: normalizedAttendance.conflictEmployeeUserId,
+    }),
+    ...(normalizedAttendance.conflictEmployeeName !== undefined && {
+      conflictEmployeeName: normalizedAttendance.conflictEmployeeName,
+    }),
+    ...(normalizedAttendance.proposedAssigneeUserId !== undefined && {
+      proposedAssigneeUserId: normalizedAttendance.proposedAssigneeUserId,
+    }),
+    ...(normalizedAttendance.proposedAssigneeName !== undefined && {
+      proposedAssigneeName: normalizedAttendance.proposedAssigneeName,
+    }),
+    ...(normalizedAttendance.proposedAssigneeWorkerType !== undefined && {
+      proposedAssigneeWorkerType: normalizedAttendance.proposedAssigneeWorkerType,
     }),
     storeId: normalizedAttendance.storeId,
     storeName: normalizedAttendance.storeName,

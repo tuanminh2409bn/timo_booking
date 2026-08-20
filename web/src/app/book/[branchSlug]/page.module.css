@@ -1,21 +1,20 @@
 .page {
-  animation: fadeInUp 0.4s ease-out;
   max-width: 900px;
   margin: 0 auto;
   padding-bottom: 100px; /* Space for floating footer */
 }
 
 .pageTitle {
-  font-size: var(--font-size-2xl);
+  font-size: 20px;
   font-weight: 700;
-  color: var(--color-text-primary);
-  margin-bottom: var(--space-lg);
+  color: var(--hrm-text);
+  margin-bottom: 16px;
 }
 
 /* Search bar */
 .searchWrapper {
   position: relative;
-  margin-bottom: var(--space-xl);
+  margin-bottom: 20px;
 }
 
 .searchIcon {
@@ -30,9 +29,10 @@
 
 .searchInput {
   width: 100%;
-  padding: 14px var(--space-md) 14px 44px;
+  min-height: 40px;
+  padding: 9px 16px 9px 42px;
   border-radius: var(--radius-pill);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--hrm-control-border);
   background: var(--color-surface);
   font-size: var(--font-size-base);
   color: var(--color-text-primary);
@@ -45,21 +45,21 @@
 }
 
 .searchInput:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.08);
+  border-color: var(--hrm-blue-400);
+  box-shadow: 0 0 0 3px var(--hrm-blue-100);
 }
 
 /* Category groups */
 .categories {
   display: flex;
   flex-direction: column;
-  gap: var(--space-lg);
+  gap: 12px;
 }
 
 .categoryCard {
   background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border);
+  border-radius: var(--hrm-radius-card);
+  border: 1px solid var(--hrm-border);
   overflow: hidden;
   transition: box-shadow var(--transition-base), opacity var(--transition-base);
 }
@@ -69,7 +69,8 @@
 }
 
 .categoryHeader {
-  padding: var(--space-lg);
+  min-height: 60px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -89,7 +90,7 @@
 }
 
 .categoryName {
-  font-size: var(--font-size-lg);
+  font-size: 15px;
   font-weight: 700;
   color: var(--color-text-primary);
 }
@@ -105,8 +106,8 @@
   gap: 4px;
   padding: 4px 12px;
   border-radius: var(--radius-pill);
-  background: var(--color-success-bg);
-  color: var(--color-success-text);
+  background: var(--hrm-blue-50);
+  color: var(--hrm-blue-700);
   font-size: var(--font-size-xs);
   font-weight: 600;
   white-space: nowrap;
@@ -126,8 +127,8 @@
   gap: 4px;
   padding: 4px 12px;
   border-radius: var(--radius-pill);
-  background: #fff3e0;
-  color: #e65100;
+  background: var(--hrm-blue-50);
+  color: var(--hrm-blue-700);
   font-size: var(--font-size-xs);
   font-weight: 600;
   white-space: nowrap;
@@ -168,7 +169,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-md) var(--space-lg);
+  min-height: 76px;
+  padding: 14px 16px;
   gap: var(--space-md);
   transition: background var(--transition-fast);
   border-bottom: 1px solid var(--color-border-light);
@@ -231,7 +233,8 @@
 /* Select button — main service */
 .selectButton {
   padding: 8px 20px;
-  border-radius: var(--radius-pill);
+  min-height: 36px;
+  border-radius: var(--hrm-radius-control);
   font-size: var(--font-size-sm);
   font-weight: 600;
   transition: all var(--transition-base);
@@ -266,7 +269,8 @@
 /* Extra/addon button — outline style */
 .extraButton {
   padding: 8px 20px;
-  border-radius: var(--radius-pill);
+  min-height: 36px;
+  border-radius: var(--hrm-radius-control);
   font-size: var(--font-size-sm);
   font-weight: 600;
   transition: all var(--transition-base);
@@ -288,14 +292,14 @@
 }
 
 .extraButtonSelected {
-  border-color: #16a34a;
-  color: #16a34a;
-  background: #f0fdf4;
+  border-color: var(--hrm-blue-700);
+  color: var(--hrm-blue-700);
+  background: var(--hrm-blue-50);
 }
 
 .extraButtonSelected:hover {
-  background: #dcfce7;
-  border-color: #15803d;
+  background: var(--hrm-blue-100);
+  border-color: var(--hrm-blue-800);
 }
 
 /* Addon item disabled (no main service selected) */
@@ -309,7 +313,7 @@
 /* ═══════════════════════════════════════ */
 .inlineStaffPicker {
   padding: var(--space-md) var(--space-lg) var(--space-lg);
-  background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%);
+  background: var(--hrm-blue-50);
   border-top: 1px dashed var(--color-border);
   border-bottom: 1px solid var(--color-border-light);
   animation: slideDown 0.3s ease-out;
@@ -339,8 +343,7 @@
 }
 
 .staffPickerLabel::before {
-  content: '👤';
-  font-size: 14px;
+  content: '';
 }
 
 .staffPickerGrid {
@@ -362,8 +365,8 @@
   align-items: center;
   gap: 6px;
   padding: 12px 16px;
-  border-radius: 16px;
-  border: 2px solid var(--color-border);
+  border-radius: var(--hrm-radius-control);
+  border: 1px solid var(--hrm-control-border);
   background: var(--color-surface);
   cursor: pointer;
   transition: all 0.2s ease;
@@ -383,9 +386,9 @@
 }
 
 .staffPickerCardSelected {
-  border-color: var(--color-primary);
-  background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
-  box-shadow: 0 2px 8px rgba(26, 86, 219, 0.15);
+  border-color: var(--hrm-blue-700);
+  background: var(--hrm-blue-50);
+  box-shadow: 0 0 0 2px var(--hrm-blue-100);
 }
 
 .staffPickerCardSelected::after {
@@ -409,19 +412,20 @@
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: var(--hrm-blue-50);
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--hrm-blue-700);
   font-size: 16px;
   font-weight: 700;
   flex-shrink: 0;
 }
 
 .staffPickerCardSelected .staffPickerAvatar {
-  background: linear-gradient(135deg, #4f46e5 0%, #6d28d9 100%);
-  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.3);
+  background: var(--hrm-blue-700);
+  color: white;
+  box-shadow: none;
 }
 
 .staffPickerName {
@@ -436,13 +440,6 @@
   white-space: nowrap;
 }
 
-.staffPickerBadge {
-  font-size: 10px;
-  position: absolute;
-  top: 4px;
-  left: 4px;
-}
-
 /* ═══════════════════════════════════════ */
 /*  Floating Continue Footer */
 /* ═══════════════════════════════════════ */
@@ -452,11 +449,12 @@
   left: 0;
   right: 0;
   z-index: 100;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border-top: 1px solid var(--color-border);
-  padding: var(--space-md) var(--space-lg);
+  border-top: 1px solid var(--hrm-border);
+  padding: 12px 24px calc(12px + env(safe-area-inset-bottom));
+  box-shadow: 0 -10px 30px rgba(15, 23, 42, 0.08);
   animation: slideUp 0.3s ease-out;
 }
 
@@ -493,8 +491,9 @@
 }
 
 .continueButton {
-  padding: 14px 28px;
-  border-radius: var(--radius-pill);
+  min-height: 44px;
+  padding: 12px 24px;
+  border-radius: var(--hrm-radius-control);
   font-size: var(--font-size-base);
   font-weight: 700;
   border: none;
@@ -627,7 +626,7 @@
   height: 40px;
   border: 3px solid rgba(0, 0, 0, 0.1);
   border-radius: 50%;
-  border-top-color: var(--color-primary);
+  border-top-color: var(--hrm-blue-700);
   animation: spin 1s ease-in-out infinite;
   margin-bottom: 16px;
 }

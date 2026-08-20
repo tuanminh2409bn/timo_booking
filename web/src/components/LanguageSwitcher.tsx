@@ -9,9 +9,11 @@ const locales: Locale[] = ['de', 'en', 'vi'];
 export default function LanguageSwitcher({
   variant = 'light',
   align = 'right',
+  placement = 'bottom',
 }: {
-  variant?: 'light' | 'dark';
+  variant?: 'light' | 'dark' | 'hrm';
   align?: 'left' | 'right';
+  placement?: 'top' | 'bottom';
 }) {
   const { locale, setLocale } = useI18n();
   const [open, setOpen] = useState(false);
@@ -30,28 +32,36 @@ export default function LanguageSwitcher({
   return (
     <div className={styles.switcher} ref={ref}>
       <button
-        className={`${styles.trigger} ${variant === 'dark' ? styles.triggerDark : ''}`}
+        className={`${styles.trigger} ${variant === 'dark' ? styles.triggerDark : ''} ${variant === 'hrm' ? styles.triggerHrm : ''}`}
         onClick={() => setOpen(!open)}
         aria-label="Switch language"
       >
-        <span className={styles.flag}>{localeFlags[locale]}</span>
-        <svg
-          className={`${styles.chevron} ${open ? styles.chevronOpen : ''}`}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
+        {variant === 'hrm' ? (
+          <span className={styles.shortLabel}>{locale.toUpperCase()}</span>
+        ) : (
+          <>
+            <span className={styles.flag}>{localeFlags[locale]}</span>
+            <svg
+              className={`${styles.chevron} ${open ? styles.chevronOpen : ''}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </>
+        )}
       </button>
 
       {open && (
         <>
           <div className={styles.overlay} onClick={() => setOpen(false)} />
-          <div className={`${styles.dropdown} ${align === 'left' ? styles.dropdownLeft : ''}`}>
+          <div
+            className={`${styles.dropdown} ${align === 'left' ? styles.dropdownLeft : ''} ${placement === 'top' ? styles.dropdownTop : ''}`}
+          >
             {locales.map((loc) => (
               <button
                 key={loc}

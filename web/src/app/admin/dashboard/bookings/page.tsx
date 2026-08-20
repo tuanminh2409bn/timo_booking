@@ -6,13 +6,15 @@ import { useAuth } from '@/lib/authContext';
 import { useI18n } from '@/lib/i18n';
 import { getGermanDateObject, getGermanTodayString } from '@/lib/timeUtils';
 import styles from './page.module.css';
-import { List, Calendar, ChevronLeft, ChevronRight, X, Users } from 'lucide-react';
+import { List, Calendar, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, Copy, Euro, Pencil, Phone, Plus, Scissors, Search, Timer, TriangleAlert, UserRound, X } from 'lucide-react';
 import { Button } from '@/components/admin/ui/button';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import {
   fetchAdminAttendanceCalendar,
+  fetchAdminEmployees,
   createAdminBooking,
   reassignAdminAttendance,
+  searchAdminAttendances,
   updateAdminAttendanceStatus,
   type AdminAttendanceItem,
 } from '@/lib/adminHrmApi';
@@ -20,9 +22,9 @@ import {
   fetchHrmAvailability,
   fetchHrmServices,
   fetchHrmStaff,
-  type HrmAvailability,
   type HrmService,
 } from '@/lib/hrmApi';
+import { getAdminBackTarget, getRequestedEmployeeId } from '@/lib/adminNavigation';
 
 type BookingServiceExtra = {
   serviceId?: string;
@@ -42,18 +44,32 @@ type BookingServiceItem = {
 
 interface FirestoreBooking {
   id: string;
+  attendanceId: string;
+  bookingId?: string;
+  bookingCode?: string;
   customerName: string;
   customerPhone: string;
   services: BookingServiceItem[];
   addOns?: BookingServiceExtra[];
   staffId: string;
   staffName: string;
+  staffSelectionType?: 'specific' | 'any';
+  requestedStaffId?: string;
+  requestedStaffName?: string;
+  conflictStaffId?: string;
+  conflictStaffName?: string;
+  proposedStaffId?: string;
+  proposedStaffName?: string;
   appointmentDate: string;
   startTime: string;
   totalPrice: number;
   totalDurationMinutes: number;
   status: 'pending_approval' | 'confirmed' | 'cancelled' | 'needs_owner_action' | 'completed' | 'no_show';
+  source: 'online_booking' | 'manual_booking' | 'walk_in';
   createdAt: string;
+  updatedByUserId?: string;
+  updatedByRole?: 'customer' | 'owner' | 'manager' | 'employee';
+  updatedByName?: string;
 }
 
 type ViewMode = 'list' | 'calendar';
@@ -74,6 +90,47 @@ type FilterStatus =
   | 'confirmed'
   | 'cancelled'
   | 'needs_owner_action';
+type SourceFilter = 'all' | 'online_booking' | 'owner_created';
+
+type BookingGroupIdentity = {
+  accent: string;
+  background: string;
+  outline: string;
+  text: string;
+};
+
+type BookingListGroup = {
+  key: string;
+  visibleBookings: FirestoreBooking[];
+  allBookings: FirestoreBooking[];
+};
+
+const BOOKING_GROUP_PALETTE: BookingGroupIdentity[] = [
+  { accent: '#2563EB', background: '#EFF6FF', outline: '#BFDBFE', text: '#1D4ED8' },
+  { accent: '#7C3AED', background: '#F5F3FF', outline: '#DDD6FE', text: '#6D28D9' },
+  { accent: '#0891B2', background: '#ECFEFF', outline: '#A5F3FC', text: '#0E7490' },
+  { accent: '#DB2777', background: '#FDF2F8', outline: '#FBCFE8', text: '#BE185D' },
+  { accent: '#4F46E5', background: '#EEF2FF', outline: '#C7D2FE', text: '#4338CA' },
+  { accent: '#0F766E', background: '#F0FDFA', outline: '#99F6E4', text: '#0F766E' },
+  { accent: '#9333EA', background: '#FAF5FF', outline: '#E9D5FF', text: '#7E22CE' },
+  { accent: '#0369A1', background: '#F0F9FF', outline: '#BAE6FD', text: '#0369A1' },
+];
+
+function getBookingGroupIdentity(index: number): BookingGroupIdentity {
+  const preset = BOOKING_GROUP_PALETTE[index];
+  if (preset) return preset;
+
+  // A busy day can contain more groups than the fixed palette. Generate an
+  // additional cool pastel identity instead of cycling back to purple/blue,
+  // otherwise unrelated customer bookings can appear to be one group.
+  const hue = 185 + ((index * 47) % 146);
+  return {
+    accent: `hsl(${hue} 72% 43%)`,
+    background: `hsl(${hue} 82% 96%)`,
+    outline: `hsl(${hue} 72% 84%)`,
+    text: `hsl(${hue} 72% 35%)`,
+  };
+}
 
 // ===== Helpers =====
 
@@ -95,25 +152,29 @@ function addDays(date: Date, n: number): Date {
 function formatDateGroupLabel(dateStr: string, locale: string): string {
   const [y, m, d] = dateStr.split('-').map(Number);
   const dateObj = new Date(y, m - 1, d); // local time
-  const today = getGermanDateObject();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = addDays(today, 1);
-
-  let prefix = '';
-  if (dateObj.getTime() === today.getTime()) {
-    prefix = locale === 'de' ? 'Heute' : locale === 'vi' ? 'Hôm nay' : 'Today';
-  } else if (dateObj.getTime() === tomorrow.getTime()) {
-    prefix = locale === 'de' ? 'Morgen' : locale === 'vi' ? 'Ngày mai' : 'Tomorrow';
-  }
-
-  const formatted = dateObj.toLocaleDateString(locale === 'de' ? 'de-DE' : locale === 'vi' ? 'vi-VN' : 'en-US', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
+  return dateObj.toLocaleDateString(locale === 'de' ? 'de-DE' : locale === 'vi' ? 'vi-VN' : 'en-US', {
+    weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric',
   });
-  return prefix ? `${prefix}, ${formatted}` : formatted;
 }
 
 function formatDateLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function formatWeekRangeLabel(start: Date, locale: string): string {
+  const end = addDays(start, 6);
+  const localeCode = locale === 'vi' ? 'vi-VN' : locale === 'de' ? 'de-DE' : 'en-GB';
+  const startLabel = start.toLocaleDateString(localeCode, {
+    day: '2-digit',
+    month: '2-digit',
+    ...(start.getFullYear() !== end.getFullYear() && { year: 'numeric' }),
+  });
+  const endLabel = end.toLocaleDateString(localeCode, {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+  return `${startLabel} – ${endLabel}`;
 }
 
 function isSameDay(d1: Date, d2: Date): boolean {
@@ -133,6 +194,31 @@ function formatEndTime(startTime: string, durationMinutes: number): string {
   const endH = Math.floor(totalMinutes / 60) % 24;
   const endM = totalMinutes % 60;
   return `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+}
+
+function matchesSourceFilter(booking: FirestoreBooking, sourceFilter: SourceFilter): boolean {
+  if (sourceFilter === 'all') return true;
+  if (sourceFilter === 'online_booking') return booking.source === 'online_booking';
+  return booking.source === 'manual_booking' || booking.source === 'walk_in';
+}
+
+function getBookingDisplayCode(booking: FirestoreBooking): string {
+  const explicitCode = booking.bookingCode?.trim();
+  if (explicitCode) return explicitCode;
+
+  const compactId = booking.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase();
+  return compactId ? `BK-${compactId}` : 'BK';
+}
+
+function getBookingGroupKey(booking: FirestoreBooking): string {
+  const bookingId = booking.bookingId?.trim();
+  return bookingId ? `booking:${bookingId}` : `attendance:${booking.id}`;
+}
+
+function getBookingGroupShortCode(booking: FirestoreBooking): string {
+  const rawId = booking.bookingId?.trim() || booking.id;
+  const compactId = rawId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase();
+  return compactId || 'BK';
 }
 
 const DEFAULT_CALENDAR_START_HOUR = 8;
@@ -226,6 +312,162 @@ function computeOverlappingLayout(bookings: FirestoreBooking[]): { booking: Fire
   return result;
 }
 
+/**
+ * Keep every segment of one customer booking in the same visual lane inside
+ * the Request column. The normal overlap layout recalculates lanes for every
+ * time cluster, which can make two consecutive segments swap colours/columns.
+ */
+function computeRequestGroupedLayout(bookings: FirestoreBooking[]): { booking: FirestoreBooking; left: number; width: number }[] {
+  if (bookings.length === 0) return [];
+
+  const groups = new Map<string, {
+    key: string;
+    start: number;
+    end: number;
+    bookings: FirestoreBooking[];
+    lane: number;
+    laneCount: number;
+  }>();
+
+  bookings.forEach((booking) => {
+    const { hours, minutes } = parseTime(booking.startTime);
+    const start = hours * 60 + minutes;
+    const end = start + booking.totalDurationMinutes;
+    const key = getBookingGroupKey(booking);
+    const group = groups.get(key);
+    if (group) {
+      group.start = Math.min(group.start, start);
+      group.end = Math.max(group.end, end);
+      group.bookings.push(booking);
+      return;
+    }
+    groups.set(key, { key, start, end, bookings: [booking], lane: 0, laneCount: 1 });
+  });
+
+  const sortedGroups = [...groups.values()].sort((left, right) =>
+    left.start - right.start ||
+    right.end - left.end ||
+    left.key.localeCompare(right.key),
+  );
+  const clusters: Array<typeof sortedGroups> = [];
+  let currentCluster: typeof sortedGroups = [];
+  let currentClusterEnd = -1;
+
+  sortedGroups.forEach((group) => {
+    if (currentCluster.length === 0 || group.start < currentClusterEnd) {
+      currentCluster.push(group);
+      currentClusterEnd = Math.max(currentClusterEnd, group.end);
+      return;
+    }
+    clusters.push(currentCluster);
+    currentCluster = [group];
+    currentClusterEnd = group.end;
+  });
+  if (currentCluster.length > 0) clusters.push(currentCluster);
+
+  clusters.forEach((cluster) => {
+    const laneEnds: number[] = [];
+    cluster.forEach((group) => {
+      const reusableLane = laneEnds.findIndex((laneEnd) => group.start >= laneEnd);
+      group.lane = reusableLane >= 0 ? reusableLane : laneEnds.length;
+      if (reusableLane >= 0) laneEnds[reusableLane] = group.end;
+      else laneEnds.push(group.end);
+    });
+    cluster.forEach((group) => { group.laneCount = laneEnds.length; });
+  });
+
+  return sortedGroups.flatMap((group) => {
+    const width = 100 / group.laneCount;
+    const left = group.lane * width;
+    return group.bookings.map((booking) => ({ booking, left, width }));
+  });
+}
+
+function mapAttendanceItemsToBookings(
+  items: AdminAttendanceItem[],
+  locale: string,
+  catalogServices: Array<HrmService & { categoryId: string }>,
+): FirestoreBooking[] {
+  const serviceById = new Map(catalogServices.map((service) => [service.id, service]));
+
+  return items.flatMap((item): FirestoreBooking[] => {
+    let serviceStartMinutes = item.startTime;
+    const services = item.services.length > 0 ? item.services : [{
+      id: item.id,
+      name: locale === 'vi' ? 'Dịch vụ' : 'Service',
+      amount: String(item.totalAmount),
+      durationMin: Math.max(item.endTime - item.startTime, 1),
+      durationMax: Math.max(item.endTime - item.startTime, 1),
+      employees: [],
+    }];
+
+    return services.map((service, serviceIndex) => {
+      const remainingMinutes = Math.max(item.endTime - serviceStartMinutes, 1);
+      const durationMinutes = Math.min(
+        Math.max(service.durationMax ?? service.durationMin ?? remainingMinutes, 1),
+        remainingMinutes,
+      );
+      const segmentStartMinutes = serviceStartMinutes;
+      serviceStartMinutes += durationMinutes;
+      const assignedEmployee = service.employees[0];
+      const staffId = assignedEmployee?.employeeId || item.mainAssigneeUserId || item.employeeUserId;
+      const staffName = assignedEmployee?.employeeName ??
+        item.services
+          .flatMap((candidate) => candidate.employees)
+          .find((employee) => employee.employeeId === staffId)
+          ?.employeeName ?? '';
+      const catalogService = service.sourceServiceId
+        ? serviceById.get(service.sourceServiceId)
+        : undefined;
+
+      return {
+        id: `${item.id}:${service.id}:${serviceIndex}`,
+        attendanceId: item.id,
+        bookingId: item.bookingId,
+        bookingCode: item.attendanceCode ?? (item.bookingId
+          ? `BK-${item.bookingId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase()}`
+          : undefined),
+        customerName: item.customerName,
+        customerPhone: item.customerPhone,
+        services: [{
+          serviceId: service.sourceServiceId ?? service.id,
+          serviceName: catalogService?.displayName?.trim() || catalogService?.name || service.name,
+          durationMinutes,
+          price: Number(service.amount) || 0,
+        }],
+        addOns: serviceIndex === 0 ? item.addOns?.map((addOn) => {
+          const catalogAddOn = addOn.sourceServiceId
+            ? serviceById.get(addOn.sourceServiceId)
+            : undefined;
+          return {
+            serviceId: addOn.sourceServiceId ?? addOn.id,
+            name: catalogAddOn?.displayName?.trim() || catalogAddOn?.name || addOn.name,
+          };
+        }) : undefined,
+        staffId,
+        staffName,
+        staffSelectionType: item.staffSelectionType,
+        requestedStaffId: item.requestedEmployeeUserId,
+        requestedStaffName: item.requestedEmployeeName,
+        conflictStaffId: item.conflictEmployeeUserId,
+        conflictStaffName: item.conflictEmployeeName,
+        proposedStaffId: item.proposedAssigneeUserId,
+        proposedStaffName: item.proposedAssigneeName,
+        appointmentDate: item.workDate,
+        startTime: `${Math.floor(segmentStartMinutes / 60).toString().padStart(2, '0')}:${(segmentStartMinutes % 60).toString().padStart(2, '0')}`,
+        totalPrice: Number(service.amount) || 0,
+        totalDurationMinutes: durationMinutes,
+        status: item.bookingStatus,
+        source: item.source,
+        createdAt: item.workDate,
+        updatedByUserId: item.updatedByUserId,
+        updatedByRole: item.updatedByRole,
+        updatedByName: item.updatedByName,
+      };
+    });
+  });
+}
+
 // ===== Component =====
 export default function BookingsManagementPage() {
   const router = useRouter();
@@ -238,8 +480,16 @@ export default function BookingsManagementPage() {
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('calendar');
+  const [staffCalendarScope, setStaffCalendarScope] = useState<'day' | 'week'>('day');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchBookings, setSearchBookings] = useState<FirestoreBooking[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [futureIssuesMode, setFutureIssuesMode] = useState(false);
+  const [copiedBookingId, setCopiedBookingId] = useState<string | null>(null);
+  const [hoveredBookingGroupKey, setHoveredBookingGroupKey] = useState<string | null>(null);
   const [weekStart, setWeekStart] = useState(() => getStartOfWeek(getGermanDateObject()));
   const [selectedDate, setSelectedDate] = useState(() => getGermanTodayString());
   const [popover, setPopover] = useState<{
@@ -267,11 +517,27 @@ export default function BookingsManagementPage() {
   } | null>(null);
   const [allCategories, setAllCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [allServices, setAllServices] = useState<Array<HrmService & { categoryId: string }>>([]);
+  const isManagerOrOwner = user?.role !== 'staff';
+  const normalizedSearchQuery = searchQuery.trim();
+  const isGlobalSearchActive = normalizedSearchQuery.length >= 2;
 
-  // Check for 'new' param in URL to open modal automatically
+  // Apply route intent from dashboard, employee attendance and status banners.
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
+      const requestedView = searchParams.get('view');
+      if (requestedView === 'list' || requestedView === 'calendar') setViewMode(requestedView);
+      const requestedDate = searchParams.get('date');
+      if (/^\d{4}-\d{2}-\d{2}$/.test(requestedDate ?? '')) setSelectedDate(requestedDate as string);
+      const requestedStatus = searchParams.get('status');
+      if (['all', 'pending_approval', 'confirmed', 'cancelled', 'needs_owner_action'].includes(requestedStatus ?? '')) {
+        setFilter(requestedStatus as FilterStatus);
+      }
+      const requestedSource = searchParams.get('source');
+      if (['all', 'online_booking', 'owner_created'].includes(requestedSource ?? '')) {
+        setSourceFilter(requestedSource as SourceFilter);
+      }
+      setFutureIssuesMode(searchParams.get('scope') === 'future');
       if (searchParams.get('new') === '1' && ['owner', 'manager'].includes(user?.role ?? '')) {
         setShowNewBookingModal(true);
         // Clear param so it doesn't reopen on refresh
@@ -283,43 +549,20 @@ export default function BookingsManagementPage() {
   const refreshCanonicalCalendar = useCallback(async () => {
     const storeId = activeBranch || user?.assignedBranches?.[0];
     if (!storeId) return;
-    const items = await fetchAdminAttendanceCalendar(
-      storeId,
-      selectedDate,
-      selectedDate,
-    );
-    const list = items.map((item: AdminAttendanceItem): FirestoreBooking => {
-      const staffName =
-        item.services
-          .flatMap((service) => service.employees)
-          .find((employee) => employee.employeeId === item.mainAssigneeUserId)
-          ?.employeeName ?? '';
-      return {
-        id: item.id,
-        customerName: item.customerName,
-        customerPhone: item.customerPhone,
-        services: item.services.map((service) => ({
-          serviceId: service.id,
-          serviceName: service.name,
-          durationMinutes: Math.max(item.endTime - item.startTime, 1),
-          price: Number.parseFloat(service.amount) || 0,
-        })),
-        addOns: item.addOns?.map((addOn) => ({
-          serviceId: addOn.sourceServiceId ?? addOn.id,
-          name: addOn.name,
-        })),
-        staffId: item.mainAssigneeUserId || item.employeeUserId,
-        staffName,
-        appointmentDate: item.workDate,
-        startTime: `${Math.floor(item.startTime / 60).toString().padStart(2, '0')}:${(item.startTime % 60).toString().padStart(2, '0')}`,
-        totalPrice: item.totalAmount,
-        totalDurationMinutes: Math.max(item.endTime - item.startTime, 1),
-        status: item.bookingStatus,
-        createdAt: item.workDate,
-      };
-    });
-    setBookings(list);
-  }, [activeBranch, selectedDate, user]);
+    const futureEndDate = formatDateLocal(addDays(getGermanDateObject(), 90));
+    const fromDate = futureIssuesMode
+      ? getGermanTodayString()
+      : user?.role === 'staff' && staffCalendarScope === 'week'
+      ? formatDateLocal(weekStart)
+      : selectedDate;
+    const toDate = futureIssuesMode
+      ? futureEndDate
+      : user?.role === 'staff' && staffCalendarScope === 'week'
+      ? formatDateLocal(addDays(weekStart, 6))
+      : selectedDate;
+    const items = await fetchAdminAttendanceCalendar(storeId, fromDate, toDate);
+    setBookings(mapAttendanceItemsToBookings(items, locale, allServices));
+  }, [activeBranch, allServices, futureIssuesMode, locale, selectedDate, staffCalendarScope, user, weekStart]);
 
   // Canonical attendance sync from the HRM backend.
   useEffect(() => {
@@ -345,25 +588,61 @@ export default function BookingsManagementPage() {
     };
   }, [user, activeBranch, refreshCanonicalCalendar]);
 
+  // 19/08: search is store-wide, not restricted to the currently selected
+  // calendar date. The backend performs the all-date lookup on demand.
+  useEffect(() => {
+    const storeId = activeBranch || user?.assignedBranches?.[0];
+    if (!storeId || !isGlobalSearchActive) {
+      setSearchBookings([]);
+      setSearchLoading(false);
+      setSearchError('');
+      return;
+    }
+
+    let active = true;
+    const timeoutId = window.setTimeout(() => {
+      setSearchLoading(true);
+      setSearchError('');
+      searchAdminAttendances(storeId, normalizedSearchQuery)
+        .then((items) => {
+          if (active) setSearchBookings(mapAttendanceItemsToBookings(items, locale, allServices));
+        })
+        .catch((error: unknown) => {
+          console.error('Could not search all booking dates:', error);
+          if (active) {
+            setSearchBookings([]);
+            setSearchError(locale === 'vi' ? 'Không thể tìm kiếm toàn bộ lịch.' : 'Could not search all bookings.');
+          }
+        })
+        .finally(() => {
+          if (active) setSearchLoading(false);
+        });
+    }, 250);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+    };
+  }, [activeBranch, allServices, isGlobalSearchActive, locale, normalizedSearchQuery, user]);
+
   // Staff, services, categories and leave blocks all come from the current HRM data source.
   useEffect(() => {
     const storeId = activeBranch || user?.assignedBranches?.[0];
     if (!storeId) return;
     let active = true;
     Promise.all([
-      fetchHrmStaff(storeId),
+      isManagerOrOwner ? fetchAdminEmployees(storeId) : fetchHrmStaff(storeId),
       fetchHrmServices(storeId),
-      Promise.all(
-        Array.from({ length: 14 }, (_, index) =>
-          fetchHrmAvailability(storeId, formatDateLocal(addDays(getGermanDateObject(), index - 3))),
-        ),
-      ),
+      Promise.all((user?.role === 'staff' && staffCalendarScope === 'week'
+        ? Array.from({ length: 7 }, (_, index) => formatDateLocal(addDays(weekStart, index)))
+        : [selectedDate]
+      ).map((date) => fetchHrmAvailability(storeId, date))),
     ]).then(([staff, services, availabilityDays]) => {
       if (!active) return;
       setRealStaffList(staff.map((item) => ({
-        id: item.uid,
+        id: 'uid' in item ? item.uid : item.id,
         name: item.name,
-        status: 'active',
+        status: 'status' in item ? item.status : 'active',
         serviceIds: item.serviceIds,
         staffType: item.workerType,
       })));
@@ -394,22 +673,22 @@ export default function BookingsManagementPage() {
       console.error('Could not load HRM calendar options:', error);
     });
     return () => { active = false; };
-  }, [user, activeBranch]);
+  }, [user, activeBranch, isManagerOrOwner, selectedDate, staffCalendarScope, weekStart]);
 
   // Handlers
-  const handleApprove = async (id: string) => {
-    if (!user) return;
+  const handleApprove = async (id: string): Promise<boolean> => {
+    if (!user) return false;
     const storeId = activeBranch || user.assignedBranches?.[0];
-    if (!storeId) return;
+    if (!storeId) return false;
     try {
-      await updateAdminAttendanceStatus(storeId, id, 'confirmed');
-      setBookings((current) =>
-        current.map((booking) =>
-          booking.id === id ? { ...booking, status: 'confirmed' } : booking,
-        ),
-      );
+      const attendanceId = bookings.find((booking) => booking.id === id)?.attendanceId ?? id;
+      await updateAdminAttendanceStatus(storeId, attendanceId, 'confirmed');
+      await refreshCanonicalCalendar();
+      return true;
     } catch (error: unknown) {
       console.error(error);
+      window.alert(error instanceof Error ? error.message : (locale === 'vi' ? 'Không thể duyệt yêu cầu.' : 'Could not approve request.'));
+      return false;
     }
   };
 
@@ -418,10 +697,15 @@ export default function BookingsManagementPage() {
     const storeId = activeBranch || user.assignedBranches?.[0];
     if (!storeId) return;
     try {
-      await updateAdminAttendanceStatus(storeId, id, 'cancelled');
+      const targetBooking = bookings.find((booking) => booking.id === id);
+      const attendanceId = targetBooking?.attendanceId ?? id;
+      await updateAdminAttendanceStatus(storeId, attendanceId, 'cancelled');
+      const targetBookingId = targetBooking?.bookingId;
       setBookings((current) =>
         current.map((booking) =>
-          booking.id === id ? { ...booking, status: 'cancelled' } : booking,
+          booking.id === id || (targetBookingId && booking.bookingId === targetBookingId)
+            ? { ...booking, status: 'cancelled' }
+            : booking,
         ),
       );
     } catch (error: unknown) {
@@ -437,7 +721,8 @@ export default function BookingsManagementPage() {
     const storeId = activeBranch || user.assignedBranches?.[0];
     if (!storeId) return;
     try {
-      await updateAdminAttendanceStatus(storeId, id, status);
+      const attendanceId = bookings.find((booking) => booking.id === id)?.attendanceId ?? id;
+      await updateAdminAttendanceStatus(storeId, attendanceId, status);
       await refreshCanonicalCalendar();
     } catch (error: unknown) {
       window.alert(error instanceof Error ? error.message : 'Could not update booking');
@@ -518,7 +803,7 @@ export default function BookingsManagementPage() {
     }
 
     try {
-      await reassignAdminAttendance(branchId, bookingId, staffId);
+      await reassignAdminAttendance(branchId, booking.attendanceId, staffId);
       await refreshCanonicalCalendar();
     } catch (e) {
       console.error('Error reassigning staff:', e);
@@ -526,89 +811,205 @@ export default function BookingsManagementPage() {
     }
   };
 
+  const handleClaimBooking = async (booking: FirestoreBooking) => {
+    if (!user?.staffId) return;
+    const branchId = activeBranch || user.assignedBranches?.[0];
+    if (!branchId) return;
+    try {
+      await reassignAdminAttendance(branchId, booking.attendanceId, user.staffId);
+      await refreshCanonicalCalendar();
+      setPopover(null);
+      setPopoverAnchorEl(null);
+    } catch (error: unknown) {
+      window.alert(error instanceof Error
+        ? error.message
+        : (locale === 'vi' ? 'Không thể nhận lịch này.' : 'Could not claim this booking.'));
+      await refreshCanonicalCalendar();
+    }
+  };
+
   // Derived data
   const bookingsForRole = useMemo(() => bookings.filter(b => {
-    if (user?.role === 'staff') return b.staffId === user.staffId;
+    if (user?.role === 'staff') {
+      const isOwnBooking = b.staffId === user.staffId || b.proposedStaffId === user.staffId;
+      const isUnassignedRequest =
+        b.status === 'pending_approval' && (!b.staffId || b.staffId === 'any');
+      const isUnclaimedLeaveConflict =
+        b.status === 'needs_owner_action' && !b.proposedStaffId;
+      return isOwnBooking || isUnassignedRequest || isUnclaimedLeaveConflict;
+    }
     return true;
   }), [bookings, user]);
-
-  const filteredBookings = useMemo(() => {
-    let list = bookingsForRole.filter(b => filter === 'all' || b.status === filter);
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(b =>
-        b.customerName.toLowerCase().includes(q) ||
-        b.customerPhone.includes(q) ||
-        b.staffName.toLowerCase().includes(q) ||
-        b.services.some(s => {
-          const name = typeof s === 'object' && s !== null
-            ? `${s.categoryName || ''} ${s.serviceName || s.name || ''}`
-            : String(s);
-          return name.toLowerCase().includes(q);
-        })
-      );
-    }
-    return list;
-  }, [bookingsForRole, filter, searchQuery]);
-
-  const groupedByDate = useMemo(() => {
-    const groups: Record<string, FirestoreBooking[]> = {};
-    const sorted = [...filteredBookings].sort((a, b) => {
-      if (a.appointmentDate !== b.appointmentDate) return a.appointmentDate.localeCompare(b.appointmentDate);
-      return a.startTime.localeCompare(b.startTime);
-    });
-    sorted.forEach(b => {
-      const key = b.appointmentDate || 'unknown';
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(b);
-    });
-    const sortedKeys = Object.keys(groups).sort((a, b) => b.localeCompare(a));
-    return sortedKeys.map(key => ({ date: key, bookings: groups[key] }));
-  }, [filteredBookings]);
 
   const staffList = useMemo(() => {
     return realStaffList.map(s => ({ id: s.id, name: s.name, status: s.status }));
   }, [realStaffList]);
 
   const [staffFilterId, setStaffFilterId] = useState<string>('all');
-  const isManagerOrOwner = user?.role !== 'staff';
-  const ownStaff = useMemo(
-    () => realStaffList.find((staff) => staff.id === user?.staffId),
-    [realStaffList, user?.staffId],
-  );
-
+  useEffect(() => {
+    if (!isManagerOrOwner) return;
+    const requestedEmployeeId = getRequestedEmployeeId();
+    if (requestedEmployeeId && realStaffList.some((staff) => staff.id === requestedEmployeeId)) {
+      setStaffFilterId(requestedEmployeeId);
+    }
+  }, [isManagerOrOwner, realStaffList]);
   const dayFilteredBookings = useMemo(() => {
-    let list = bookingsForRole.filter(b => b.appointmentDate === selectedDate);
+    let list = isGlobalSearchActive
+      ? [...searchBookings]
+      : bookingsForRole.filter((booking) => futureIssuesMode
+        ? booking.appointmentDate >= getGermanTodayString() && booking.status === 'needs_owner_action'
+        : booking.appointmentDate === selectedDate);
 
     // Filter by staff
     if (staffFilterId !== 'all') {
       list = list.filter(b => b.staffId === staffFilterId);
     }
 
+    list = list.filter((booking) => matchesSourceFilter(booking, sourceFilter));
+
     // Filter by status
     if (filter !== 'all') {
       list = list.filter(b => b.status === filter);
     }
 
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(b =>
-        b.customerName.toLowerCase().includes(q) ||
-        b.customerPhone.includes(q) ||
-        b.staffName.toLowerCase().includes(q) ||
-        b.services.some(s => {
-          const name = typeof s === 'object' && s !== null
-            ? `${s.categoryName || ''} ${s.serviceName || s.name || ''}`
-            : String(s);
-          return name.toLowerCase().includes(q);
-        })
-      );
-    }
-
     // Sort by start time ascending
-    return list.sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
-  }, [bookingsForRole, selectedDate, staffFilterId, filter, searchQuery]);
+    return list.sort((a, b) => `${a.appointmentDate}-${a.startTime}`.localeCompare(`${b.appointmentDate}-${b.startTime}`));
+  }, [bookingsForRole, filter, futureIssuesMode, isGlobalSearchActive, searchBookings, selectedDate, sourceFilter, staffFilterId]);
+
+  const bookingIdentityByGroupKey = useMemo(() => {
+    const identities = new Map<string, BookingGroupIdentity>();
+    [...(isGlobalSearchActive ? searchBookings : bookingsForRole)]
+      .sort((left, right) => (
+        `${left.appointmentDate}-${left.startTime}-${getBookingGroupKey(left)}`
+          .localeCompare(`${right.appointmentDate}-${right.startTime}-${getBookingGroupKey(right)}`)
+      ))
+      .forEach((booking) => {
+        const groupKey = getBookingGroupKey(booking);
+        if (!identities.has(groupKey)) {
+          identities.set(groupKey, getBookingGroupIdentity(identities.size));
+        }
+      });
+    return identities;
+  }, [bookingsForRole, isGlobalSearchActive, searchBookings]);
+
+  const selectedDayBookingsByGroupKey = useMemo(() => {
+    const groups = new Map<string, FirestoreBooking[]>();
+    (isGlobalSearchActive ? searchBookings : bookingsForRole)
+      .filter((booking) => isGlobalSearchActive || (futureIssuesMode ? booking.appointmentDate >= getGermanTodayString() : booking.appointmentDate === selectedDate))
+      .sort((left, right) => left.startTime.localeCompare(right.startTime))
+      .forEach((booking) => {
+        const groupKey = getBookingGroupKey(booking);
+        const group = groups.get(groupKey) ?? [];
+        group.push(booking);
+        groups.set(groupKey, group);
+      });
+    return groups;
+  }, [bookingsForRole, futureIssuesMode, isGlobalSearchActive, searchBookings, selectedDate]);
+
+  const dayFilteredBookingGroups = useMemo<BookingListGroup[]>(() => {
+    const groups = new Map<string, FirestoreBooking[]>();
+    dayFilteredBookings.forEach((booking) => {
+      const groupKey = getBookingGroupKey(booking);
+      const group = groups.get(groupKey) ?? [];
+      group.push(booking);
+      groups.set(groupKey, group);
+    });
+
+    return [...groups.entries()].map(([key, visibleBookings]) => ({
+      key,
+      visibleBookings,
+      allBookings: selectedDayBookingsByGroupKey.get(key) ?? visibleBookings,
+    }));
+  }, [dayFilteredBookings, selectedDayBookingsByGroupKey]);
+
+  const dayNeedsActionCount = useMemo(
+    () => bookingsForRole.filter(
+      (booking) => booking.appointmentDate === selectedDate && booking.status === 'needs_owner_action',
+    ).length,
+    [bookingsForRole, selectedDate],
+  );
+  const dayRequestCount = useMemo(
+    () => bookingsForRole.filter(
+      (booking) => booking.appointmentDate === selectedDate && booking.status === 'pending_approval',
+    ).length,
+    [bookingsForRole, selectedDate],
+  );
+  const applyDayStatusFilter = useCallback((nextFilter: FilterStatus) => {
+    setFutureIssuesMode(false);
+    setFilter(nextFilter);
+    setViewMode('list');
+
+    if (typeof window === 'undefined') return;
+    const searchParams = new URLSearchParams(window.location.search);
+    searchParams.set('view', 'list');
+    searchParams.set('status', nextFilter);
+    searchParams.set('date', selectedDate);
+    searchParams.delete('scope');
+    window.history.replaceState({}, '', `${window.location.pathname}?${searchParams.toString()}`);
+  }, [selectedDate]);
+  const renderAttentionSummary = () => (
+    isManagerOrOwner && (dayRequestCount > 0 || dayNeedsActionCount > 0) ? (
+      <div className={styles.attentionSummaryRow}>
+        {dayRequestCount > 0 && (
+          <button type="button" className={styles.attentionSummaryButton} onClick={() => applyDayStatusFilter('pending_approval')}>
+            <span className={styles.attentionSummaryCount}>{dayRequestCount}</span>
+            <span>{locale === 'vi' ? 'Yêu cầu' : 'Requests'}</span>
+          </button>
+        )}
+        {dayNeedsActionCount > 0 && (
+          <button type="button" className={styles.attentionSummaryButton} onClick={() => applyDayStatusFilter('needs_owner_action')}>
+            <span className={styles.attentionSummaryCount}>{dayNeedsActionCount}</span>
+            <span>{locale === 'vi' ? 'Cần xử lý' : 'Needs action'}</span>
+          </button>
+        )}
+      </div>
+    ) : null
+  );
+  const popoverBookingGroup = useMemo(() => {
+    if (!popover) return [];
+    if (!popover.booking.bookingId) return [popover.booking];
+    return bookings
+      .filter((booking) => booking.bookingId === popover.booking.bookingId)
+      .sort((left, right) => left.startTime.localeCompare(right.startTime));
+  }, [bookings, popover]);
+  const popoverBookingSummary = useMemo(() => {
+    if (popoverBookingGroup.length === 0) return undefined;
+    const startMinutes = Math.min(...popoverBookingGroup.map((booking) => {
+      const { hours, minutes } = parseTime(booking.startTime);
+      return hours * 60 + minutes;
+    }));
+    const endMinutes = Math.max(...popoverBookingGroup.map((booking) => {
+      const { hours, minutes } = parseTime(booking.startTime);
+      return hours * 60 + minutes + booking.totalDurationMinutes;
+    }));
+    const formatMinutes = (minutes: number) => `${String(Math.floor(minutes / 60) % 24).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+    return {
+      startTime: formatMinutes(startMinutes),
+      endTime: formatMinutes(endMinutes),
+      durationMinutes: Math.max(endMinutes - startMinutes, 1),
+    };
+  }, [popoverBookingGroup]);
+  const popoverHasUnassignedSegments = useMemo(
+    () => popoverBookingGroup.some((segment) =>
+      segment.status === 'needs_owner_action'
+        ? !segment.proposedStaffId
+        : !segment.staffId || segment.staffId === 'any',
+    ),
+    [popoverBookingGroup],
+  );
+
+  const handleCopyBookingCode = useCallback(async (booking: FirestoreBooking) => {
+    const bookingCode = getBookingDisplayCode(booking);
+    try {
+      await navigator.clipboard.writeText(bookingCode);
+      setCopiedBookingId(booking.id);
+      window.setTimeout(() => {
+        setCopiedBookingId((current) => current === booking.id ? null : current);
+      }, 1400);
+    } catch (error) {
+      console.error('Could not copy booking code:', error);
+    }
+  }, []);
 
   /** Translate a single service item: "CategoryName – ServiceName" */
   const translateServiceItem = useCallback((s: BookingServiceItem | string): string => {
@@ -618,9 +1019,10 @@ export default function BookingsManagementPage() {
     }
     if (typeof s === 'object' && s !== null) {
       // New format: object with serviceId, categoryId, serviceName, categoryName
-      const svcName = s.serviceId
+      const compactCatalogName = allServices.find((service) => service.id === s.serviceId)?.displayName?.trim();
+      const svcName = compactCatalogName || (s.serviceId
         ? translateService(s.serviceId, s.serviceName || s.name || '')
-        : (s.serviceName || s.name || '');
+        : (s.serviceName || s.name || ''));
       const catName = s.categoryId
         ? translateCategory(s.categoryId, s.categoryName || '')
         : (s.categoryName || '');
@@ -640,7 +1042,7 @@ export default function BookingsManagementPage() {
       return `${svcName}${extrasSuffix}`;
     }
     return String(s);
-  }, [translateService, translateCategory]);
+  }, [allServices, translateService, translateCategory]);
 
   const getServiceName = useCallback((booking: FirestoreBooking): string => {
     if (booking.services.length === 0) return '';
@@ -677,6 +1079,30 @@ export default function BookingsManagementPage() {
       default: return null;
     }
   }, [t]);
+
+  const getStatusLabel = useCallback((status: string) => {
+    switch (status) {
+      case 'pending_approval': return t.admin.bookings.statusPending;
+      case 'confirmed': return t.admin.bookings.statusConfirmed;
+      case 'cancelled': return t.admin.bookings.statusCancelled;
+      case 'needs_owner_action': return t.admin.bookings.statusNeedsAction || 'Cần xử lý';
+      case 'completed': return t.admin.bookings.statusCompleted || 'Đã hoàn thành';
+      case 'no_show': return locale === 'vi' ? 'Không đến' : locale === 'de' ? 'Nicht erschienen' : 'No-show';
+      default: return status;
+    }
+  }, [locale, t]);
+
+  const getUpdateActorLabel = useCallback((booking: FirestoreBooking) => {
+    if (booking.updatedByName?.trim()) return booking.updatedByName.trim();
+    if (booking.updatedByRole === 'customer') return locale === 'vi' ? 'Khách hàng' : 'Customer';
+    if (booking.updatedByRole === 'employee') {
+      return realStaffList.find((staff) => staff.id === booking.updatedByUserId)?.name ||
+        (locale === 'vi' ? 'Nhân viên' : 'Employee');
+    }
+    if (booking.updatedByRole === 'manager') return locale === 'vi' ? 'Quản lý' : 'Manager';
+    if (booking.updatedByRole === 'owner') return locale === 'vi' ? 'Chủ tiệm' : 'Owner';
+    return locale === 'vi' ? 'Hệ thống' : 'System';
+  }, [locale, realStaffList]);
 
   // Walk-in booking: open modal with pre-filled staff + time
   const openNewBookingModal = useCallback((staffId: string, staffName: string, timeStr: string) => {
@@ -728,6 +1154,17 @@ export default function BookingsManagementPage() {
     setShowNewBookingModal(true);
   }, [realStaffList, staffAbsences, selectedDate, locale]);
 
+  useEffect(() => {
+    const openManualBooking = () => {
+      if (['owner', 'manager'].includes(user?.role ?? '')) {
+        openNewBookingModal('', '', '09:00');
+      }
+    };
+
+    window.addEventListener('timmo:open-manual-booking', openManualBooking);
+    return () => window.removeEventListener('timmo:open-manual-booking', openManualBooking);
+  }, [user?.role, openNewBookingModal]);
+
   // ── Quick 2-tap booking: open small popup at slot ──
   const openQuickBookPopup = useCallback((staffId: string, staffName: string, timeStr: string, e: React.MouseEvent) => {
     // Same validation as openNewBookingModal
@@ -765,7 +1202,7 @@ export default function BookingsManagementPage() {
     if (!quickBookPopup || !user) return;
     const resolvedBranchId = activeBranch || user.assignedBranches?.[0] || '';
     if (!resolvedBranchId) return;
-    const { staffId, staffName, timeStr } = quickBookPopup;
+    const { staffId, timeStr } = quickBookPopup;
     setQuickBookPopup(null);
 
     const svcName = durationMinutes === 60
@@ -786,6 +1223,7 @@ export default function BookingsManagementPage() {
       source: selectedDate > getGermanTodayString()
         ? 'manual_booking' as const
         : 'walk_in' as const,
+      quickBooking: true,
       notes: '',
     };
     try {
@@ -917,9 +1355,13 @@ export default function BookingsManagementPage() {
 
   // Calendar
   const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  const calendarVisibleBookings = useMemo(
+    () => bookingsForRole.filter((booking) => booking.status !== 'cancelled' && booking.status !== 'no_show'),
+    [bookingsForRole],
+  );
   const selectedDateBookings = useMemo(
-    () => bookingsForRole.filter((booking) => booking.appointmentDate === selectedDate),
-    [bookingsForRole, selectedDate],
+    () => calendarVisibleBookings.filter((booking) => booking.appointmentDate === selectedDate),
+    [calendarVisibleBookings, selectedDate],
   );
   const calendarStartHour = useMemo(() => selectedDateBookings.reduce((earliestHour, booking) => {
     const { hours: bookingHour } = parseTime(booking.startTime);
@@ -945,38 +1387,68 @@ export default function BookingsManagementPage() {
 
   const bookingsByDate = useMemo(() => {
     const map: Record<string, FirestoreBooking[]> = {};
-    let list = bookingsForRole;
+    let list = calendarVisibleBookings;
     if (staffFilterId !== 'all') list = list.filter(b => b.staffId === staffFilterId);
+    list = list.filter((booking) => matchesSourceFilter(booking, sourceFilter));
     list.forEach(b => { const key = b.appointmentDate; if (!map[key]) map[key] = []; map[key].push(b); });
     return map;
-  }, [bookingsForRole, staffFilterId]);
+  }, [calendarVisibleBookings, sourceFilter, staffFilterId]);
 
   const staffColumnsForDate = useMemo(() => {
     const dayBookings = bookingsByDate[selectedDate] || [];
 
-    // Employees use the same day-column calendar as the owner, but only see
-    // their own read-only column.
+    // Employees see their own column plus a store Request column. Unassigned
+    // Requests and leave conflicts remain visible until one employee claims
+    // them; a claimed item remains visible to the claiming employee.
     if (!isManagerOrOwner) {
       const currentStaff = realStaffList.find((staff) => staff.id === user?.staffId);
       if (!user?.staffId) return [];
 
-      return [{
+      const ownBookings = dayBookings.filter((booking) =>
+        booking.status !== 'pending_approval' &&
+        booking.status !== 'needs_owner_action' &&
+        booking.staffId === user.staffId,
+      );
+      const requestBookings = dayBookings.filter((booking) =>
+        booking.status === 'pending_approval' || booking.status === 'needs_owner_action',
+      );
+      const columns: Array<{
+        id: string;
+        name: string;
+        bookings: FirestoreBooking[];
+        isInactive: boolean;
+        columnType: 'staff' | 'request';
+        span: number;
+      }> = [{
         id: user.staffId,
         name:
           currentStaff?.name ||
           dayBookings[0]?.staffName ||
           (locale === 'vi' ? 'Lịch của tôi' : locale === 'de' ? 'Mein Kalender' : 'My calendar'),
-        bookings: dayBookings.filter((booking) => booking.staffId === user.staffId),
+        bookings: ownBookings,
         isInactive: currentStaff ? currentStaff.status !== 'active' : false,
-        columnType: 'staff' as const,
+        columnType: 'staff',
+        span: 1,
       }];
+      if (requestBookings.length > 0) {
+        columns.push({
+          id: '__request__',
+          name: locale === 'vi' ? 'Yêu cầu' : locale === 'de' ? 'Anfragen' : 'Requests',
+          bookings: requestBookings,
+          isInactive: false,
+          columnType: 'request',
+          span: 1,
+        });
+      }
+      return columns;
     }
 
     const map = new Map<string, {
       name: string;
       bookings: FirestoreBooking[];
       isInactive: boolean;
-      columnType: 'staff' | 'request' | 'needs_action';
+      columnType: 'staff' | 'request';
+      span: number;
     }>();
 
     // 1. Add all active staff first (sorted by name for consistent order)
@@ -989,23 +1461,20 @@ export default function BookingsManagementPage() {
           bookings: [],
           isInactive: false,
           columnType: 'staff',
+          span: 1,
         });
       }
     });
 
-    // The mockup keeps customer requests and disrupted appointments out of staff columns.
+    // Pending requests remain in Request even after an assignee is selected.
+    // Confirmed appointments disrupted by leave stay in their original staff
+    // column with a warning so the owner can see exactly who was affected.
     const requestColumnBookings: FirestoreBooking[] = [];
-    const needsActionColumnBookings: FirestoreBooking[] = [];
-
     // 2. Assign bookings to columns
     dayBookings.forEach(b => {
       const isUnassigned = !b.staffId || b.staffId === 'any' || b.staffId === '';
       const isPending = b.status === 'pending_approval';
-      const needsOwnerAction = b.status === 'needs_owner_action';
-
-      if (needsOwnerAction) {
-        needsActionColumnBookings.push(b);
-      } else if (isUnassigned || isPending) {
+      if (isUnassigned || isPending) {
         requestColumnBookings.push(b);
       } else {
         if (!map.has(b.staffId)) {
@@ -1018,6 +1487,7 @@ export default function BookingsManagementPage() {
             bookings: [],
             isInactive,
             columnType: 'staff',
+            span: 1,
           });
         }
         map.get(b.staffId)!.bookings.push(b);
@@ -1037,25 +1507,24 @@ export default function BookingsManagementPage() {
 
     // Permanent workflow columns from the mockup. They remain visible even
     // when empty so the owner always knows where requests and disruptions go.
+    const requestEvents = requestColumnBookings.flatMap((booking) => {
+      const start = parseTime(booking.startTime);
+      const startMinutes = start.hours * 60 + start.minutes;
+      return [{ time: startMinutes, delta: 1 }, { time: startMinutes + booking.totalDurationMinutes, delta: -1 }];
+    }).sort((left, right) => left.time - right.time || left.delta - right.delta);
+    let concurrentRequests = 0;
+    let peakConcurrentRequests = 0;
+    requestEvents.forEach((event) => {
+      concurrentRequests += event.delta;
+      peakConcurrentRequests = Math.max(peakConcurrentRequests, concurrentRequests);
+    });
     staffColumns.push({
       id: '__request__',
       name: locale === 'vi' ? 'Yêu cầu' : locale === 'de' ? 'Anfragen' : 'Requests',
       bookings: requestColumnBookings,
       isInactive: false,
       columnType: 'request',
-    });
-
-    staffColumns.push({
-      id: '__needs_action__',
-      name:
-        locale === 'vi'
-          ? 'Cần xử lý'
-          : locale === 'de'
-            ? 'Aktion'
-            : 'Needs action',
-      bookings: needsActionColumnBookings,
-      isInactive: false,
-      columnType: 'needs_action',
+      span: Math.max(1, Math.min(3, peakConcurrentRequests)),
     });
 
     return staffColumns;
@@ -1090,6 +1559,15 @@ export default function BookingsManagementPage() {
           popoverEl.style.left = `${Math.max(10, (viewportWidth - currentPopoverWidth) / 2)}px`;
           popoverEl.style.opacity = '1';
         }
+        return;
+      }
+
+      if (window.innerWidth <= 767) {
+        const mobilePopoverWidth = popoverEl.offsetWidth || Math.min(window.innerWidth - 32, 432);
+        const mobilePopoverHeight = popoverEl.offsetHeight || 480;
+        popoverEl.style.top = `${Math.max(16, (window.innerHeight - mobilePopoverHeight) / 2)}px`;
+        popoverEl.style.left = `${Math.max(16, (window.innerWidth - mobilePopoverWidth) / 2)}px`;
+        popoverEl.style.opacity = '1';
         return;
       }
 
@@ -1141,24 +1619,35 @@ export default function BookingsManagementPage() {
   const goToNextWeek = () => setWeekStart(prev => addDays(prev, 7));
   const goToToday = () => { setWeekStart(getStartOfWeek(getGermanDateObject())); setSelectedDate(getGermanTodayString()); };
 
-  const weekRangeLabel = useMemo(() => {
-    const end = addDays(weekStart, 6);
-    const fmt = (d: Date) => d.toLocaleDateString(locale === 'de' ? 'de-DE' : locale === 'vi' ? 'vi-VN' : 'en-US', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    return `${fmt(weekStart)} – ${fmt(end)}`;
-  }, [weekStart, locale]);
-
   // ===== RENDER BOOKING BLOCK =====
   const renderCalBookingBlock = (booking: FirestoreBooking, leftPercent = 0, widthPercent = 100) => {
     const { hours: startH, minutes: startM } = parseTime(booking.startTime);
     const topOffset = (startH - calendarStartHour) * HOUR_HEIGHT + (startM / 60) * HOUR_HEIGHT;
     const height = Math.max((booking.totalDurationMinutes / 60) * HOUR_HEIGHT, 28);
     const endTime = formatEndTime(booking.startTime, booking.totalDurationMinutes);
+    const hasLeaveConflict = Boolean(booking.conflictStaffId);
+    const isSpecificLeaveConflict = hasLeaveConflict && booking.staffSelectionType === 'specific';
+    const isAnyLeaveConflict = hasLeaveConflict && booking.staffSelectionType !== 'specific';
 
     let blockClass = styles.calBlock;
     if (booking.status === 'confirmed') blockClass += ` ${styles.calBlockConfirmed}`;
     if (booking.status === 'pending_approval') blockClass += ` ${styles.calBlockPending}`;
-    if (booking.status === 'needs_owner_action') blockClass += ` ${styles.calBlockNeedsAction}`;
+    if (booking.status === 'needs_owner_action') {
+      blockClass += ` ${styles.calBlockNeedsAction}`;
+      blockClass += booking.staffSelectionType === 'specific'
+        ? ` ${styles.calBlockNeedsActionSpecific}`
+        : ` ${styles.calBlockNeedsActionAny}`;
+    }
     if (booking.status === 'cancelled') blockClass += ` ${styles.calBlockCancelled}`;
+    const bookingGroupKey = getBookingGroupKey(booking);
+    const bookingIdentity = bookingIdentityByGroupKey.get(bookingGroupKey) ?? BOOKING_GROUP_PALETTE[0];
+    const visibleIdentity = isSpecificLeaveConflict
+      ? { background: '#FFF1F2', accent: '#EF4444', text: '#B91C1C', outline: '#FECACA' }
+      : isAnyLeaveConflict
+        ? { background: '#FFF7ED', accent: '#F97316', text: '#C2410C', outline: '#FED7AA' }
+        : bookingIdentity;
+    if (hoveredBookingGroupKey === bookingGroupKey) blockClass += ` ${styles.calBlockGroupHighlighted}`;
+    if (hoveredBookingGroupKey && hoveredBookingGroupKey !== bookingGroupKey) blockClass += ` ${styles.calBlockGroupMuted}`;
 
     return (
       <div
@@ -1169,16 +1658,132 @@ export default function BookingsManagementPage() {
           top: `${topOffset}px`,
           height: `${height}px`,
           left: `calc(${leftPercent}% + 3px)`,
-          width: `calc(${widthPercent}% - 6px)`
+          width: `calc(${widthPercent}% - 6px)`,
+          backgroundColor: visibleIdentity.background,
+          borderLeftColor: visibleIdentity.accent,
         }}
+        data-booking-group={bookingGroupKey}
+        title={`${booking.customerName} · ${getBookingGroupShortCode(booking)} · ${getServiceName(booking)}`}
+        onMouseEnter={() => setHoveredBookingGroupKey(bookingGroupKey)}
+        onMouseLeave={() => setHoveredBookingGroupKey(null)}
+        onFocus={() => setHoveredBookingGroupKey(bookingGroupKey)}
+        onBlur={() => setHoveredBookingGroupKey(null)}
         onClick={(e) => {
           e.stopPropagation();
           setPopover({ booking });
         }}
       >
-        <div className={styles.calBlockService}>{getServiceName(booking)}</div>
+        <span
+          className={styles.calBlockGroupCode}
+          style={{ color: visibleIdentity.text, borderColor: visibleIdentity.outline }}
+          aria-label={locale === 'vi' ? `Nhóm ${getBookingGroupShortCode(booking)}` : `Group ${getBookingGroupShortCode(booking)}`}
+        >
+          {getBookingGroupShortCode(booking)}
+        </span>
+        <span className={`${styles.calBlockStatusDot} ${styles[`calBlockStatusDot_${booking.status}`]}`} aria-hidden="true" />
+        <div className={styles.calBlockService} style={booking.status === 'cancelled' ? undefined : { color: visibleIdentity.text }}>{getServiceName(booking)}</div>
         <div className={styles.calBlockTime}>{booking.startTime}–{endTime}</div>
-        {height > 48 && user?.role !== 'staff' && <div className={styles.calBlockCustomer}>{booking.customerName}</div>}
+        {(height > 48 || (
+          height >= 40 &&
+          (booking.status === 'pending_approval' || booking.status === 'needs_owner_action')
+        )) && (user?.role !== 'staff' || booking.status === 'pending_approval' || booking.status === 'needs_owner_action') && (
+          <div className={styles.calBlockCustomer}>
+            {hasLeaveConflict
+              ? `${locale === 'vi' ? 'Thợ gốc' : 'Original'}: ${booking.requestedStaffName || booking.conflictStaffName || getStaffNameDisplay(booking.staffId, booking.staffName)}`
+              : booking.status === 'pending_approval' && booking.staffId && booking.staffId !== 'any'
+              ? `${locale === 'vi' ? 'Thợ' : 'Staff'}: ${getStaffNameDisplay(booking.staffId, booking.staffName)}`
+              : booking.status === 'needs_owner_action' && booking.proposedStaffName
+                ? `${locale === 'vi' ? 'Thợ thay' : 'Replacement'}: ${booking.proposedStaffName}`
+                : booking.status === 'needs_owner_action' && (booking.requestedStaffName || booking.conflictStaffName)
+                  ? `${locale === 'vi' ? 'Thợ gốc' : 'Original'}: ${booking.requestedStaffName || booking.conflictStaffName}`
+                  : user?.role === 'staff'
+                    ? ''
+                    : booking.customerName}
+          </div>
+        )}
+        {(booking.status === 'needs_owner_action' || booking.status === 'pending_approval') && (
+          <span className={styles.calBlockWarning} title={booking.status === 'pending_approval'
+            ? hasLeaveConflict
+              ? isSpecificLeaveConflict
+                ? (locale === 'vi' ? 'Khách đã yêu cầu đích danh thợ đang nghỉ' : 'Customer requested the absent employee')
+                : (locale === 'vi' ? 'Thợ được xếp tự động đang nghỉ' : 'The automatically assigned employee is absent')
+              : (locale === 'vi' ? 'Yêu cầu chưa được duyệt' : 'Request is awaiting approval')
+            : booking.staffSelectionType === 'specific'
+              ? (locale === 'vi' ? 'Khách đã yêu cầu đích danh thợ đang nghỉ' : 'Customer requested the absent employee')
+              : (locale === 'vi' ? 'Không còn thợ phù hợp đang rảnh' : 'No eligible employee is currently available')}>
+            <TriangleAlert className="h-3 w-3" />
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const renderBookingListRow = (booking: FirestoreBooking, grouped = false) => {
+    let borderLeftColor = '#E5E7EB';
+    if (booking.status === 'confirmed') borderLeftColor = '#1A56DB';
+    else if (booking.status === 'pending_approval') borderLeftColor = booking.conflictStaffId
+      ? (booking.staffSelectionType === 'specific' ? '#EF4444' : '#F97316')
+      : '#EAB308';
+    else if (booking.status === 'needs_owner_action') borderLeftColor = booking.staffSelectionType === 'specific' ? '#EF4444' : '#F97316';
+    else if (booking.status === 'cancelled') borderLeftColor = '#9CA3AF';
+    else if (booking.status === 'completed') borderLeftColor = '#2563EB';
+
+    const bookingGroupKey = getBookingGroupKey(booking);
+    const bookingIdentity = bookingIdentityByGroupKey.get(bookingGroupKey) ?? BOOKING_GROUP_PALETTE[0];
+
+    return (
+      <div key={booking.id} className={`${styles.bookingRow} ${grouped ? styles.bookingRowGrouped : ''}`}>
+        <div className={styles.rowTimeContainer}>
+          {(futureIssuesMode || isGlobalSearchActive) && <span className={styles.rowFutureDate}>{booking.appointmentDate}</span>}
+          <span className={styles.rowTime}>{booking.startTime} - {formatEndTime(booking.startTime, booking.totalDurationMinutes)}</span>
+          <span className={styles.rowDuration}>{booking.totalDurationMinutes} {t.common.minutes}</span>
+        </div>
+        <div
+          className={styles.bookingListItemCard}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            setPopoverAnchorEl(event.currentTarget as HTMLElement);
+            setPopover({ booking });
+          }}
+        >
+          <span className={styles.cardStatusDivider} style={{ backgroundColor: borderLeftColor }} />
+          <div className={styles.cardDetails}>
+            <div className={styles.bookingCodeRow}>
+              <span className={styles.bookingGroupDot} style={{ backgroundColor: bookingIdentity.accent }} aria-hidden="true" />
+              <span>{getBookingDisplayCode(booking)}</span>
+              <button
+                type="button"
+                className={styles.copyBookingCodeButton}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleCopyBookingCode(booking);
+                }}
+                aria-label={locale === 'vi' ? `Sao chép mã ${getBookingDisplayCode(booking)}` : `Copy ${getBookingDisplayCode(booking)}`}
+              >
+                {copiedBookingId === booking.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              </button>
+            </div>
+            <h3 className={styles.cardServiceTitle}>{getServiceName(booking)}</h3>
+            <div className={styles.cardStaffLine}>
+              {getStaffNameDisplay(booking.staffId, booking.staffName)}
+              {(() => {
+                const staff = realStaffList.find((item) => item.id === booking.staffId);
+                if (staff && staff.status !== 'active') {
+                  return <span className={styles.cardInactiveBadge}>{locale === 'vi' ? 'Nghỉ làm' : locale === 'de' ? 'Inaktiv' : 'Inactive'}</span>;
+                }
+                return null;
+              })()}
+            </div>
+            {user?.role !== 'staff' && booking.customerName && (
+              <div className={styles.cardCustomerLine}>
+                <Phone className="h-3.5 w-3.5 shrink-0" />
+                <span className={styles.customerNameText}>{booking.customerName}</span>
+              </div>
+            )}
+          </div>
+          <div className={styles.cardStatus}>{getStatusBadge(booking.status)}</div>
+        </div>
       </div>
     );
   };
@@ -1192,26 +1797,29 @@ export default function BookingsManagementPage() {
     return (
       <div className={styles.calendarView}>
         <div className={styles.calendarNav}>
-          <div className={styles.calNavLeft}>
-            <Button variant="outline" size="icon" onClick={goToPrevWeek}>
+          <div className={`${styles.calNavLeft} ${styles.staffWeekDateNav}`}>
+            <Button variant="outline" size="icon" className={styles.calNavBtn} onClick={goToPrevWeek}>
               <ChevronLeft className="w-5 h-5" />
             </Button>
-            <input
-              type="date"
-              className={styles.datePickerInput}
-              value={formatDateLocal(weekStart)}
-              onChange={(e) => {
-                if (e.target.value) {
-                  const [y, m, d] = e.target.value.split('-').map(Number);
-                  setWeekStart(getStartOfWeek(new Date(y, m - 1, d)));
-                }
-              }}
-            />
-            <Button variant="outline" size="icon" onClick={goToNextWeek}>
+            <div className={styles.datePickerWrapper}>
+              <span className={styles.dateLabelText}>{formatWeekRangeLabel(weekStart, locale)}</span>
+              <input
+                type="date"
+                className={styles.datePickerInputHidden}
+                value={formatDateLocal(weekStart)}
+                onChange={(e) => {
+                  if (e.target.value) {
+                    const [y, m, d] = e.target.value.split('-').map(Number);
+                    setWeekStart(getStartOfWeek(new Date(y, m - 1, d)));
+                  }
+                }}
+              />
+            </div>
+            <Button variant="outline" size="icon" className={styles.calNavBtn} onClick={goToNextWeek}>
               <ChevronRight className="w-5 h-5" />
             </Button>
           </div>
-          <Button variant="outline" onClick={goToToday}>
+          <Button variant="outline" className={styles.weekTodayButton} onClick={goToToday}>
             {locale === 'de' ? 'Heute' : locale === 'vi' ? 'Hôm nay' : 'Today'}
           </Button>
         </div>
@@ -1225,7 +1833,8 @@ export default function BookingsManagementPage() {
           </div>
         )}
 
-        <div className={styles.calGrid}>
+        <div className={styles.calGridScroller}>
+          <div className={`${styles.calGrid} ${styles.calGridMobileScrollable}`}>
           {/* Header row */}
           <div className={styles.calRow + ' ' + styles.calHeaderRow}>
             <div className={styles.calTimeCol}></div>
@@ -1271,6 +1880,7 @@ export default function BookingsManagementPage() {
               })}
             </div>
           </div>
+          </div>
         </div>
       </div>
     );
@@ -1279,57 +1889,62 @@ export default function BookingsManagementPage() {
   // ===== STAFF DAY CALENDAR (Manager/Owner view) =====
   const renderStaffDayCalendar = () => {
     const cols = staffColumnsForDate;
+    const columnUnits = cols.reduce((total, column) => total + column.span, 0);
     const totalHours = calendarEndHour - calendarStartHour;
     const bodyHeight = totalHours * HOUR_HEIGHT;
 
     return (
       <div className={styles.calendarView}>
-        {/* Centered Date Navigator */}
-        <div className={styles.calendarNavCentered}>
-          <Button
-            variant="outline"
-            size="icon"
-            className={styles.calNavBtn}
-            onClick={() => {
-              const [y, m, d] = selectedDate.split('-').map(Number);
-              const dateObj = new Date(y, m - 1, d);
-              dateObj.setDate(dateObj.getDate() - 1);
-              setSelectedDate(formatDateLocal(dateObj));
-            }}
-          >
-            <ChevronLeft className="w-5 h-5" />
-          </Button>
-          <div className={styles.datePickerWrapper}>
-            <span className={styles.dateLabelText}>
-              {formatDateGroupLabel(selectedDate, locale)}
-            </span>
-            <input
-              type="date"
-              className={styles.datePickerInputHidden}
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-            />
+        <div className={styles.calendarToolbarRow}>
+          <div className={styles.calendarNavCentered}>
+            <Button
+              variant="outline"
+              size="icon"
+              className={styles.calNavBtn}
+              onClick={() => {
+                const [y, m, d] = selectedDate.split('-').map(Number);
+                const dateObj = new Date(y, m - 1, d);
+                dateObj.setDate(dateObj.getDate() - 1);
+                setSelectedDate(formatDateLocal(dateObj));
+              }}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <div className={styles.datePickerWrapper}>
+              <span className={styles.dateLabelText}>
+                {formatDateGroupLabel(selectedDate, locale)}
+              </span>
+              <input
+                type="date"
+                className={styles.datePickerInputHidden}
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="icon"
+              className={styles.calNavBtn}
+              onClick={() => {
+                const [y, m, d] = selectedDate.split('-').map(Number);
+                const dateObj = new Date(y, m - 1, d);
+                dateObj.setDate(dateObj.getDate() + 1);
+                setSelectedDate(formatDateLocal(dateObj));
+              }}
+            >
+              <ChevronRight className="w-4 h-4" />
+            </Button>
           </div>
-          <Button
-            variant="outline"
-            size="icon"
-            className={styles.calNavBtn}
-            onClick={() => {
-              const [y, m, d] = selectedDate.split('-').map(Number);
-              const dateObj = new Date(y, m - 1, d);
-              dateObj.setDate(dateObj.getDate() + 1);
-              setSelectedDate(formatDateLocal(dateObj));
-            }}
-          >
-            <ChevronRight className="w-5 h-5" />
-          </Button>
 
         </div>
 
-        <div
-          className={styles.calGrid}
-          style={{ minWidth: `${Math.max(390, 56 + cols.length * 82)}px` }}
-        >
+        {renderAttentionSummary()}
+
+        <div className={styles.calGridScroller}>
+          <div
+            className={`${styles.calGrid} ${columnUnits > 3 ? styles.calGridMobileScrollable : ''}`}
+            style={{ minWidth: `${Math.max(390, 56 + columnUnits * 82)}px` }}
+          >
           {/* Header row - staff columns */}
           <div className={styles.calRow + ' ' + styles.calHeaderRow}>
             <div className={styles.calTimeCol}>
@@ -1344,21 +1959,15 @@ export default function BookingsManagementPage() {
             ) : (
               cols.map((col) => {
                 const isRequestCol = col.columnType === 'request';
-                const isNeedsActionCol = col.columnType === 'needs_action';
-                const isSpecialCol = isRequestCol || isNeedsActionCol;
+                const isSpecialCol = isRequestCol;
                 const displayName = isSpecialCol ? col.name : getStaffNameDisplay(col.id, col.name);
                 const isInactive = 'isInactive' in col && col.isInactive;
                 return (
-                  <div key={col.id} className={`${styles.calDayCol} ${styles.calHeaderCell} ${isRequestCol ? styles.calHeaderCellRequest : ''} ${isNeedsActionCol ? styles.calHeaderCellNeedsAction : ''} ${isInactive ? styles.calHeaderCellInactive : ''}`}>
-                    <div className={isRequestCol ? styles.requestAvatar : isNeedsActionCol ? styles.needsActionAvatar : isInactive ? styles.staffAvatarInactive : styles.staffAvatar}>
-                      {isRequestCol ? '📋' : isNeedsActionCol ? '!' : displayName.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
-                    </div>
+                  <div key={col.id} style={{ '--calendar-column-span': col.span, flexGrow: col.span } as React.CSSProperties} className={`${styles.calDayCol} ${styles.calHeaderCell} ${isRequestCol ? styles.calHeaderCellRequest : ''} ${isInactive ? styles.calHeaderCellInactive : ''}`}>
                     <span className={styles.calStaffName}>{displayName}</span>
                     <span className={styles.calStaffSubtitle}>
                       {isRequestCol
                         ? (locale === 'vi' ? 'chờ duyệt' : locale === 'de' ? 'wartend' : 'pending')
-                        : isNeedsActionCol
-                        ? (locale === 'vi' ? 'chờ sắp xếp' : locale === 'de' ? 'neu planen' : 'reassign')
                         : isInactive
                         ? (locale === 'vi' ? '🔴 Nghỉ làm' : locale === 'de' ? '🔴 Inaktiv' : '🔴 Inactive')
                         : (locale === 'vi' ? 'nhân viên' : locale === 'de' ? 'Mitarbeiter' : 'employee')}
@@ -1388,7 +1997,9 @@ export default function BookingsManagementPage() {
                 <div className={styles.calColumn}></div>
               ) : (
                 cols.map((col) => {
-                  const positioned = computeOverlappingLayout(col.bookings);
+                  const positioned = col.columnType === 'request'
+                    ? computeRequestGroupedLayout(col.bookings)
+                    : computeOverlappingLayout(col.bookings);
                   // Get absence blocks for this staff on selected date
                   const isStaffColumn = col.columnType === 'staff';
                   const colAbsences = (isStaffColumn && staffAbsences[col.id])
@@ -1397,12 +2008,12 @@ export default function BookingsManagementPage() {
                   return (
                     <div
                       key={col.id}
+                      style={{ '--calendar-column-span': col.span, flexGrow: col.span } as React.CSSProperties}
                       className={styles.calColumn}
                     >
                       {/* Clickable time slots for walk-in booking */}
                       {isStaffColumn && isManagerOrOwner && hours.flatMap((hour) => {
                         return [0, 30].map((minOffset) => {
-                          const slotMinutes = hour * 60 + minOffset;
                           const topPx = (hour - calendarStartHour) * HOUR_HEIGHT + (minOffset / 60) * HOUR_HEIGHT;
                           const timeStr = `${String(hour).padStart(2, '0')}:${String(minOffset).padStart(2, '0')}`;
                           return (
@@ -1457,6 +2068,7 @@ export default function BookingsManagementPage() {
               )}
             </div>
           </div>
+          </div>
         </div>
 
         {/* Legend Footer */}
@@ -1492,206 +2104,272 @@ export default function BookingsManagementPage() {
   return (
     <div id="bookings-container" className={styles.container}>
       {/* Top Bar */}
-      {viewMode === 'list' ? (
-        <div className={styles.topBar}>
-          <h1 className={styles.title}>
-            {locale === 'vi' ? 'Lịch hẹn' : locale === 'de' ? 'Termine' : 'Bookings'}
-          </h1>
-          <div className={styles.topBarRight}>
-            {user?.role === 'staff' && ownStaff && selectedDate <= getGermanTodayString() && (
+      <div className={styles.topBar}>
+        <button className={styles.backBtn} onClick={() => router.push(getAdminBackTarget())}>
+          <ChevronLeft className="h-6 w-6" />
+        </button>
+        <h1 className={`${styles.title} ${styles.titleCenter}`}>
+          {locale === 'vi' ? 'Lịch hẹn' : locale === 'de' ? 'Termine' : 'Bookings'}
+        </h1>
+        <div className={styles.topBarRight}>
+          {isManagerOrOwner && (
+            <Button variant="outline" className={styles.walkInTopBtn} onClick={() => openNewBookingModal('', '', '09:00')}>
+              + {locale === 'vi' ? 'Khách lẻ' : 'Walk-in'}
+            </Button>
+          )}
+          {viewMode === 'list' ? (
+            <>
               <Button
                 variant="outline"
-                onClick={() => openNewBookingModal(ownStaff.id, ownStaff.name, '09:00')}
+                size="icon"
+                className={styles.toggleViewBtn}
+                onClick={() => setSearchOpen((current) => !current)}
+                aria-label={locale === 'vi' ? 'Tìm kiếm lịch hẹn' : 'Search bookings'}
               >
-                + {locale === 'vi' ? 'Khách lẻ' : 'Walk-in'}
+                <Search className="h-5 w-5" />
               </Button>
-            )}
-            <Button
-              variant="outline"
-              size="icon"
-              className={styles.toggleViewBtn}
-              onClick={() => setViewMode('calendar')}
-            >
-              <Calendar className="w-5 h-5" />
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className={styles.topBar}>
-          <button
-            className={styles.backBtn}
-            onClick={() => router.push('/admin/dashboard/')}
-          >
-            <ChevronLeft className="w-6 h-6" />
-          </button>
-          <h1 className={`${styles.title} ${styles.titleCenter}`}>
-            {locale === 'vi' ? 'Lịch hẹn' : locale === 'de' ? 'Termine' : 'Bookings'}
-          </h1>
-          <div className={styles.topBarRight}>
-            {user?.role === 'staff' && ownStaff && selectedDate <= getGermanTodayString() && (
               <Button
                 variant="outline"
-                onClick={() => openNewBookingModal(ownStaff.id, ownStaff.name, '09:00')}
+                size="icon"
+                className={`${styles.toggleViewBtn} ${styles.desktopTopAction}`}
+                onClick={() => setViewMode('calendar')}
+                aria-label={locale === 'vi' ? 'Xem lịch dạng lịch' : 'Calendar view'}
               >
-                + {locale === 'vi' ? 'Khách lẻ' : 'Walk-in'}
+                <Calendar className="h-5 w-5" />
               </Button>
-            )}
-            <Button
-              variant="outline"
-              size="icon"
-              className={styles.toggleViewBtn}
-              onClick={() => setViewMode('list')}
-            >
-              <List className="w-5 h-5" />
-            </Button>
-          </div>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="icon"
+                className={styles.toggleViewBtn}
+                onClick={() => setSearchOpen((current) => !current)}
+                aria-label={locale === 'vi' ? 'Tìm kiếm toàn bộ lịch hẹn' : 'Search all bookings'}
+              >
+                <Search className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className={styles.toggleViewBtn}
+                onClick={() => setViewMode('list')}
+                aria-label={locale === 'vi' ? 'Xem lịch dạng danh sách' : 'List view'}
+              >
+                <List className="h-5 w-5" />
+              </Button>
+            </>
+          )}
         </div>
-      )}
+      </div>
+
+      {searchOpen && <div className={styles.mobileSearchRow}>
+        <div className={styles.mobileSearchBox}>
+          <Search className="h-4 w-4" />
+          <input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder={locale === 'vi' ? 'Tìm mã CC, khách, dịch vụ, thợ' : 'Search code, customer, service, staff'} />
+        </div>
+        <button type="button" className={styles.mobileSearchClose} onClick={() => { setSearchOpen(false); setSearchQuery(''); }} aria-label={locale === 'vi' ? 'Đóng tìm kiếm' : 'Close search'}>
+          <X className="h-4 w-4" />
+        </button>
+      </div>}
 
       {/* View */}
-      {viewMode === 'list' ? (
+      {viewMode === 'list' || isGlobalSearchActive ? (
         <>
-          {/* Dual Dropdown Select Filter Bar */}
-          <div className={styles.filtersBar}>
-            <div className={styles.filterHalf}>
-              <Users className="w-4 h-4 text-gray-400 mr-2 flex-shrink-0" />
-              <select
-                className={styles.filterSelect}
-                value={staffFilterId}
-                onChange={(e) => setStaffFilterId(e.target.value)}
+          {/* Centered Date Navigator */}
+          <div className={styles.dateNavRow}>
+            <div className={styles.calendarNavCentered}>
+              {isGlobalSearchActive ? (
+                <div className={styles.datePickerWrapper}><span className={styles.dateLabelText}>{locale === 'vi' ? 'Kết quả trên toàn bộ lịch' : 'Results across all dates'}</span></div>
+              ) : futureIssuesMode ? (
+                <div className={styles.datePickerWrapper}><span className={styles.dateLabelText}>{locale === 'vi' ? 'Lịch tương lai cần xử lý' : 'Future bookings needing action'}</span></div>
+              ) : <>
+              <Button
+                variant="outline"
+                size="icon"
+                className={styles.calNavBtn}
+                onClick={() => {
+                  const [y, m, d] = selectedDate.split('-').map(Number);
+                  const dateObj = new Date(y, m - 1, d);
+                  dateObj.setDate(dateObj.getDate() - 1);
+                  setSelectedDate(formatDateLocal(dateObj));
+                }}
               >
-                <option value="all">{locale === 'vi' ? 'Tất cả thợ' : locale === 'de' ? 'Alle Mitarbeiter' : 'All staff'}</option>
-                {staffList.map(s => {
-                  const isInactive = s.status !== 'active';
-                  return (
-                    <option key={s.id} value={s.id}>
-                      {getStaffNameDisplay(s.id, s.name)}{isInactive ? ` (${locale === 'vi' ? 'Nghỉ làm' : locale === 'de' ? 'Inaktiv' : 'Inactive'})` : ''}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-            <div className={styles.filterDivider}></div>
-            <div className={styles.filterHalf}>
-              <div className={`${styles.statusDot} ${styles[`statusDot_${filter}`]}`} />
-              <select
-                className={styles.filterSelect}
-                value={filter}
-                onChange={(e) => setFilter(e.target.value as FilterStatus)}
+                <ChevronLeft className="w-5 h-5" />
+              </Button>
+              <div className={styles.datePickerWrapper}>
+                <span className={styles.dateLabelText}>
+                  {formatDateGroupLabel(selectedDate, locale)}
+                </span>
+                <input
+                  type="date"
+                  className={styles.datePickerInputHidden}
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                />
+              </div>
+              <Button
+                variant="outline"
+                size="icon"
+                className={styles.calNavBtn}
+                onClick={() => {
+                  const [y, m, d] = selectedDate.split('-').map(Number);
+                  const dateObj = new Date(y, m - 1, d);
+                  dateObj.setDate(dateObj.getDate() + 1);
+                  setSelectedDate(formatDateLocal(dateObj));
+                }}
               >
-                <option value="all">{locale === 'vi' ? 'Tất cả trạng thái' : locale === 'de' ? 'Alle Status' : 'All status'}</option>
-                <option value="pending_approval">{t.admin.bookings.statusPending}</option>
-                <option value="needs_owner_action">
-                  {locale === 'vi' ? 'Cần xử lý' : locale === 'de' ? 'Zu bearbeiten' : 'Needs action'}
-                </option>
-                <option value="confirmed">{t.admin.bookings.statusConfirmed}</option>
-                <option value="cancelled">{t.admin.bookings.statusCancelled}</option>
-              </select>
+                <ChevronRight className="w-5 h-5" />
+              </Button>
+              </>}
             </div>
+            {!isGlobalSearchActive && (
+              <button
+                type="button"
+                className={styles.mobileFilterButton}
+                onClick={() => setViewMode('calendar')}
+                aria-label={locale === 'vi' ? 'Chuyển sang lịch dạng cột' : 'Switch to calendar view'}
+              >
+                <Calendar className="h-5 w-5" />
+              </button>
+            )}
           </div>
 
-          {/* Centered Date Navigator */}
-          <div className={styles.calendarNavCentered}>
-            <Button
-              variant="outline"
-              size="icon"
-              className={styles.calNavBtn}
-              onClick={() => {
-                const [y, m, d] = selectedDate.split('-').map(Number);
-                const dateObj = new Date(y, m - 1, d);
-                dateObj.setDate(dateObj.getDate() - 1);
-                setSelectedDate(formatDateLocal(dateObj));
-              }}
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </Button>
-            <div className={styles.datePickerWrapper}>
-              <span className={styles.dateLabelText}>
-                {formatDateGroupLabel(selectedDate, locale)}
-              </span>
-              <input
-                type="date"
-                className={styles.datePickerInputHidden}
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-              />
+          <div className={styles.mobileFilterPanel}>
+              {isManagerOrOwner && (
+                <label className={styles.mobileFilterField}>
+                  <span>{locale === 'vi' ? 'Thợ' : 'Staff'}</span>
+                  <div className={styles.mobileFilterSelectControl}>
+                    <span aria-hidden="true">
+                      {staffFilterId === 'all'
+                        ? (locale === 'vi' ? 'Tất cả thợ' : 'All staff')
+                        : getStaffNameDisplay(
+                          staffFilterId,
+                          staffList.find((staff) => staff.id === staffFilterId)?.name || '',
+                        )}
+                    </span>
+                    <select
+                      aria-label={locale === 'vi' ? 'Chọn thợ' : 'Select staff'}
+                      value={staffFilterId}
+                      onChange={(event) => setStaffFilterId(event.target.value)}
+                    >
+                      <option value="all">{locale === 'vi' ? 'Tất cả thợ' : 'All staff'}</option>
+                      {staffList.map((staff) => <option key={staff.id} value={staff.id}>{getStaffNameDisplay(staff.id, staff.name)}</option>)}
+                    </select>
+                  </div>
+                </label>
+              )}
+              <label className={styles.mobileFilterField}>
+                <span>{locale === 'vi' ? 'Nguồn lịch' : 'Source'}</span>
+                <div className={styles.mobileFilterSelectControl}>
+                  <span aria-hidden="true">
+                    {sourceFilter === 'all'
+                      ? (locale === 'vi' ? 'Tất cả nguồn' : 'All sources')
+                      : sourceFilter === 'online_booking'
+                        ? (locale === 'vi' ? 'Khách đặt từ web' : 'Web booking')
+                        : (locale === 'vi' ? 'Chủ tiệm tạo' : 'Owner created')}
+                  </span>
+                  <select
+                    aria-label={locale === 'vi' ? 'Chọn nguồn lịch' : 'Select booking source'}
+                    value={sourceFilter}
+                    onChange={(event) => setSourceFilter(event.target.value as SourceFilter)}
+                  >
+                    <option value="all">{locale === 'vi' ? 'Tất cả nguồn' : 'All sources'}</option>
+                    <option value="online_booking">{locale === 'vi' ? 'Khách đặt từ web' : 'Web booking'}</option>
+                    <option value="owner_created">{locale === 'vi' ? 'Chủ tiệm tạo' : 'Owner created'}</option>
+                  </select>
+                </div>
+              </label>
             </div>
-            <Button
-              variant="outline"
-              size="icon"
-              className={styles.calNavBtn}
-              onClick={() => {
-                const [y, m, d] = selectedDate.split('-').map(Number);
-                const dateObj = new Date(y, m - 1, d);
-                dateObj.setDate(dateObj.getDate() + 1);
-                setSelectedDate(formatDateLocal(dateObj));
-              }}
-            >
-              <ChevronRight className="w-5 h-5" />
-            </Button>
+
+          {renderAttentionSummary()}
+
+          <div className={styles.mobileStatusChips}>
+            {([
+              ['all', locale === 'vi' ? 'Tất cả' : 'All'],
+              ['confirmed', t.admin.bookings.statusConfirmed],
+              ['pending_approval', t.admin.bookings.statusPending],
+              ['needs_owner_action', locale === 'vi' ? 'Cần xử lý' : 'Needs action'],
+              ['cancelled', t.admin.bookings.statusCancelled],
+            ] as Array<[FilterStatus, string]>).map(([value, label]) => (
+              <button key={value} type="button" onClick={() => applyDayStatusFilter(value)} className={filter === value ? styles.mobileStatusChipActive : styles.mobileStatusChip}>
+                {label}
+              </button>
+            ))}
           </div>
 
           <div className={styles.listView}>
-            {loading ? (
+            {(isGlobalSearchActive ? searchLoading : loading) ? (
               <div className={styles.noBookings}><p>{t.admin.bookings.loading}</p></div>
+            ) : searchError ? (
+              <div className={styles.noBookings}><p>{searchError}</p></div>
             ) : dayFilteredBookings.length === 0 ? (
-              <div className={styles.noBookings}><span className={styles.emptyIcon}>📭</span><p>{t.admin.bookings.empty}</p></div>
+              <div className={styles.noBookings}><Calendar className={styles.emptyCalendarIcon} /><p>{t.admin.bookings.empty}</p></div>
             ) : (
-              dayFilteredBookings.map(booking => {
-                let borderLeftColor = '#E5E7EB';
-                if (booking.status === 'confirmed') borderLeftColor = '#059669';
-                else if (booking.status === 'pending_approval') borderLeftColor = '#EAB308';
-                else if (booking.status === 'needs_owner_action') borderLeftColor = '#F97316';
-                else if (booking.status === 'cancelled') borderLeftColor = '#9CA3AF';
-                else if (booking.status === 'completed') borderLeftColor = '#2563EB';
+              dayFilteredBookingGroups.map((group) => {
+                const firstBooking = group.allBookings[0] ?? group.visibleBookings[0];
+                if (!firstBooking) return null;
+                const identity = bookingIdentityByGroupKey.get(group.key) ?? BOOKING_GROUP_PALETTE[0];
+                const totalServiceCount = group.allBookings.reduce((total, booking) => total + Math.max(booking.services.length, 1), 0);
+                const visibleServiceCount = group.visibleBookings.reduce((total, booking) => total + Math.max(booking.services.length, 1), 0);
+                const groupEndMinute = Math.max(...group.allBookings.map((booking) => {
+                  const { hours: startHour, minutes: startMinute } = parseTime(booking.startTime);
+                  return startHour * 60 + startMinute + booking.totalDurationMinutes;
+                }));
+                const groupEndLabel = `${String(Math.floor(groupEndMinute / 60) % 24).padStart(2, '0')}:${String(groupEndMinute % 60).padStart(2, '0')}`;
+                const serviceCountLabel = visibleServiceCount === totalServiceCount
+                  ? `${totalServiceCount} ${locale === 'vi' ? 'dịch vụ' : 'services'}`
+                  : `${visibleServiceCount}/${totalServiceCount} ${locale === 'vi' ? 'dịch vụ' : 'services'}`;
+                const isMultiSegmentBooking = group.allBookings.length > 1;
+
+                if (!isMultiSegmentBooking) return renderBookingListRow(firstBooking);
 
                 return (
-                  <div key={booking.id} className={styles.bookingRow}>
-                    <div className={styles.rowTimeContainer}>
-                      <span className={styles.rowTime}>{booking.startTime}</span>
-                      <span className={styles.rowDuration}>{booking.totalDurationMinutes} {t.common.minutes}</span>
-                    </div>
-                    <div
-                      className={styles.bookingListItemCard}
-                      style={{ borderLeft: `4px solid ${borderLeftColor}` }}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPopoverAnchorEl(e.currentTarget as HTMLElement);
-                        setPopover({ booking });
+                  <section
+                    key={group.key}
+                    className={styles.bookingGroup}
+                    style={{ borderColor: identity.outline }}
+                    aria-label={locale === 'vi' ? `Nhóm lịch của ${firstBooking.customerName}` : `Booking group for ${firstBooking.customerName}`}
+                  >
+                    <button
+                      type="button"
+                      className={styles.bookingGroupHeader}
+                      style={{ backgroundColor: identity.background }}
+                      onClick={(event) => {
+                        setPopoverAnchorEl(event.currentTarget as HTMLElement);
+                        setPopover({ booking: group.visibleBookings[0] });
                       }}
                     >
-                      <div className={styles.cardHeaderRow}>
-                        <h3 className={styles.cardServiceTitle}>{getServiceName(booking)}</h3>
-                        {getStatusBadge(booking.status)}
-                      </div>
-                      <div className={styles.cardStaffLine}>
-                        {getStaffNameDisplay(booking.staffId, booking.staffName)}
-                        {(() => {
-                          const staff = realStaffList.find(s => s.id === booking.staffId);
-                          if (staff && staff.status !== 'active') {
-                            return <span className={styles.cardInactiveBadge}>{locale === 'vi' ? 'Nghỉ làm' : locale === 'de' ? 'Inaktiv' : 'Inactive'}</span>;
-                          }
-                          return null;
-                        })()}
-                      </div>
-                      {user?.role !== 'staff' && (
-                        <div className={styles.cardCustomerLine}>
-                          <span className="text-gray-400 mr-1.5 flex-shrink-0">📞</span>
-                          <span className={styles.customerPhoneNumber}>{booking.customerPhone}</span>
-                          <span className="mx-1.5 text-gray-300">·</span>
-                          <span className={styles.customerNameText}>{booking.customerName}</span>
-                        </div>
-                      )}
+                      <span className={styles.bookingGroupMarker} style={{ backgroundColor: identity.accent }} aria-hidden="true" />
+                      <span className={styles.bookingGroupHeading}>
+                        <strong>{firstBooking.customerName || (locale === 'vi' ? 'Khách vãng lai' : 'Walk-in')}</strong>
+                        <span>
+                          #{getBookingGroupShortCode(firstBooking)} · {serviceCountLabel} · {firstBooking.startTime}–{groupEndLabel}
+                        </span>
+                      </span>
+                      <span className={styles.bookingGroupCount} style={{ color: identity.text, borderColor: identity.outline }}>
+                        {group.allBookings.length}
+                      </span>
+                    </button>
+                    <div className={styles.bookingGroupItems}>
+                      {group.visibleBookings.map((booking) => renderBookingListRow(booking, true))}
                     </div>
-                  </div>
+                  </section>
                 );
               })
             )}
           </div>
         </>
       ) : (
-        <>{renderStaffDayCalendar()}</>
+        <>
+          {user?.role === 'staff' && (
+            <div className={styles.staffCalendarScopeToggle}>
+              <button type="button" className={staffCalendarScope === 'week' ? styles.staffCalendarScopeActive : ''} onClick={() => setStaffCalendarScope('week')}>{locale === 'vi' ? 'Tuần' : 'Week'}</button>
+              <button type="button" className={staffCalendarScope === 'day' ? styles.staffCalendarScopeActive : ''} onClick={() => setStaffCalendarScope('day')}>{locale === 'vi' ? 'Ngày' : 'Day'}</button>
+            </div>
+          )}
+          {user?.role === 'staff' && staffCalendarScope === 'week' ? renderWeeklyCalendar() : renderStaffDayCalendar()}
+        </>
       )}
 
       {/* Quick 2-Tap Booking Popup */}
@@ -1708,20 +2386,18 @@ export default function BookingsManagementPage() {
           >
             <div className={styles.quickBookHeader}>
               <span className={styles.quickBookTitle}>
-                ⚡ {quickBookPopup.timeStr} · {quickBookPopup.staffName}
+                {quickBookPopup.timeStr} · {quickBookPopup.staffName}
               </span>
               <button className={styles.quickBookClose} onClick={() => setQuickBookPopup(null)}>×</button>
             </div>
             <div className={styles.quickBookBtns}>
               <button className={styles.quickBookBtn} onClick={() => handleQuickCreate(60)}>
-                <span className={styles.quickBookBtnIcon}>💅</span>
                 <span className={styles.quickBookBtnLabel}>
                   {locale === 'vi' ? '1 Dịch vụ' : locale === 'de' ? '1 Dienst' : '1 Service'}
                 </span>
                 <span className={styles.quickBookBtnTime}>60 {locale === 'vi' ? 'phút' : 'min'}</span>
               </button>
               <button className={styles.quickBookBtn} onClick={() => handleQuickCreate(120)}>
-                <span className={styles.quickBookBtnIcon}>✨</span>
                 <span className={styles.quickBookBtnLabel}>
                   {locale === 'vi' ? '2 Dịch vụ' : locale === 'de' ? '2 Dienste' : '2 Services'}
                 </span>
@@ -1741,199 +2417,211 @@ export default function BookingsManagementPage() {
           <div className={styles.modalOverlay} onClick={() => setShowNewBookingModal(false)} />
           <div className={styles.newBookingModal}>
             <div className={styles.nbmHeader}>
+              <span aria-hidden="true" className={styles.nbmHeaderSpacer} />
               <h3 className={styles.nbmTitle}>{t.admin.bookings.walkInBooking || 'Walk-in Booking'}</h3>
-              <Button variant="ghost" size="icon" className="w-7 h-7 p-0 border-0 bg-transparent cursor-pointer" onClick={() => setShowNewBookingModal(false)}>
-                <X className="w-4 h-4" />
-              </Button>
+              <button type="button" className={styles.nbmCloseButton} onClick={() => setShowNewBookingModal(false)} aria-label={locale === 'vi' ? 'Đóng' : 'Close'}>
+                <X className="h-5 w-5" />
+              </button>
             </div>
 
             <div className={styles.nbmBody}>
-              {/* Date & Time & Staff */}
-              <div className={styles.nbmRow}>
-                <div className={styles.nbmField}>
-                  <label className={styles.nbmLabel}>📅 {t.admin.bookings.detailDate}</label>
-                  <span className={styles.nbmValue}>{formatDateGroupLabel(selectedDate, locale)}</span>
+              <section className={styles.nbmCard}>
+                <div className={styles.nbmHero}>
+                  <span className={styles.nbmHeroCircleOne} />
+                  <span className={styles.nbmHeroCircleTwo} />
+                  <span className={styles.nbmHeroCircleThree} />
                 </div>
-                <div className={styles.nbmField}>
-                  <label className={styles.nbmLabel}>⏰ {t.admin.bookings.startTime || 'Start time'}</label>
-                  <input
-                    type="time"
-                    className={styles.nbmInput}
-                    value={newBookingTime}
-                    onChange={(e) => setNewBookingTime(e.target.value)}
-                  />
-                </div>
-              </div>
 
-              <div className={styles.nbmField}>
-                <label className={styles.nbmLabel}>👤 {t.admin.bookings.detailStaff}</label>
-                <select
-                  className={styles.nbmSelect}
-                  value={newBookingStaffId}
-                  disabled={user?.role === 'staff'}
-                  onChange={(e) => {
-                    const s = realStaffList.find(st => st.id === e.target.value);
-                    setNewBookingStaffId(e.target.value);
-                    setNewBookingStaffName(s?.name || '');
-                    // Clear services incompatible with new staff
-                    if (s && s.serviceIds && s.serviceIds.length > 0) {
-                      setNewBookingServices(prev => prev.filter(svc => s.serviceIds!.includes(svc.serviceId)));
-                    }
-                  }}
-                >
-                  {user?.role !== 'staff' && <option value="">{t.admin.bookings.anyStaff}</option>}
-                  {realStaffList.filter(s => s.status === 'active').map(s => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Services */}
-              <div className={styles.nbmServicesSection}>
-                <label className={styles.nbmLabel}>💅 {t.admin.bookings.service || 'Service'}</label>
-                {newBookingServices.map((svc, idx) => (
-                  <div key={idx} className={styles.nbmServiceRow}>
-                    <div className={styles.nbmServiceInfo}>
-                      <span className={styles.nbmServiceCat}>{svc.categoryName}</span>
-                      <span className={styles.nbmServiceName}>{svc.serviceName}</span>
-                      <span className={styles.nbmServiceMeta}>{svc.duration} min · €{svc.price}</span>
+                <div className={styles.nbmCardContent}>
+                  <div className={styles.nbmIdentityRow}>
+                    <span className={styles.nbmAvatar}>
+                      <UserRound className="h-12 w-12" strokeWidth={1.8} />
+                    </span>
+                    <div className={styles.nbmCustomerNameWrap}>
+                      <input
+                        type="text"
+                        className={styles.nbmCustomerNameInput}
+                        aria-label={t.admin.bookings.customerName || 'Customer name'}
+                        placeholder={locale === 'vi' ? 'Khách lẻ' : locale === 'de' ? 'Laufkundschaft' : 'Walk-in customer'}
+                        value={newBookingCustomerName}
+                        onChange={(e) => setNewBookingCustomerName(e.target.value)}
+                      />
+                      <Pencil className="h-4 w-4 shrink-0" aria-hidden="true" />
                     </div>
-                    <button
-                      className={styles.nbmRemoveBtn}
-                      onClick={() => setNewBookingServices(prev => prev.filter((_, i) => i !== idx))}
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
                   </div>
-                ))}
 
-                {newBookingServices.length < 2 && (() => {
-                  // Filter services based on selected staff's capabilities
-                  const selectedStaff = newBookingStaffId ? realStaffList.find(s => s.id === newBookingStaffId) : null;
-                  const staffServiceIds = selectedStaff?.serviceIds;
-                  const hasServiceFilter = staffServiceIds && staffServiceIds.length > 0;
-                  const availableServices = hasServiceFilter
-                    ? allServices.filter((service) => staffServiceIds.includes(service.id))
-                    : allServices;
+                  <label className={styles.nbmDateBar}>
+                    <CalendarDays className="h-5 w-5 shrink-0" />
+                    <span>{formatDateGroupLabel(selectedDate, locale)}</span>
+                    <input
+                      type="date"
+                      className={styles.nbmDateInput}
+                      value={selectedDate}
+                      onChange={(e) => setSelectedDate(e.target.value)}
+                      aria-label={t.admin.bookings.detailDate}
+                    />
+                  </label>
 
-                  return (
-                  <div className={styles.nbmAddService}>
-                    {hasServiceFilter && (
-                      <div className={styles.nbmFilterHint}>
-                        {locale === 'vi' ? `Chỉ hiện dịch vụ ${selectedStaff?.name} có thể làm`
-                          : locale === 'de' ? `Nur Services die ${selectedStaff?.name} kann`
-                          : `Only showing services ${selectedStaff?.name} can do`}
-                      </div>
-                    )}
-                    <select
-                      className={styles.nbmSelect}
-                      value=""
-                      onChange={(e) => {
-                        const svcId = e.target.value;
-                        if (!svcId) return;
-                        const svc = allServices.find((service) => service.id === svcId);
-                        if (!svc) return;
-                        const cat = allCategories.find((category) => category.id === svc.categoryId);
-                        setNewBookingServices(prev => [...prev, {
-                          categoryId: svc.categoryId || '',
-                          categoryName: cat?.name || svc.category || '',
-                          serviceId: svc.id,
-                          serviceName: svc.name || '',
-                          duration: svc.durationMin || 30,
-                          price: svc.price || 0,
-                        }]);
-                      }}
-                    >
-                      <option value="">{t.admin.bookings.addService || '+ Add service'}</option>
-                      {allCategories.map((cat) => {
-                        const catServices = availableServices.filter((service) => service.categoryId === cat.id);
-                        if (catServices.length === 0) return null;
-                        return (
-                          <optgroup key={cat.id} label={translateCategory(cat.id, cat.name)}>
-                            {catServices.map((s) => (
-                              <option key={s.id} value={s.id}>
-                                {translateService(s.id, s.name)} ({s.durationMin || 30}min · €{s.price})
-                              </option>
-                            ))}
-                          </optgroup>
-                        );
-                      })}
-                    </select>
-                  </div>
-                  );
-                })()}
-              </div>
-
-              {/* Customer info */}
-              <div className={styles.nbmField}>
-                <label className={styles.nbmLabel}>🧑 {t.admin.bookings.customerName || 'Customer name'} ({locale === 'vi' ? 'không bắt buộc' : 'optional'})</label>
-                <input
-                  type="text"
-                  className={styles.nbmInput}
-                  placeholder={t.admin.bookings.customerName}
-                  value={newBookingCustomerName}
-                  onChange={(e) => setNewBookingCustomerName(e.target.value)}
-                />
-              </div>
-              <div className={styles.nbmField}>
-                <label className={styles.nbmLabel}>📱 {t.admin.bookings.customerPhone || 'Phone'} ({locale === 'vi' ? 'không bắt buộc' : 'optional'})</label>
-                <input
-                  type="tel"
-                  className={styles.nbmInput}
-                  placeholder="+49 123 456 789"
-                  value={newBookingCustomerPhone}
-                  onChange={(e) => setNewBookingCustomerPhone(e.target.value)}
-                />
-              </div>
-              <div className={styles.nbmField}>
-                <label className={styles.nbmLabel}>📝 {t.admin.bookings.notes || 'Notes'}</label>
-                <textarea
-                  className={styles.nbmTextarea}
-                  placeholder="..."
-                  value={newBookingNotes}
-                  onChange={(e) => setNewBookingNotes(e.target.value)}
-                  rows={2}
-                />
-              </div>
-
-              {/* Summary */}
-              {newBookingServices.length > 0 && (() => {
-                const totalDuration = newBookingServices.reduce((s, sv) => s + sv.duration, 0);
-                const totalPrice = newBookingServices.reduce((s, sv) => s + sv.price, 0);
-                const [sH, sM] = newBookingTime.split(':').map(Number);
-                let runMin = sH * 60 + sM;
-                return (
-                  <div className={styles.nbmSummary}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', flex: 1 }}>
-                      {newBookingServices.map((sv, i) => {
-                        const from = `${String(Math.floor(runMin / 60)).padStart(2, '0')}:${String(runMin % 60).padStart(2, '0')}`;
-                        runMin += sv.duration;
-                        const to = `${String(Math.floor(runMin / 60)).padStart(2, '0')}:${String(runMin % 60).padStart(2, '0')}`;
-                        return (
-                          <span key={i} style={{ fontSize: '12px' }}>
-                            {i + 1}. {sv.serviceName}: {from} → {to}
-                          </span>
-                        );
-                      })}
-                      <span style={{ marginTop: '4px', fontWeight: 700 }}>
-                        ⏱ {totalDuration} min · 💰 €{totalPrice}
+                  <div className={styles.nbmTimeGrid}>
+                    <label className={styles.nbmTimeCard}>
+                      <span className={styles.nbmTimeLabel}><Clock className="h-4 w-4" />{t.admin.bookings.startTime || 'Start time'}</span>
+                      <select
+                        className={styles.nbmTimeInput}
+                        value={newBookingTime}
+                        onChange={(e) => setNewBookingTime(e.target.value)}
+                        aria-label={t.admin.bookings.startTime || 'Start time'}
+                      >
+                        {Array.from({ length: 96 }, (_, index) => {
+                          const totalMinutes = index * 15;
+                          const value = `${String(Math.floor(totalMinutes / 60)).padStart(2, '0')}:${String(totalMinutes % 60).padStart(2, '0')}`;
+                          return <option key={value} value={value}>{value}</option>;
+                        })}
+                      </select>
+                    </label>
+                    <div className={styles.nbmTimeCard}>
+                      <span className={styles.nbmTimeLabel}><Clock className="h-4 w-4" />{locale === 'vi' ? 'Kết thúc' : locale === 'de' ? 'Ende' : 'End time'}</span>
+                      <span className={`${styles.nbmTimeInput} ${styles.nbmEndTime}`}>
+                        {formatEndTime(newBookingTime, newBookingServices.reduce((sum, service) => sum + service.duration, 0) || 60)}
                       </span>
                     </div>
                   </div>
-                );
-              })()}
+
+                  <label className={styles.nbmControlShell}>
+                    <UserRound className="h-4 w-4 shrink-0" />
+                    <select
+                      className={styles.nbmControl}
+                      value={newBookingStaffId}
+                      disabled={user?.role === 'staff'}
+                      aria-label={t.admin.bookings.detailStaff}
+                      onChange={(e) => {
+                        const s = realStaffList.find(st => st.id === e.target.value);
+                        setNewBookingStaffId(e.target.value);
+                        setNewBookingStaffName(s?.name || '');
+                        if (s && s.serviceIds && s.serviceIds.length > 0) {
+                          setNewBookingServices(prev => prev.filter(svc => s.serviceIds!.includes(svc.serviceId)));
+                        }
+                      }}
+                    >
+                      {user?.role !== 'staff' && <option value="">{t.admin.bookings.anyStaff}</option>}
+                      {realStaffList.filter(s => s.status === 'active').map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div className={styles.nbmServiceShell}>
+                    {newBookingServices.length < 2 && (() => {
+                      const selectedStaff = newBookingStaffId ? realStaffList.find(s => s.id === newBookingStaffId) : null;
+                      const staffServiceIds = selectedStaff?.serviceIds;
+                      const hasServiceFilter = staffServiceIds && staffServiceIds.length > 0;
+                      const availableServices = hasServiceFilter
+                        ? allServices.filter((service) => staffServiceIds.includes(service.id))
+                        : allServices;
+
+                      return (
+                        <div className={styles.nbmServicePicker}>
+                          <Scissors className="h-4 w-4 shrink-0" />
+                          <select
+                            className={styles.nbmControl}
+                            value=""
+                            aria-label={t.admin.bookings.service || 'Service'}
+                            onChange={(e) => {
+                              const svcId = e.target.value;
+                              if (!svcId) return;
+                              const svc = allServices.find((service) => service.id === svcId);
+                              if (!svc) return;
+                              const cat = allCategories.find((category) => category.id === svc.categoryId);
+                              setNewBookingServices(prev => [...prev, {
+                                categoryId: svc.categoryId || '',
+                                categoryName: cat?.name || svc.category || '',
+                                serviceId: svc.id,
+                                serviceName: svc.name || '',
+                                duration: svc.durationMin || 30,
+                                price: svc.price || 0,
+                              }]);
+                            }}
+                          >
+                            <option value="">{locale === 'vi' ? 'Chọn dịch vụ' : locale === 'de' ? 'Dienstleistung auswählen' : 'Choose service'}</option>
+                            {allCategories.map((cat) => {
+                              const catServices = availableServices.filter((service) => service.categoryId === cat.id);
+                              if (catServices.length === 0) return null;
+                              return (
+                                <optgroup key={cat.id} label={translateCategory(cat.id, cat.name)}>
+                                  {catServices.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                      {translateService(s.id, s.name)} ({s.durationMin || 30}min · €{s.price})
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              );
+                            })}
+                          </select>
+                          <span className={styles.nbmServiceAddIcon}><Plus className="h-4 w-4" /></span>
+                        </div>
+                      );
+                    })()}
+
+                    {newBookingServices.length > 0 && (
+                      <div className={styles.nbmSelectedServices}>
+                        {newBookingServices.map((svc, idx) => (
+                          <div key={`${svc.serviceId}-${idx}`} className={styles.nbmServiceRow}>
+                            <span className={styles.nbmServiceIcon}><Scissors className="h-4 w-4" /></span>
+                            <span className={styles.nbmServiceInfo}>
+                              <span className={styles.nbmServiceName}>{svc.serviceName}</span>
+                              <span className={styles.nbmServiceMeta}>{svc.duration} min · €{svc.price}</span>
+                            </span>
+                            <button type="button" className={styles.nbmRemoveBtn} onClick={() => setNewBookingServices(prev => prev.filter((_, i) => i !== idx))} aria-label={locale === 'vi' ? `Xóa ${svc.serviceName}` : `Remove ${svc.serviceName}`}>
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <label className={styles.nbmControlShell}>
+                    <UserRound className="h-4 w-4 shrink-0" />
+                    <input
+                      type="tel"
+                      inputMode="tel"
+                      className={styles.nbmControl}
+                      placeholder={t.admin.bookings.customerPhone || (locale === 'vi' ? 'Số điện thoại' : 'Phone number')}
+                      value={newBookingCustomerPhone}
+                      onChange={(e) => setNewBookingCustomerPhone(e.target.value)}
+                      aria-label={t.admin.bookings.customerPhone || 'Phone'}
+                    />
+                  </label>
+
+                  <label className={styles.nbmNoteShell}>
+                    <span className={styles.nbmNoteLabel}><ClipboardList className="h-4 w-4" />{t.admin.bookings.notes || 'Notes'}</span>
+                    <textarea
+                      className={styles.nbmNoteInput}
+                      placeholder={locale === 'vi' ? 'Ghi chú nếu có' : locale === 'de' ? 'Notiz, falls vorhanden' : 'Add a note'}
+                      value={newBookingNotes}
+                      onChange={(e) => setNewBookingNotes(e.target.value)}
+                      rows={2}
+                    />
+                  </label>
+
+                  {newBookingServices.length > 0 && (() => {
+                    const totalDuration = newBookingServices.reduce((sum, service) => sum + service.duration, 0);
+                    const totalPrice = newBookingServices.reduce((sum, service) => sum + service.price, 0);
+                    return <div className={styles.nbmSummary}><Timer size={14} /> {totalDuration} min <span aria-hidden="true">·</span> <Euro size={14} /> {totalPrice}</div>;
+                  })()}
+                </div>
+              </section>
             </div>
 
             <div className={styles.nbmFooter}>
-              <Button variant="outline" onClick={() => setShowNewBookingModal(false)}>
-                {locale === 'vi' ? 'Hủy' : locale === 'de' ? 'Abbrechen' : 'Cancel'}
-              </Button>
-              <Button
+              <button
+                type="button"
+                className={styles.nbmConfirmButton}
                 onClick={handleCreateWalkInBooking}
                 disabled={newBookingCreating || newBookingServices.length === 0 || !newBookingStaffId}
               >
                 {newBookingCreating ? '...' : (t.admin.bookings.confirmCreate || 'Confirm booking')}
-              </Button>
+                {!newBookingCreating && <Check className="h-4 w-4" />}
+              </button>
             </div>
           </div>
         </>
@@ -1950,96 +2638,220 @@ export default function BookingsManagementPage() {
             ref={popoverRef}
             className={styles.calPopover}
             style={{ opacity: 0 }}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="booking-detail-title"
           >
-          <div className={styles.calPopoverHeader}>
-            <h4 className={styles.calPopoverTitle}>{getFullServicesDisplay(popover.booking)}</h4>
-            <Button variant="ghost" size="icon" className="w-6 h-6 p-0 text-gray-400 hover:text-gray-600 border-0 bg-transparent cursor-pointer" onClick={() => { setPopover(null); setPopoverAnchorEl(null); }}>
-              <X className="w-4 h-4" />
-            </Button>
-          </div>
-          <div className={styles.calPopoverRow}>
-            <span className={styles.calPopoverLabel}>{t.admin.bookings.detailTime}</span>
-            <span className={styles.calPopoverValue}>{popover.booking.startTime} – {formatEndTime(popover.booking.startTime, popover.booking.totalDurationMinutes)}</span>
-          </div>
-          <div className={styles.calPopoverRow}>
-            <span className={styles.calPopoverLabel}>{t.admin.bookings.detailDate}</span>
-            <span className={styles.calPopoverValue}>{popover.booking.appointmentDate}</span>
-          </div>
-          <div className={styles.calPopoverRow}>
-            <span className={styles.calPopoverLabel}>{t.admin.bookings.detailStaff}</span>
-            {isManagerOrOwner ? (
-              <select
-                className={styles.popoverStaffSelect}
-                value={popover.booking.staffId || 'any'}
-                onChange={(e) => {
-                  const newStaffId = e.target.value;
-                  const newStaff = realStaffList.find(s => s.id === newStaffId);
-                  const newStaffName = newStaff ? newStaff.name : (newStaffId === 'any' ? (t.admin.bookings.anyStaff || 'Bất kỳ ai') : '');
-                  handleReassignStaff(popover.booking.id, newStaffId, newStaffName);
-                  setPopover(prev => prev ? { ...prev, booking: { ...prev.booking, staffId: newStaffId, staffName: newStaffName } } : null);
-                }}
-              >
-                <option value="any">{t.admin.bookings.anyStaff || 'Bất kỳ ai'}</option>
-                {realStaffList.map(s => {
-                  const isInactive = s.status !== 'active';
-                  const label = isInactive
-                    ? `🔴 ${s.name} (${locale === 'vi' ? 'Nghỉ làm' : locale === 'de' ? 'Inaktiv' : 'Inactive'})`
-                    : s.name;
-                  return (
-                    <option key={s.id} value={s.id} disabled={isInactive}>{label}</option>
-                  );
-                })}
-              </select>
-            ) : (
-              <span className={styles.calPopoverValue}>{getStaffNameDisplay(popover.booking.staffId, popover.booking.staffName)}</span>
-            )}
-          </div>
-          {user?.role !== 'staff' && (
-            <div className={styles.calPopoverRow}>
-              <span className={styles.calPopoverLabel}>{locale === 'vi' ? 'Khách hàng' : 'Customer'}</span>
-              <span className={styles.calPopoverValue}>{popover.booking.customerName} · {popover.booking.customerPhone}</span>
-            </div>
-          )}
-          {popover.booking.addOns && popover.booking.addOns.length > 0 && (
-            <div className={styles.calPopoverRow}>
-              <span className={styles.calPopoverLabel}>Add-ons</span>
-              <span className={styles.calPopoverValue}>
-                {popover.booking.addOns.map((addOn) => addOn.name || '').join(', ')}
+            <div className={styles.calPopoverHero}>
+              <button type="button" className={styles.calPopoverClose} onClick={() => { setPopover(null); setPopoverAnchorEl(null); }} aria-label={locale === 'vi' ? 'Đóng chi tiết lịch' : 'Close booking details'}>
+                <X className="h-5 w-5" />
+              </button>
+              <span className={styles.calPopoverHeroIcon}><Scissors className="h-5 w-5" /></span>
+              <span className={styles.calPopoverCode}>
+                {popoverBookingGroup.length > 1
+                  ? `#${getBookingGroupShortCode(popover.booking)} · ${getBookingDisplayCode(popover.booking)}`
+                  : getBookingDisplayCode(popover.booking)}
               </span>
+              <h4 id="booking-detail-title" className={styles.calPopoverTitle}>{popoverBookingGroup.map(getFullServicesDisplay).join(' + ')}</h4>
+              <p className={styles.calPopoverHeroMeta}>
+                {popoverBookingSummary?.startTime ?? popover.booking.startTime} – {popoverBookingSummary?.endTime ?? formatEndTime(popover.booking.startTime, popover.booking.totalDurationMinutes)} · {popoverBookingSummary?.durationMinutes ?? popover.booking.totalDurationMinutes} {t.common.minutes}
+              </p>
             </div>
-          )}
-          <div className={styles.calPopoverRow}>
-            <span className={styles.calPopoverLabel}>{t.admin.bookings.detailTotal}</span>
-            <span className={styles.calPopoverValue}>€{popover.booking.totalPrice}</span>
-          </div>
-          <div className={styles.calPopoverRow}>
-            <span className={styles.calPopoverLabel}>Status</span>
-            {getStatusBadge(popover.booking.status)}
-          </div>
-          {user?.role !== 'staff' && (
-            <>
-              {(popover.booking.status === 'pending_approval' || popover.booking.status === 'needs_owner_action') && (
-                <div className={styles.calPopoverActions}>
-                  <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700" onClick={() => { handleReject(popover.booking.id); setPopover(null); setPopoverAnchorEl(null); }}>{t.admin.bookings.btnReject}</Button>
-                  <Button size="sm" onClick={() => { handleApprove(popover.booking.id); setPopover(null); setPopoverAnchorEl(null); }}>{t.admin.bookings.btnApprove}</Button>
+
+            <div className={styles.calPopoverBody}>
+              <div className={styles.calPopoverStatGrid}>
+                <div className={styles.calPopoverStatCard}>
+                  <span className={styles.calPopoverStatLabel}><Clock className="h-4 w-4" />{t.admin.bookings.detailTime}</span>
+                  <strong>{popoverBookingSummary?.startTime ?? popover.booking.startTime} – {popoverBookingSummary?.endTime ?? formatEndTime(popover.booking.startTime, popover.booking.totalDurationMinutes)}</strong>
+                </div>
+                <div className={styles.calPopoverStatCard}>
+                  <span className={styles.calPopoverStatLabel}><CalendarDays className="h-4 w-4" />{t.admin.bookings.detailDate}</span>
+                  <strong>{popover.booking.appointmentDate}</strong>
+                </div>
+              </div>
+
+              <div className={styles.calPopoverDetailsCard}>
+                {popoverBookingGroup.length > 1 ? (
+                  <div className={styles.calPopoverSegments}>
+                    <span className={styles.calPopoverLabel}>{locale === 'vi' ? 'Phân công từng dịch vụ' : 'Assign each segment'}</span>
+                    {popoverBookingGroup.map((segment) => (
+                      <div key={segment.id} className={styles.calPopoverSegmentRow}>
+                        <span className={styles.calPopoverSegmentInfo}>
+                          <strong>{segment.startTime}–{formatEndTime(segment.startTime, segment.totalDurationMinutes)}</strong>
+                          <span>{getFullServicesDisplay(segment)}</span>
+                        </span>
+                        {isManagerOrOwner ? (
+                          <select
+                            className={styles.popoverStaffSelect}
+                            value={(segment.status === 'needs_owner_action' ? segment.proposedStaffId : segment.staffId) || 'any'}
+                            onChange={(event) => {
+                              const newStaffId = event.target.value;
+                              const newStaff = realStaffList.find((staff) => staff.id === newStaffId);
+                              void handleReassignStaff(segment.id, newStaffId, newStaff?.name || '');
+                            }}
+                          >
+                            <option value="any">{t.admin.bookings.anyStaff || 'Bất kỳ ai'}</option>
+                            {realStaffList.map((staff) => <option key={staff.id} value={staff.id} disabled={staff.status !== 'active'}>{staff.name}</option>)}
+                          </select>
+                        ) : <strong>{getStaffNameDisplay(segment.staffId, segment.staffName)}</strong>}
+                      </div>
+                    ))}
+                  </div>
+                ) : <div className={styles.calPopoverDetailRow}>
+                  <span className={styles.calPopoverDetailIcon}><UserRound className="h-4 w-4" /></span>
+                  <span className={styles.calPopoverDetailText}>
+                    <span className={styles.calPopoverLabel}>{t.admin.bookings.detailStaff}</span>
+                    {isManagerOrOwner ? (
+                      <select
+                        className={styles.popoverStaffSelect}
+                        value={(popover.booking.status === 'needs_owner_action' ? popover.booking.proposedStaffId : popover.booking.staffId) || 'any'}
+                        onChange={(e) => {
+                          const newStaffId = e.target.value;
+                          const newStaff = realStaffList.find(s => s.id === newStaffId);
+                          const newStaffName = newStaff ? newStaff.name : (newStaffId === 'any' ? (t.admin.bookings.anyStaff || 'Bất kỳ ai') : '');
+                          handleReassignStaff(popover.booking.id, newStaffId, newStaffName);
+                          setPopover(prev => prev ? {
+                            ...prev,
+                            booking: prev.booking.status === 'needs_owner_action'
+                              ? { ...prev.booking, proposedStaffId: newStaffId, proposedStaffName: newStaffName }
+                              : { ...prev.booking, staffId: newStaffId, staffName: newStaffName },
+                          } : null);
+                        }}
+                      >
+                        <option value="any">{t.admin.bookings.anyStaff || 'Bất kỳ ai'}</option>
+                        {realStaffList.map(s => {
+                          const isInactive = s.status !== 'active';
+                          const label = isInactive
+                            ? `🔴 ${s.name} (${locale === 'vi' ? 'Nghỉ làm' : locale === 'de' ? 'Inaktiv' : 'Inactive'})`
+                            : s.name;
+                          return <option key={s.id} value={s.id} disabled={isInactive}>{label}</option>;
+                        })}
+                      </select>
+                    ) : (
+                      <strong className={styles.calPopoverValue}>{getStaffNameDisplay(popover.booking.staffId, popover.booking.staffName)}</strong>
+                    )}
+                  </span>
+                </div>}
+
+                {popover.booking.status === 'needs_owner_action' && (
+                  <div className={`${styles.calPopoverNotice} ${popover.booking.staffSelectionType === 'specific' ? styles.calPopoverNoticeDanger : styles.calPopoverNoticeWarning}`}>
+                    <TriangleAlert className="h-4 w-4" />
+                    <span>
+                      <strong>{popover.booking.staffSelectionType === 'specific'
+                        ? (locale === 'vi' ? 'Khách đã chọn đích danh thợ' : 'Customer requested a specific employee')
+                        : (locale === 'vi' ? 'Không còn thợ phù hợp đang rảnh' : 'No eligible employee is available')}</strong>
+                      {popover.booking.staffSelectionType === 'specific' && (
+                        <small>{locale === 'vi'
+                          ? `Khách yêu cầu: ${popover.booking.requestedStaffName || popover.booking.conflictStaffName || '—'}. Hãy gọi khách trước khi đổi thợ.`
+                          : `Requested: ${popover.booking.requestedStaffName || popover.booking.conflictStaffName || '—'}. Call the customer before changing staff.`}</small>
+                      )}
+                      {popover.booking.proposedStaffName && (
+                        <small>{locale === 'vi'
+                          ? `Thợ thay thế đang chờ duyệt: ${popover.booking.proposedStaffName}`
+                          : `Replacement awaiting approval: ${popover.booking.proposedStaffName}`}</small>
+                      )}
+                    </span>
+                  </div>
+                )}
+
+                {user?.role !== 'staff' && (
+                  <div className={styles.calPopoverDetailRow}>
+                    <span className={styles.calPopoverDetailIcon}><Phone className="h-4 w-4" /></span>
+                    <span className={styles.calPopoverDetailText}>
+                      <span className={styles.calPopoverLabel}>{locale === 'vi' ? 'Khách hàng' : 'Customer'}</span>
+                      <strong className={styles.calPopoverValue}>{popover.booking.customerName}{popover.booking.customerPhone ? ` · ${popover.booking.customerPhone}` : ''}</strong>
+                    </span>
+                  </div>
+                )}
+
+                {popover.booking.addOns && popover.booking.addOns.length > 0 && (
+                  <div className={styles.calPopoverDetailRow}>
+                    <span className={styles.calPopoverDetailIcon}><Plus className="h-4 w-4" /></span>
+                    <span className={styles.calPopoverDetailText}>
+                      <span className={styles.calPopoverLabel}>Add-ons</span>
+                      <strong className={styles.calPopoverValue}>{popover.booking.addOns.map((addOn) => addOn.name || '').join(', ')}</strong>
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className={styles.calPopoverSummaryRow}>
+                <span className={styles.calPopoverSummaryItem}>
+                  <span className={styles.calPopoverLabel}>{t.admin.bookings.detailTotal}</span>
+                  <strong>€{popoverBookingGroup.reduce((sum, segment) => sum + segment.totalPrice, 0)}</strong>
+                </span>
+                <span className={styles.calPopoverSummaryItem}>
+                  <span className={styles.calPopoverLabel}>{locale === 'vi' ? 'Trạng thái' : 'Status'}</span>
+                  <strong className={`${styles.calPopoverSummaryValue} ${styles[`calPopoverStatus_${popover.booking.status}`] || ''}`}>
+                    {getStatusLabel(popover.booking.status)}
+                  </strong>
+                </span>
+              </div>
+
+              {(popover.booking.status === 'cancelled' || popover.booking.status === 'no_show') && (
+                <div className={styles.calPopoverActorRow}>
+                  <span>{popover.booking.status === 'cancelled'
+                    ? (locale === 'vi' ? 'Người hủy' : 'Cancelled by')
+                    : (locale === 'vi' ? 'Người đánh dấu không đến' : 'Marked no-show by')}</span>
+                  <strong>{getUpdateActorLabel(popover.booking)}</strong>
                 </div>
               )}
-              {popover.booking.status === 'confirmed' && (
-                <div className={styles.calPopoverActions}>
-                  <Button variant="outline" size="sm" className="text-gray-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200" onClick={() => { handleReject(popover.booking.id); setPopover(null); setPopoverAnchorEl(null); }}>{t.admin.bookings.btnCancel}</Button>
-                  <Button variant="outline" size="sm" onClick={() => { void handleLifecycleStatus(popover.booking.id, 'no_show'); setPopover(null); }}>{locale === 'vi' ? 'Không đến' : 'No-show'}</Button>
-                  <Button size="sm" onClick={() => { void handleLifecycleStatus(popover.booking.id, 'completed'); setPopover(null); }}>{locale === 'vi' ? 'Hoàn thành' : 'Complete'}</Button>
+
+              {user?.role !== 'staff' && (
+                <>
+                  {(popover.booking.status === 'pending_approval' || popover.booking.status === 'needs_owner_action') && (
+                    <div className={`${styles.calPopoverActions} ${styles.calPopoverActionsTwo}`}>
+                      <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionDanger}`} onClick={() => { handleReject(popover.booking.id); setPopover(null); setPopoverAnchorEl(null); }}>{t.admin.bookings.btnReject}</button>
+                      <button
+                        type="button"
+                        className={`${styles.calPopoverAction} ${styles.calPopoverActionPrimary}`}
+                        disabled={popoverHasUnassignedSegments}
+                        title={popoverHasUnassignedSegments ? (locale === 'vi' ? 'Cần phân công đủ thợ trước khi duyệt' : 'Assign every segment before approval') : undefined}
+                        onClick={() => { void handleApprove(popover.booking.id).then((approved) => { if (approved) { setPopover(null); setPopoverAnchorEl(null); } }); }}
+                      >{t.admin.bookings.btnApprove}</button>
+                    </div>
+                  )}
+                  {popover.booking.status === 'confirmed' && (
+                    <div className={`${styles.calPopoverActions} ${popover.booking.appointmentDate === getGermanTodayString() ? '' : styles.calPopoverActionsTwo}`}>
+                      <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionDanger}`} onClick={() => { handleReject(popover.booking.id); setPopover(null); setPopoverAnchorEl(null); }}>{t.admin.bookings.btnCancel}</button>
+                      {popover.booking.appointmentDate === getGermanTodayString() && (
+                        <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionNeutral}`} onClick={() => { void handleLifecycleStatus(popover.booking.id, 'no_show'); setPopover(null); }}>{locale === 'vi' ? 'Không đến' : 'No-show'}</button>
+                      )}
+                      <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionPrimary}`} onClick={() => { void handleLifecycleStatus(popover.booking.id, 'completed'); setPopover(null); }} title={locale === 'vi' ? 'Đóng ca dịch vụ và ghi nhận hoàn thành' : 'Close the service attendance as completed'}>{locale === 'vi' ? 'Hoàn thành dịch vụ' : 'Complete service'}</button>
+                    </div>
+                  )}
+                </>
+              )}
+              {user?.role === 'staff' && popover.booking.status === 'confirmed' && (
+                <div className={`${styles.calPopoverActions} ${popover.booking.appointmentDate === getGermanTodayString() ? styles.calPopoverActionsTwo : styles.calPopoverActionsOne}`}>
+                  <button
+                    type="button"
+                    className={`${styles.calPopoverAction} ${styles.calPopoverActionDanger}`}
+                    onClick={() => { void handleReject(popover.booking.id); setPopover(null); setPopoverAnchorEl(null); }}
+                  >{t.admin.bookings.btnCancel}</button>
+                  {popover.booking.appointmentDate === getGermanTodayString() && (
+                    <button
+                      type="button"
+                      className={`${styles.calPopoverAction} ${styles.calPopoverActionNeutral}`}
+                      onClick={() => { void handleLifecycleStatus(popover.booking.id, 'no_show'); setPopover(null); setPopoverAnchorEl(null); }}
+                    >{locale === 'vi' ? 'Không đến' : 'No-show'}</button>
+                  )}
                 </div>
               )}
-            </>
-          )}
-          {user?.role === 'staff' && popover.booking.status === 'confirmed' && popover.booking.staffId === user.staffId && (
-            <div className={styles.calPopoverActions}>
-              <Button variant="outline" size="sm" onClick={() => { void handleLifecycleStatus(popover.booking.id, 'no_show'); setPopover(null); }}>{locale === 'vi' ? 'Không đến' : 'No-show'}</Button>
-              <Button size="sm" onClick={() => { void handleLifecycleStatus(popover.booking.id, 'completed'); setPopover(null); }}>{locale === 'vi' ? 'Hoàn thành' : 'Complete'}</Button>
+              {user?.role === 'staff' && (
+                (popover.booking.status === 'pending_approval' && (!popover.booking.staffId || popover.booking.staffId === 'any')) ||
+                (popover.booking.status === 'needs_owner_action' && !popover.booking.proposedStaffId)
+              ) && (
+                <div className={`${styles.calPopoverActions} ${styles.calPopoverActionsOne}`}>
+                  <button
+                    type="button"
+                    className={`${styles.calPopoverAction} ${styles.calPopoverActionPrimary}`}
+                    onClick={() => { void handleClaimBooking(popover.booking); }}
+                  >{locale === 'vi' ? 'Nhận lịch này' : locale === 'de' ? 'Termin übernehmen' : 'Claim booking'}</button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
         </>
       )}
     </div>

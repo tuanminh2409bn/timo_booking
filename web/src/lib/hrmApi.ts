@@ -60,11 +60,13 @@ export interface HrmStaffMember {
   name: string;
   workerType?: 'main' | 'assistant';
   serviceIds?: string[];
+  publicBookingVisible?: boolean;
 }
 
 export interface HrmService {
   id: string;
   name: string;
+  displayName?: string;
   category?: string;
   price: number;
   durationMin?: number;
@@ -72,6 +74,8 @@ export interface HrmService {
   groupService?: string;
   preferredWorkerType?: 'main' | 'assistant';
   bookingKind?: 'main' | 'add_on';
+  description?: string;
+  availableForBooking?: boolean;
 }
 
 export interface HrmBookingServiceInput {
@@ -138,6 +142,17 @@ export interface HrmAvailability {
     startDate: string;
     endDate: string;
     allDay: boolean;
+    startTime?: string;
+    endTime?: string;
+  }>;
+  /**
+   * Active employees that contribute to shop capacity. This intentionally
+   * includes employees hidden from the public staff picker.
+   */
+  capacityStaff?: Array<{
+    uid: string;
+    workerType?: 'main' | 'assistant';
+    serviceIds?: string[];
   }>;
 }
 

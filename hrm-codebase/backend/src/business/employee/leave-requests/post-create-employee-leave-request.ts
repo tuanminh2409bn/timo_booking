@@ -8,6 +8,7 @@ import { createErrorResponse } from "../../../modules/create-error-response.js";
 import { verifyAuthorizationHeader } from "../../../modules/verify-auth-header.js";
 import { firestoreRepository } from "../../../repository/firestore/index.js";
 import { leaveRequestSchema } from "./leave-request-shared.js";
+import { processLeaveConflicts } from "./leave-conflict-processing.js";
 
 const SERVICE_ERRORS = {
   forbiddenRole: {
@@ -94,6 +95,8 @@ export const createEmployeeLeaveRequest = async (req: Request, res: Response) =>
       startDate: createLeaveRequestParseResult.data.startDate,
       endDate: createLeaveRequestParseResult.data.endDate,
       allDay: createLeaveRequestParseResult.data.allDay,
+      ...(createLeaveRequestParseResult.data.startTime !== undefined && { startTime: createLeaveRequestParseResult.data.startTime }),
+      ...(createLeaveRequestParseResult.data.endTime !== undefined && { endTime: createLeaveRequestParseResult.data.endTime }),
       reason: createLeaveRequestParseResult.data.reason,
       createdByUserId: authContext.uid,
       updatedByUserId: authContext.uid,
@@ -116,7 +119,24 @@ export const createEmployeeLeaveRequest = async (req: Request, res: Response) =>
       startDate: createdLeaveRequest.startDate,
       endDate: createdLeaveRequest.endDate,
       allDay: createdLeaveRequest.allDay,
+      ...(createdLeaveRequest.startTime !== undefined && { startTime: createdLeaveRequest.startTime }),
+      ...(createdLeaveRequest.endTime !== undefined && { endTime: createdLeaveRequest.endTime }),
     },
+  });
+
+  const conflictResolution = await processLeaveConflicts({
+    ownerId: authContext.ownerId,
+    storeId,
+    employeeUserId: employee.uid,
+    leaveWindow: {
+      startDate: createdLeaveRequest.startDate,
+      endDate: createdLeaveRequest.endDate,
+      allDay: createdLeaveRequest.allDay,
+      ...(createdLeaveRequest.startTime !== undefined && { startTime: createdLeaveRequest.startTime }),
+      ...(createdLeaveRequest.endTime !== undefined && { endTime: createdLeaveRequest.endTime }),
+    },
+    actorUserId: authContext.uid,
+    actorRole: authContext.role,
   });
 
   return res.status(StatusCodes.CREATED).json({
@@ -129,9 +149,12 @@ export const createEmployeeLeaveRequest = async (req: Request, res: Response) =>
       startDate: createdLeaveRequest.startDate,
       endDate: createdLeaveRequest.endDate,
       allDay: createdLeaveRequest.allDay,
+      ...(createdLeaveRequest.startTime !== undefined && { startTime: createdLeaveRequest.startTime }),
+      ...(createdLeaveRequest.endTime !== undefined && { endTime: createdLeaveRequest.endTime }),
       reason: createdLeaveRequest.reason,
       createdAt: createdLeaveRequest.createdAt,
       updatedAt: createdLeaveRequest.updatedAt,
     },
+    conflictResolution,
   });
 };

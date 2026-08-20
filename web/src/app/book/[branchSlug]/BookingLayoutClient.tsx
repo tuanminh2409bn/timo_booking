@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { BookingProvider, useBooking } from '@/lib/bookingContext';
-import { useI18n, I18nProvider } from '@/lib/i18n';
+import { useI18n } from '@/lib/i18n';
 import Stepper from '@/components/booking/Stepper';
 import BottomBar from '@/components/booking/BottomBar';
 import styles from './layout.module.css';

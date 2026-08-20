@@ -170,6 +170,18 @@ export type ShopAttendanceType = {
   customerId?: string;
   note?: string;
   bookingSource?: string;
+  /** How the customer selected staff for this calendar segment. */
+  staffSelectionType?: "specific" | "any";
+  /** Immutable snapshot of the employee explicitly requested by the customer. */
+  requestedEmployeeUserId?: string;
+  requestedEmployeeName?: string;
+  /** Employee whose leave made this segment require owner action. */
+  conflictEmployeeUserId?: string;
+  conflictEmployeeName?: string;
+  /** Replacement selected while the segment remains in its original workflow column. */
+  proposedAssigneeUserId?: string;
+  proposedAssigneeName?: string;
+  proposedAssigneeWorkerType?: "main" | "assistant";
   source?: ShopAttendanceSource | "hrm";
   assignees: ShopAttendanceAssigneeType[];
   services: ShopServiceType[];
@@ -188,6 +200,8 @@ export type ShopAttendanceType = {
   createdByRole?: ShopAttendanceActorRole;
   updatedByUserId?: string;
   updatedByRole?: ShopAttendanceActorRole;
+  /** Human-readable snapshot used by Booking history and cancellation details. */
+  updatedByName?: string;
   closedAt?: number;
   closedBy?: string;
 };
@@ -216,6 +230,14 @@ export type ShopAttendanceCalendarType = Pick<
   | "customerId"
   | "note"
   | "bookingSource"
+  | "staffSelectionType"
+  | "requestedEmployeeUserId"
+  | "requestedEmployeeName"
+  | "conflictEmployeeUserId"
+  | "conflictEmployeeName"
+  | "proposedAssigneeUserId"
+  | "proposedAssigneeName"
+  | "proposedAssigneeWorkerType"
   | "source"
   | "assignees"
   | "services"
@@ -234,6 +256,7 @@ export type ShopAttendanceCalendarType = Pick<
   | "createdByRole"
   | "updatedByUserId"
   | "updatedByRole"
+  | "updatedByName"
   | "closedAt"
   | "closedBy"
 >;
@@ -511,6 +534,8 @@ export type ShopEmployeeLeaveRequestType = {
   startDate: string;
   endDate: string;
   allDay: boolean;
+  startTime?: string;
+  endTime?: string;
   reason: string;
   createdByUserId: string;
   updatedByUserId: string;
@@ -585,6 +610,8 @@ export type ShopServiceType = {
   serviceCategoryId?: string;
   type: "predefined" | "custom";
   name: string;
+  /** Compact label used by internal owner/employee calendar views. */
+  displayName?: string;
   description?: string;
   groupService?: string;
   category: ShopServiceCategoryType;
@@ -596,6 +623,8 @@ export type ShopServiceType = {
   preferredWorkerType?: "main" | "assistant";
   /** Add-ons are persisted at booking scope and never reserve calendar time. */
   bookingKind?: "main" | "add_on";
+  /** Controls whether customers can select this service on the public booking page. */
+  availableForBooking?: boolean;
   discountAmount?: number;
   employees?: ShopAttendanceAssigneeType[];
   sourceAttendanceId?: string;

@@ -7,6 +7,7 @@ import { useBooking } from '@/lib/bookingContext';
 import { useRouter } from 'next/navigation';
 import styles from './page.module.css';
 import Link from 'next/link';
+import { AlarmClock, CalendarDays, CalendarPlus, Check, Clock3, Info, MapPin, Timer, UserRound } from 'lucide-react';
 
 export default function SuccessPage() {
   const { t, locale } = useI18n();
@@ -26,17 +27,6 @@ export default function SuccessPage() {
   const isRequestMode = state.bookingMode === 'request';
 
   if (!mounted) return null;
-
-  // Build service display string from all selected services
-  const serviceDisplayText = state.selectedServices
-    .map((item) => {
-      const name = getServiceName(item.mainService.id, item.mainService.name);
-      const extras = item.extras
-        .map((e) => getServiceName(e.id, e.name))
-        .join(', ');
-      return extras ? `${name} + ${extras}` : name;
-    })
-    .join(' | ') || '—';
 
   // Build iCal SUMMARY from all service names
   const icalSummary = state.selectedServices
@@ -176,7 +166,7 @@ export default function SuccessPage() {
                   {/* Add-on note: shown when any extra is an addon type */}
                   {item.extras.some(e => e.isAddon || e.type === 'addon') && (
                     <div className={styles.addonNote}>
-                      ℹ️{' '}
+                      <Info size={14} className={styles.addonNoteIcon} />
                       {locale === 'de'
                         ? 'Add-on-Dienste können jederzeit durchgeführt werden – kommen Sie einfach rein!'
                         : locale === 'vi'
@@ -185,10 +175,10 @@ export default function SuccessPage() {
                     </div>
                   )}
                   <div className={styles.serviceMetaRow}>
-                    <span className={styles.serviceMetaChip}>🕐 {svcDuration} {t.common.minutes}</span>
-                    <span className={styles.serviceMetaChip}>👤 {staffLabel}</span>
+                    <span className={styles.serviceMetaChip}><Clock3 size={13} /> {svcDuration} {t.common.minutes}</span>
+                    <span className={styles.serviceMetaChip}><UserRound size={13} /> {staffLabel}</span>
                     {state.selectedTime && (
-                      <span className={styles.serviceMetaChip}>⏰ {segStartStr} – {segEndStr}</span>
+                      <span className={styles.serviceMetaChip}><AlarmClock size={13} /> {segStartStr} – {segEndStr}</span>
                     )}
                   </div>
                 </div>
@@ -198,24 +188,24 @@ export default function SuccessPage() {
 
           {/* Date & Location */}
           <div className={styles.detailRow}>
-            <span className={styles.detailLabel}>📅 {t.booking.dateTime.summary.date}</span>
+            <span className={styles.detailLabel}><CalendarDays size={14} /> {t.booking.dateTime.summary.date}</span>
             <span className={styles.detailValue}>
               {state.selectedDate ? formatDate(state.selectedDate) : '—'}
             </span>
           </div>
           <div className={styles.detailRow}>
-            <span className={styles.detailLabel}>📍 {t.booking.success.details.where}</span>
+            <span className={styles.detailLabel}><MapPin size={14} /> {t.booking.success.details.where}</span>
             <span className={styles.detailValue}>{state.branch?.name ?? '—'}</span>
           </div>
           <div className={styles.detailRow}>
-            <span className={styles.detailLabel}>⏱ {t.booking.services.summary.duration}</span>
+            <span className={styles.detailLabel}><Timer size={14} /> {t.booking.services.summary.duration}</span>
             <span className={styles.detailValue}>{totals.totalDuration} {t.common.minutes}</span>
           </div>
         </div>
 
         {/* Cancellation policy */}
         <div className={isRequestMode ? `${styles.cancellation} ${styles.cancellationRequest}` : styles.cancellation}>
-          ✓ {t.booking.success.details.cancellation}
+          <Check size={14} /> {t.booking.success.details.cancellation}
         </div>
 
         {/* Action buttons */}
@@ -224,7 +214,7 @@ export default function SuccessPage() {
             className={`${styles.actionButton} ${styles.outlineButton}`}
             onClick={handleAddToCalendar}
           >
-            📅 {t.booking.success.actions.addCalendar}
+            <CalendarPlus size={16} /> {t.booking.success.actions.addCalendar}
           </button>
           <button
             className={`${styles.actionButton} ${styles.primaryButton}`}

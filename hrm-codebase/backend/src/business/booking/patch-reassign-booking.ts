@@ -5,6 +5,7 @@ import { canAccessStore } from "../../helpers/role-access.js";
 import { verifyAuthorizationHeader } from "../../modules/verify-auth-header.js";
 import { firestoreAuth, firestoreRepository } from "../../repository/firestore/index.js";
 import { synchronizeWorkDaySettlement } from "../employee/work-days/work-day-settlement-sync.js";
+import { leaveOverlapsAttendance } from "../employee/leave-requests/leave-request-shared.js";
 import {
   BookingSlotConflictError,
   getBookingSlotReservationIds,
@@ -25,10 +26,21 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
       message: "Invalid attendance reassignment",
     });
   }
-  if (authContext.role !== "owner" && authContext.role !== "manager") {
+  const isEmployeeClaim = authContext.role === "employee";
+  if (
+    authContext.role !== "owner" &&
+    authContext.role !== "manager" &&
+    !isEmployeeClaim
+  ) {
     return response.status(403).json({
       type: "/attendance/forbidden-reassignment",
-      message: "Only owner or manager may reassign the main employee",
+      message: "Only owner, manager, or an eligible employee claim may assign the booking",
+    });
+  }
+  if (isEmployeeClaim && parsed.data.employeeUserId !== authContext.uid) {
+    return response.status(403).json({
+      type: "/attendance/forbidden-reassignment",
+      message: "Employees may only claim a booking for themselves",
     });
   }
   if (!canAccessStore(authContext, storeId)) {
@@ -51,6 +63,37 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
     return response.status(409).json({
       type: "/attendance/work-day-closed",
       message: "Attendance cannot be reassigned after day close",
+    });
+  }
+  const isRequestAssignment = attendance.bookingStatus === "requested";
+  const isLeaveConflictAssignment = attendance.bookingStatus === "processing";
+  if (isEmployeeClaim && !isRequestAssignment && !isLeaveConflictAssignment) {
+    return response.status(403).json({
+      type: "/attendance/forbidden-reassignment",
+      message: "Employees may only claim an unassigned Request or leave-conflict booking",
+    });
+  }
+  const currentAssigneeUserId = attendance.mainAssigneeUserId ?? attendance.employeeUserId;
+  if (
+    isEmployeeClaim &&
+    isRequestAssignment &&
+    currentAssigneeUserId !== undefined &&
+    currentAssigneeUserId !== authContext.uid
+  ) {
+    return response.status(409).json({
+      type: "/attendance/already-assigned",
+      message: "This Request has already been assigned",
+    });
+  }
+  if (
+    isEmployeeClaim &&
+    isLeaveConflictAssignment &&
+    attendance.proposedAssigneeUserId !== undefined &&
+    attendance.proposedAssigneeUserId !== authContext.uid
+  ) {
+    return response.status(409).json({
+      type: "/attendance/already-assigned",
+      message: "A replacement employee has already claimed this booking",
     });
   }
   if (
@@ -77,8 +120,6 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
     });
   }
 
-  const isRequestAssignment = attendance.bookingStatus === "requested";
-
   const [attendanceSnapshot, leaveSnapshot] = await Promise.all([
     firestoreAuth
       .collection("stores")
@@ -98,7 +139,14 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
     return leave["ownerId"] === authContext.ownerId &&
       leave["employeeUserId"] === employee.uid &&
       typeof leave["endDate"] === "string" &&
-      leave["endDate"] >= attendance.workDate;
+      leave["endDate"] >= attendance.workDate &&
+      leaveOverlapsAttendance({
+        startDate: String(leave["startDate"]),
+        endDate: leave["endDate"],
+        allDay: leave["allDay"] !== false,
+        ...(typeof leave["startTime"] === "string" && { startTime: leave["startTime"] }),
+        ...(typeof leave["endTime"] === "string" && { endTime: leave["endTime"] }),
+      }, attendance.workDate, attendance.startTime, attendance.endTime);
   });
   const employeeHasOverlap = attendanceSnapshot.docs.some((document) => {
     const item = document.data();
@@ -113,7 +161,8 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
   });
   // Spec V1: assigning a pending Request intentionally bypasses only the
   // double-booking check. Leave and service capability remain enforced.
-  if (employeeOnLeave || (!isRequestAssignment && employeeHasOverlap)) {
+  const ownerMayOverrideRequestOverlap = isRequestAssignment && !isEmployeeClaim;
+  if (employeeOnLeave || (!ownerMayOverrideRequestOverlap && employeeHasOverlap)) {
     return response.status(409).json({
       type: "/attendance/reassignment-conflict",
       message: "Target employee is unavailable at this time",
@@ -196,34 +245,51 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
       shareAmount: service.price,
     }],
   }));
+  const directAssignment = {
+    employeeUserId: employee.uid,
+    mainAssigneeUserId: employee.uid,
+    assignees: [{
+      employeeUserId: employee.uid,
+      employeeName,
+      workerType,
+      percentage: 100,
+      shareAmount: attendance.subtotalAmount,
+    }],
+    services,
+    // A Request stays pending until the owner explicitly approves the booking.
+    bookingStatus: isRequestAssignment ? "requested" as const : "confirmed" as const,
+  };
+  const deferredLeaveAssignment = {
+    // Preserve the original column while the owner reviews the replacement.
+    proposedAssigneeUserId: employee.uid,
+    proposedAssigneeName: employeeName,
+    proposedAssigneeWorkerType: workerType,
+    bookingStatus: "processing" as const,
+  };
   try {
     await firestoreRepository.shop.attendance.updateShopAttendance(
     authContext.ownerId,
     storeId,
     attendanceId,
     {
-      employeeUserId: employee.uid,
-      mainAssigneeUserId: employee.uid,
-      assignees: [{
-        employeeUserId: employee.uid,
-        employeeName,
-        workerType,
-        percentage: 100,
-        shareAmount: attendance.subtotalAmount,
-      }],
-      services,
-      bookingStatus: "confirmed",
+      ...(isLeaveConflictAssignment ? deferredLeaveAssignment : directAssignment),
       updatedBy: authContext.uid,
       updatedByUserId: authContext.uid,
       updatedByRole: authContext.role,
     },
     attendance,
-    { deleteFields: ["assistantAssigneeUserId"] },
+    isLeaveConflictAssignment ? undefined : { deleteFields: ["assistantAssigneeUserId"] },
     );
     if (bookingReference && nextReservationIds) {
       await bookingReference.update({
         slotReservationIds: nextReservationIds,
-        ...(isRequestAssignment && { bookingStatus: "confirmed" }),
+        ...(isRequestAssignment && { bookingStatus: "requested" }),
+        ...(isLeaveConflictAssignment && {
+          bookingStatus: "processing",
+          proposedAssigneeUserId: employee.uid,
+          proposedAssigneeName: employeeName,
+          proposedAssigneeWorkerType: workerType,
+        }),
         updatedByType: "user",
         updatedById: authContext.uid,
         updatedByRole: authContext.role,
@@ -250,5 +316,6 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
     employeeUserId: employee.uid,
     employeeName,
     assistantCleared: true,
+    pendingConfirmation: isLeaveConflictAssignment,
   });
 };

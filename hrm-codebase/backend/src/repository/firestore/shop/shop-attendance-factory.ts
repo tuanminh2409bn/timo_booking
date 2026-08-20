@@ -281,17 +281,18 @@ export const invalidateAttendanceRetentionCaches = async (
 export const createShopAttendanceFactory = (firestoreDB: Firestore) => {
   return async (
     ownerId: string,
-    data: Omit<ShopAttendanceType, "id" | "attendanceCode" | "ownerId" | "createdAt" | "updatedAt">,
+    data: Omit<ShopAttendanceType, "id" | "ownerId" | "createdAt" | "updatedAt">,
   ): Promise<ShopAttendanceType> => {
     const attendanceDoc = getStoreAttendances(firestoreDB, data.storeId).doc();
-    const attendanceCode = await reservePublicCode(firestoreDB, "attendance", ownerId);
+    const attendanceCode = data.attendanceCode ??
+      await reservePublicCode(firestoreDB, "attendance", ownerId);
     const timestamp = Date.now();
 
     const createdAttendance: ShopAttendanceType = {
       id: attendanceDoc.id,
-      attendanceCode,
       ownerId,
       ...data,
+      attendanceCode,
       assigneeUserIds: computeAttendanceAssigneeUserIds(
         data.createdBy,
         data.assignees,

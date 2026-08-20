@@ -151,6 +151,7 @@ export const createEmployee = async (req: Request, res: Response) => {
       createdByUserId: authContext.uid,
       updatedByUserId: authContext.uid,
       serviceIds: assignedServiceIds,
+      publicBookingVisible: createEmployeeParseResult.data.publicBookingVisible,
     };
 
     if (normalizedCompensation.compensationModel !== undefined) {
@@ -224,6 +225,7 @@ export const createEmployee = async (req: Request, res: Response) => {
       hourlyRate: createdEmployee.hourlyRate,
       weeklyWorkingHours: createdEmployee.weeklyWorkingHours,
       serviceIds: createdEmployee.serviceIds,
+      publicBookingVisible: createdEmployee.publicBookingVisible ?? true,
       workerType: createdEmployee.workerType,
       active: createdEmployee.active,
     },

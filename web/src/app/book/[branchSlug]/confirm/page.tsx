@@ -10,6 +10,7 @@ import type {
   HrmBookingAddonInput,
   HrmBookingServiceInput,
 } from '@/lib/hrmApi';
+import { AlarmClock, AlertTriangle, CalendarDays, Clock3, Timer, UserRound } from 'lucide-react';
 import styles from './page.module.css';
 
 export default function ConfirmPage() {
@@ -212,16 +213,16 @@ export default function ConfirmPage() {
                   {/* Meta row: duration + staff + time */}
                   <div className={styles.summaryServiceMeta}>
                     <span className={styles.summaryMetaChip}>
-                      🕐 {svcDuration} {t.common.minutes}
+                      <Clock3 size={13} /> {svcDuration} {t.common.minutes}
                     </span>
                     {staffLabel && (
                       <span className={styles.summaryMetaChip}>
-                        👤 {staffLabel}
+                        <UserRound size={13} /> {staffLabel}
                       </span>
                     )}
                     {state.selectedTime && (
                       <span className={styles.summaryMetaChip}>
-                        ⏰ {segStartStr} – {segEndStr}
+                        <AlarmClock size={13} /> {segStartStr} – {segEndStr}
                       </span>
                     )}
                   </div>
@@ -235,12 +236,12 @@ export default function ConfirmPage() {
         <div className={styles.summaryFooter}>
           {state.selectedDate && (
             <div className={styles.summaryFooterRow}>
-              <span>📅 {t.booking.dateTime.summary.date}</span>
+              <span className={styles.summaryFooterLabel}><CalendarDays size={14} /> {t.booking.dateTime.summary.date}</span>
               <strong>{formatDate(state.selectedDate)}</strong>
             </div>
           )}
           <div className={styles.summaryFooterRow}>
-            <span>⏱ {t.booking.services.summary.duration}</span>
+            <span className={styles.summaryFooterLabel}><Timer size={14} /> {t.booking.services.summary.duration}</span>
             <strong>{totals.totalDuration} {t.common.minutes}</strong>
           </div>
         </div>
@@ -334,8 +335,8 @@ export default function ConfirmPage() {
           {isSubmitting ? '...' : confirmButtonText}
         </button>
         {submitError && (
-          <div style={{ color: '#e53e3e', fontSize: '14px', marginTop: '12px', textAlign: 'center', padding: '8px 16px', background: '#fff5f5', borderRadius: '8px', border: '1px solid #fed7d7' }}>
-            ⚠️ {submitError}
+          <div className={styles.submitError}>
+            <AlertTriangle size={16} /> {submitError}
           </div>
         )}
         {isRequestMode && (

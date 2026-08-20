@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 import { canAccessStore } from "../../helpers/role-access.js";
 import { verifyAuthorizationHeader } from "../../modules/verify-auth-header.js";
@@ -73,11 +74,11 @@ export const updateBookingStatus = async (request: Request, response: Response) 
     (attendance.mainAssigneeUserId ?? attendance.employeeUserId) === authContext.uid;
   if (
     authContext.role === "employee" &&
-    (!employeeIsMain || !["completed", "no_show"].includes(requestedStatus))
+    (!employeeIsMain || !["completed", "no_show", "cancelled"].includes(requestedStatus))
   ) {
     return response.status(403).json({
       type: "/attendance/forbidden-status-transition",
-      message: "Employee may only complete or mark no-show for their own attendance",
+      message: "Employee may only complete, cancel, or mark no-show for their own attendance",
     });
   }
   if (
@@ -90,16 +91,9 @@ export const updateBookingStatus = async (request: Request, response: Response) 
       message: "Forbidden: insufficient permissions",
     });
   }
-  if (requestedStatus === "cancelled" && authContext.role === "employee") {
-    return response.status(403).json({
-      type: "/attendance/forbidden-status-transition",
-      message: "Employees cannot cancel bookings",
-    });
-  }
-
   const bookingStatus = toBookingStatus(requestedStatus);
   const groupedAttendances: ShopAttendanceType[] = [];
-  if (attendance.bookingId && ["cancelled", "no_show"].includes(requestedStatus)) {
+  if (attendance.bookingId && ["confirmed", "cancelled", "no_show"].includes(requestedStatus)) {
     const snapshot = await firestoreAuth
       .collection("stores")
       .doc(storeId)
@@ -114,20 +108,78 @@ export const updateBookingStatus = async (request: Request, response: Response) 
     }
   }
   if (groupedAttendances.length === 0) groupedAttendances.push(attendance);
+  const commitsLeaveReplacement =
+    requestedStatus === "confirmed" &&
+    groupedAttendances.some(
+      (item) => item.bookingStatus === "processing" && item.proposedAssigneeUserId !== undefined,
+    );
+
+  const actor = await firestoreRepository.user.getUser(authContext.uid).catch(() => undefined);
+  const actorName = actor?.name?.trim() || actor?.displayName?.trim() || actor?.email;
+
+  if (
+    requestedStatus === "confirmed" &&
+    groupedAttendances.some((item) =>
+      item.bookingStatus === "processing"
+        ? !item.proposedAssigneeUserId
+        : !(item.mainAssigneeUserId ?? item.employeeUserId),
+    )
+  ) {
+    return response.status(409).json({
+      type: "/attendance/unassigned-booking-segment",
+      message: "Assign an employee to every booking segment before approval",
+    });
+  }
 
   for (const item of groupedAttendances) {
+    const shouldCommitReplacement =
+      requestedStatus === "confirmed" &&
+      item.bookingStatus === "processing" &&
+      item.proposedAssigneeUserId !== undefined;
+    const replacementAssignee = shouldCommitReplacement
+      ? {
+          employeeUserId: item.proposedAssigneeUserId as string,
+          employeeName: item.proposedAssigneeName ?? item.proposedAssigneeUserId as string,
+          workerType: item.proposedAssigneeWorkerType ?? "main" as const,
+          percentage: 100,
+          shareAmount: item.subtotalAmount,
+        }
+      : undefined;
+    const replacementServices = replacementAssignee
+      ? item.services.map((service) => ({
+          ...service,
+          employees: [{ ...replacementAssignee, shareAmount: service.price }],
+        }))
+      : undefined;
     await firestoreRepository.shop.attendance.updateShopAttendance(
       authContext.ownerId,
       storeId,
       item.id,
       {
         bookingStatus,
+        ...(replacementAssignee !== undefined && {
+          employeeUserId: replacementAssignee.employeeUserId,
+          mainAssigneeUserId: replacementAssignee.employeeUserId,
+          assignees: [replacementAssignee],
+          services: replacementServices ?? item.services,
+        }),
         ...(requestedStatus === "completed" && { status: "closed" }),
         updatedBy: authContext.uid,
         updatedByUserId: authContext.uid,
         updatedByRole: authContext.role === "employee" ? "employee" : authContext.role,
+        ...(actorName !== undefined && { updatedByName: actorName }),
       },
       item,
+      shouldCommitReplacement
+        ? {
+            deleteFields: [
+              "assistantAssigneeUserId",
+              "proposedAssigneeUserId",
+              "proposedAssigneeName",
+              "proposedAssigneeWorkerType",
+            ],
+          }
+        : undefined,
     );
   }
 
@@ -141,6 +193,11 @@ export const updateBookingStatus = async (request: Request, response: Response) 
     if (bookingDocument.exists) {
       await bookingReference.update({
         ...(requestedStatus !== "completed" && { bookingStatus }),
+        ...(commitsLeaveReplacement && {
+          proposedAssigneeUserId: FieldValue.delete(),
+          proposedAssigneeName: FieldValue.delete(),
+          proposedAssigneeWorkerType: FieldValue.delete(),
+        }),
         ...(parsed.data.reason !== undefined && { statusReason: parsed.data.reason }),
         updatedByType: "user",
         updatedById: authContext.uid,

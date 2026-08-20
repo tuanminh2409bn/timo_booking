@@ -111,6 +111,8 @@ export const getEmployeeLeaveRequests = async (req: Request, res: Response) => {
         startDate: leaveRequest.startDate,
         endDate: leaveRequest.endDate,
         allDay: leaveRequest.allDay,
+        ...(leaveRequest.startTime !== undefined && { startTime: leaveRequest.startTime }),
+        ...(leaveRequest.endTime !== undefined && { endTime: leaveRequest.endTime }),
         reason: leaveRequest.reason,
         createdAt: leaveRequest.createdAt,
         updatedAt: leaveRequest.updatedAt,

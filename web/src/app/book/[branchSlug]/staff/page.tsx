@@ -2,15 +2,12 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useI18n } from '@/lib/i18n';
-import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
-import { hasConflict, shouldSkipStaffSelection, MAX_MAIN_SERVICES } from '@/lib/types';
+import { shouldSkipStaffSelection } from '@/lib/types';
 import type { Staff, Service, ServiceCategory } from '@/lib/types';
-import { useRouter } from 'next/navigation';
 import { fetchHrmAvailability, fetchHrmServices, fetchHrmStaff } from '@/lib/hrmApi';
 import styles from './page.module.css';
 
-type TimeFilter = 'all' | 'morning' | 'afternoon' | 'evening';
 type CalendarBooking = {
   staffId: string;
   appointmentDate: string;
@@ -45,15 +42,14 @@ function formatDateISO(year: number, month: number, day: number) {
 
 export default function StaffSelectionPage() {
   const { t, locale } = useI18n();
-  const { getCategoryName, getCategoryDescription, getServiceName, getServiceDescription } = useServiceTranslation();
   const { state, dispatch, totals } = useBooking();
-  const router = useRouter();
   const branchSlug = state.branchSlug;
 
   // ── Firestore State Hydration ──
   const [categories, setCategories] = useState<ServiceCategory[]>([]);
-  const [services, setServices] = useState<Service[]>([]);
+  const [, setServices] = useState<Service[]>([]);
   const [staffList, setStaffList] = useState<Staff[]>([]);
+  const [capacityStaffList, setCapacityStaffList] = useState<Staff[]>([]);
   const [realBookings, setRealBookings] = useState<CalendarBooking[]>([]);
   const [staffAbsences, setStaffAbsences] = useState<Record<string, PublicAbsence[]>>({});
   const [dataLoadError, setDataLoadError] = useState(false);
@@ -65,7 +61,8 @@ export default function StaffSelectionPage() {
       setDataLoadError(false);
       try {
         // Fetch services from HRM API and map to local types
-        const hrmServices = await fetchHrmServices(branchSlug);
+        const hrmServices = (await fetchHrmServices(branchSlug))
+          .filter((service) => service.availableForBooking !== false);
         const categoryMap = new Map<string, ServiceCategory>();
         const serviceList: Service[] = [];
         let categoryOrder = 0;
@@ -160,8 +157,11 @@ export default function StaffSelectionPage() {
   // ── Service addition state ──
 
   // ── Date/Time states matching screenshot 2.png ──
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = useMemo(() => {
+    const value = new Date();
+    value.setHours(0, 0, 0, 0);
+    return value;
+  }, []);
   const todayStr = formatDateISO(today.getFullYear(), today.getMonth(), today.getDate());
 
   const [weekStartDate, setWeekStartDate] = useState<Date>(() => {
@@ -173,7 +173,6 @@ export default function StaffSelectionPage() {
   const [showCalendarDropdown, setShowCalendarDropdown] = useState(false);
   const [viewYear, setViewYear] = useState(today.getFullYear());
   const [viewMonth, setViewMonth] = useState(today.getMonth());
-  const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
 
   useEffect(() => {
     if (!branchSlug) return;
@@ -190,8 +189,25 @@ export default function StaffSelectionPage() {
         if (!active) return;
         const bookings: CalendarBooking[] = [];
         const absenceMap: Record<string, PublicAbsence[]> = {};
+        const capacityStaffMap = new Map<string, Staff>();
 
         for (const availability of availabilityDays) {
+          for (const [index, staff] of (availability.capacityStaff ?? []).entries()) {
+            capacityStaffMap.set(staff.uid, {
+              id: staff.uid,
+              branchId: branchSlug,
+              userUid: staff.uid,
+              name: staff.uid,
+              initials: '',
+              role: 'staff',
+              staffType: staff.workerType === 'assistant' ? 'junior' : 'main',
+              serviceIds: staff.serviceIds || [],
+              displayOrder: index,
+              status: 'active',
+              hasAppointments: false,
+              createdAt: '',
+            });
+          }
           for (const busy of availability.busy) {
             bookings.push({
               staffId: busy.employeeUserId,
@@ -222,12 +238,16 @@ export default function StaffSelectionPage() {
 
         setRealBookings(bookings);
         setStaffAbsences(absenceMap);
+        setCapacityStaffList(
+          capacityStaffMap.size > 0 ? [...capacityStaffMap.values()] : staffList,
+        );
       })
       .catch((error: unknown) => {
         console.error('Error fetching public availability:', error);
         if (active) {
           setRealBookings([]);
           setStaffAbsences({});
+          setCapacityStaffList([]);
           setAvailabilityLoadError(true);
         }
       });
@@ -235,7 +255,7 @@ export default function StaffSelectionPage() {
     return () => {
       active = false;
     };
-  }, [branchSlug, weekStartDate]);
+  }, [branchSlug, staffList, weekStartDate]);
 
   const calendarRef = useRef<HTMLDivElement>(null);
   const calendarBtnRef = useRef<HTMLButtonElement>(null);
@@ -343,18 +363,6 @@ export default function StaffSelectionPage() {
 
 
   // Legacy global handlers (kept for backward compat)
-  const handleSelectAny = () => {
-    dispatch({ type: 'SELECT_STAFF', staff: null, staffType: 'any' });
-  };
-
-  const handleSelectStaff = (staff: Staff) => {
-    dispatch({ type: 'SELECT_STAFF', staff, staffType: 'specific' });
-  };
-
-  const isAnySelected = state.selectedStaffType === 'any' && !state.selectedStaff;
-  const isStaffSelected = (staffId: string) =>
-    state.selectedStaffType === 'specific' && state.selectedStaff?.id === staffId;
-
   // Helper to check if a staff is on leave/absence for a given date+time
   const checkStaffAbsence = useCallback((staffId: string, dateStr: string): boolean => {
     const absences = staffAbsences[staffId];
@@ -466,7 +474,10 @@ export default function StaffSelectionPage() {
             } else {
               // Any staff: check if at least one active staff is free
               // In a nail salon, all active staff can perform all services
-              const eligibleStaff = staffList.filter(
+              // Capacity includes active employees hidden from the public
+              // employee picker; those employees can still receive an
+              // automatic "Bất kỳ ai" assignment.
+              const eligibleStaff = capacityStaffList.filter(
                 (s) =>
                   s.status === 'active' &&
                   (s.serviceIds.length === 0 || s.serviceIds.includes(seg.serviceId))
@@ -500,7 +511,7 @@ export default function StaffSelectionPage() {
         }
     }
     return slots;
-  }, [availabilityLoadError, totals.totalDuration, state.selectedServices, state.branch, staffList, checkStaffOverlap]);
+  }, [availabilityLoadError, totals.totalDuration, state.selectedServices, state.branch, capacityStaffList, checkStaffOverlap]);
 
   const columnsList = useMemo(() => {
     const list = [];
@@ -524,25 +535,16 @@ export default function StaffSelectionPage() {
       // Spec V1: per-service staff is now inside selectedServices, no longer global
       const rawSlots = isOutsideWindow ? [] : getSlotsForDate(isoStr);
       
-      const filtered = rawSlots.filter((slot) => {
-        if (timeFilter === 'all') return true;
-        const hour = parseInt(slot.time.split(':')[0]);
-        if (timeFilter === 'morning') return hour < 12;
-        if (timeFilter === 'afternoon') return hour >= 12 && hour < 17;
-        if (timeFilter === 'evening') return hour >= 17;
-        return true;
-      });
-
       list.push({
         date: isoStr,
         weekdayLabel,
         dateLabel,
         isSunday: d.getDay() === 0,
-        slots: filtered
+        slots: rawSlots
       });
     }
     return list;
-  }, [weekStartDate, locale, state.selectedServices, state.branch?.bookingWindowDays, timeFilter, getSlotsForDate]);
+  }, [weekStartDate, locale, state.branch?.bookingWindowDays, getSlotsForDate, today]);
 
   const handlePrevWeek = () => {
     setWeekStartDate((prev) => {

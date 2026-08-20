@@ -5,6 +5,7 @@ import { readRateLimit, writeRateLimit } from "../../../config/employee-rate-lim
 import { getEmployeeLeaveRequests } from "./get-employee-leave-requests.js";
 import { createEmployeeLeaveRequest } from "./post-create-employee-leave-request.js";
 import { deleteEmployeeLeaveRequest } from "./delete-employee-leave-request.js";
+import { previewEmployeeLeaveRequest } from "./post-preview-employee-leave-request.js";
 
 const leaveRequestsRouter = express.Router();
 
@@ -12,6 +13,11 @@ leaveRequestsRouter.get(
   "/api/v1/stores/:storeId/employees/:employeeUserId/leave-requests",
   readRateLimit,
   handleErrorFunction(getEmployeeLeaveRequests),
+);
+leaveRequestsRouter.post(
+  "/api/v1/stores/:storeId/employees/:employeeUserId/leave-requests/preview",
+  writeRateLimit,
+  handleErrorFunction(previewEmployeeLeaveRequest),
 );
 leaveRequestsRouter.post(
   "/api/v1/stores/:storeId/employees/:employeeUserId/leave-requests",

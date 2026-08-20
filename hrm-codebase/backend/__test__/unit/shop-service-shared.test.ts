@@ -11,6 +11,7 @@ describe("shop service shared validation", () => {
     const parsedServiceInput = createShopServiceSchema.parse({
       storeId: "store-1",
       name: "  Gel manicure  ",
+      displayName: "  Gel  ",
       amount: "$45.50",
       groupService: "  Gel  ",
       duration: "60 minutes",
@@ -18,12 +19,14 @@ describe("shop service shared validation", () => {
 
     expect(normalizeShopServicePayload(parsedServiceInput)).toEqual({
       name: "Gel manicure",
+      displayName: "Gel",
       groupService: "Gel",
       price: 45.5,
       category: "other",
       durationMin: 60,
       durationMax: 60,
       bookingKind: "main",
+      availableForBooking: true,
     });
   });
 

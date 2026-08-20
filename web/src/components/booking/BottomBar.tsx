@@ -35,7 +35,9 @@ export default function BottomBar() {
   };
 
   // Hide when no services selected or past step 2
-  if (selectedServices.length === 0 || currentStep > 2) return null;
+  // Service page owns its validation-aware footer because every selected
+  // service can require a different worker. Avoid rendering two bottom bars.
+  if (selectedServices.length === 0 || currentStep === 1 || currentStep > 2) return null;
 
   const isCoralButton = currentStep === 1;
 

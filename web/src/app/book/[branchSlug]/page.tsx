@@ -4,10 +4,11 @@ import { useState, useMemo, useCallback, useEffect } from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import { useBooking } from '@/lib/bookingContext';
-import { hasConflict, MAX_MAIN_SERVICES, shouldSkipStaffSelection } from '@/lib/types';
+import { hasConflict, MAX_MAIN_SERVICES } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { fetchHrmServices, fetchHrmStaff } from '@/lib/hrmApi';
 import type { Service, ServiceCategory, Staff } from '@/lib/types';
+import { AlertTriangle, Search, Sparkles, Users } from 'lucide-react';
 import styles from './page.module.css';
 
 
@@ -41,7 +42,7 @@ export default function ServiceSelectionPage() {
         const serviceList: Service[] = [];
         let categoryOrder = 0;
 
-        for (const hrm of hrmServices) {
+        for (const hrm of hrmServices.filter((service) => service.availableForBooking !== false)) {
           const groupName = hrm.groupService || hrm.category || 'Other';
           const catId = groupName.toLowerCase().replace(/\s+/g, '-');
 
@@ -61,7 +62,7 @@ export default function ServiceSelectionPage() {
             branchId: branchSlug,
             categoryId: catId,
             name: hrm.name,
-            description: '',
+            description: hrm.description || '',
             durationMinutes: hrm.durationMin || hrm.durationMax || 30,
             price: hrm.price,
             currency: 'EUR',
@@ -269,11 +270,6 @@ export default function ServiceSelectionPage() {
     });
   }, [services, staffList]);
 
-  // ── Check if skip staff selection (auto-assign categories like Pediküre) ──
-  const skipStaffSelection = useMemo(() => {
-    return shouldSkipStaffSelection(state.selectedServices, categories);
-  }, [state.selectedServices, categories]);
-
   // ── Check if can continue ──
   const canContinue = useMemo(() => {
     if (state.selectedServices.length === 0) return false;
@@ -290,18 +286,6 @@ export default function ServiceSelectionPage() {
     router.push(`/book/${branchSlug}/staff`);
   };
 
-  // ── Build the badge text for a category ──
-  const getCategoryBadgeText = (categoryId: string): string | null => {
-    const item = getSelectedItem(categoryId);
-    if (!item) return null;
-
-    const extraCount = item.extras.length;
-    if (extraCount === 0) {
-      return '1 selected';
-    }
-    return `1 main + ${extraCount} extra`;
-  };
-
   if (loading) {
     return (
       <div className={styles.loading}>
@@ -314,7 +298,7 @@ export default function ServiceSelectionPage() {
   if (loadError) {
     return (
       <div className={styles.noResults} role="alert">
-        <div className={styles.noResultsIcon}>⚠️</div>
+        <div className={styles.noResultsIcon}><AlertTriangle size={36} strokeWidth={1.5} /></div>
         <p className={styles.noResultsText}>Không thể tải danh sách dịch vụ. Vui lòng thử lại sau.</p>
       </div>
     );
@@ -326,7 +310,7 @@ export default function ServiceSelectionPage() {
 
       {/* Search */}
       <div className={styles.searchWrapper}>
-        <span className={styles.searchIcon}>🔍</span>
+        <span className={styles.searchIcon}><Search size={17} /></span>
         <input
           type="text"
           className={styles.searchInput}
@@ -343,7 +327,6 @@ export default function ServiceSelectionPage() {
             const isExpanded = expandedCategories.has(category.id);
             const disableReason = getCategoryDisableReason(category);
             const isDisabled = disableReason !== null;
-            const badgeText = getCategoryBadgeText(category.id);
             const selectedItem = getSelectedItem(category.id);
 
             // Split services: main services (non-addon) and extras (addon)
@@ -444,7 +427,7 @@ export default function ServiceSelectionPage() {
                                   onClick={() => handleSelectAnyForService(category.id)}
                                 >
                                   <div className={styles.staffPickerAvatar}>
-                                    <span>👥</span>
+                                    <Users size={19} />
                                   </div>
                                   <div className={styles.staffPickerName}>
                                     {localLabels.noPreference}
@@ -471,11 +454,6 @@ export default function ServiceSelectionPage() {
                                       <div className={styles.staffPickerName}>
                                         {staff.name}
                                       </div>
-                                      {staff.staffType && (
-                                        <div className={styles.staffPickerBadge}>
-                                          {staff.staffType === 'main' ? '⭐' : '🔹'}
-                                        </div>
-                                      )}
                                     </div>
                                   );
                                 })}
@@ -536,7 +514,7 @@ export default function ServiceSelectionPage() {
         </div>
       ) : (
         <div className={styles.noResults}>
-          <div className={styles.noResultsIcon}>💅</div>
+          <div className={styles.noResultsIcon}><Sparkles size={36} strokeWidth={1.5} /></div>
           <p className={styles.noResultsText}>No services found</p>
         </div>
       )}

@@ -547,6 +547,7 @@ describe("money allocation", () => {
 
     expect(preview.totalRevenue).toBe(18);
     expect(preview.employeeSummaries.map((summary) => summary.totalRevenue)).toEqual([9, 9]);
+    expect(item.services[0]?.sourceServiceId).toBe("service-1");
     expect(item.services[0]?.employees.map((employee) => employee.shareAmount)).toEqual([9, 9]);
   });
 });

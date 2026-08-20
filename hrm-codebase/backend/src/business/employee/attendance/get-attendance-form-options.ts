@@ -115,6 +115,7 @@ export const getAttendanceFormOptions = async (req: Request, res: Response) => {
       services: services.map((service) => ({
         id: service.id,
         name: service.name,
+        ...(service.displayName !== undefined && { displayName: service.displayName }),
         price: service.price,
         durationMinutes: Math.max(service.durationMax ?? service.durationMin ?? 0, 0),
         ...(service.groupService !== undefined && { groupService: service.groupService }),

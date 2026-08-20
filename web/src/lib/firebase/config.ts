@@ -37,8 +37,26 @@ export const db = (() => {
 })();
 
 let appCheck: AppCheck | undefined;
+let forceAppCheckRefresh = false;
 
 if (typeof window !== 'undefined') {
+  const isLocalDevelopment =
+    process.env.NODE_ENV !== 'production' &&
+    ['localhost', '127.0.0.1', '::1', '[::1]'].includes(window.location.hostname);
+
+  // Firebase App Check's debug provider is the supported way to test from
+  // localhost. Keep this strictly development-only so production continues to
+  // use reCAPTCHA Enterprise and App Check enforcement normally.
+  if (isLocalDevelopment) {
+    forceAppCheckRefresh = true;
+    const configuredDebugToken =
+      process.env.NEXT_PUBLIC_FIREBASE_APP_CHECK_DEBUG_TOKEN?.trim();
+    const debugGlobal = globalThis as typeof globalThis & {
+      FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean | string;
+    };
+    debugGlobal.FIREBASE_APPCHECK_DEBUG_TOKEN = configuredDebugToken || true;
+  }
+
   const siteKey = process.env.NEXT_PUBLIC_FIREBASE_APP_CHECK_SITE_KEY?.trim();
   if (siteKey) {
     appCheck = initializeAppCheck(app, {
@@ -50,5 +68,5 @@ if (typeof window !== 'undefined') {
 
 export const getFirebaseAppCheckToken = async (): Promise<string | undefined> => {
   if (!appCheck) return undefined;
-  return (await getAppCheckToken(appCheck, false)).token;
+  return (await getAppCheckToken(appCheck, forceAppCheckRefresh)).token;
 };

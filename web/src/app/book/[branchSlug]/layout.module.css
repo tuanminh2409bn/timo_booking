@@ -1,8 +1,14 @@
 .layoutWrapper {
-  min-height: 100vh;
-  background: var(--color-bg);
+  min-height: 100dvh;
+  background: var(--hrm-page-bg);
   display: flex;
   flex-direction: column;
+}
+
+.layoutWrapper button {
+  -webkit-appearance: none;
+  appearance: none;
+  font: inherit;
 }
 
 /* Header */
@@ -11,9 +17,8 @@
   top: 0;
   z-index: var(--z-sticky);
   background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border);
-  backdrop-filter: blur(12px);
-  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid var(--hrm-border);
+  background: var(--hrm-surface);
 }
 
 .headerContent {
@@ -27,30 +32,30 @@
 }
 
 .headerButton {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--hrm-border);
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--color-surface);
   cursor: pointer;
-  transition: all var(--transition-base);
-  color: var(--color-text-primary);
-  font-size: var(--font-size-lg);
+  box-shadow: var(--hrm-shadow-header);
+  transition: background 150ms ease, color 150ms ease;
+  color: var(--hrm-muted);
+  font-size: 20px;
 }
 
 .headerButton:hover {
-  background: var(--color-primary-light);
-  border-color: var(--color-text-tertiary);
-  transform: scale(1.05);
+  background: var(--hrm-blue-50);
+  color: var(--hrm-blue-700);
 }
 
 .headerTitle {
-  font-size: var(--font-size-base);
+  font-size: 14px;
   font-weight: 600;
-  color: var(--color-text-primary);
+  color: var(--hrm-text);
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
@@ -59,7 +64,7 @@
 /* Stepper wrapper */
 .stepperWrapper {
   background: var(--color-surface);
-  border-bottom: 1px solid var(--color-border-light);
+  border-bottom: 1px solid var(--hrm-border);
 }
 
 .stepperInner {
@@ -73,20 +78,19 @@
   max-width: var(--max-width);
   margin: 0 auto;
   width: 100%;
-  padding: var(--space-xl) var(--space-lg);
+  padding: 24px;
   padding-bottom: calc(var(--bottom-bar-height) + var(--space-xl));
 }
 
 .contentColumn {
   flex: 1;
   min-width: 0;
-  animation: fadeInUp 0.4s ease-out;
 }
 
 /* Mobile bottom spacing for BottomBar */
 @media (max-width: 1024px) {
   .mainArea {
-    padding: var(--space-lg) var(--space-md);
+    padding: 20px;
     padding-bottom: calc(var(--bottom-bar-height) + var(--space-xl));
   }
 }
@@ -101,7 +105,7 @@
   }
 
   .mainArea {
-    padding: var(--space-md);
+    padding: 16px;
     padding-bottom: calc(var(--bottom-bar-height) + var(--space-xl));
   }
 }

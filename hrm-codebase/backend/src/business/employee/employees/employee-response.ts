@@ -24,6 +24,7 @@ export const toEmployeeListItem = (employee: ShopEmployeeListItem) => {
     storeId?: string;
     workerType?: "main" | "assistant";
     serviceIds?: string[];
+    publicBookingVisible: boolean;
     weeklyWorkingHours?: ShopEmployeeListItem["weeklyWorkingHours"];
     compensationModel: typeof compensationModel;
     ownerCommissionRate?: number | undefined;
@@ -37,6 +38,7 @@ export const toEmployeeListItem = (employee: ShopEmployeeListItem) => {
     active: employee.active,
     status,
     compensationModel,
+    publicBookingVisible: employee.publicBookingVisible ?? true,
   };
 
   if (employee.storeId !== undefined) {
@@ -97,6 +99,7 @@ export const toEmployeeResponse = (employee: ShopEmployeeListItem) => {
     storeId?: string;
     workerType?: "main" | "assistant";
     serviceIds?: string[];
+    publicBookingVisible: boolean;
     weeklyWorkingHours?: ShopEmployeeListItem["weeklyWorkingHours"];
     gender?: ShopEmployeeListItem["gender"];
     compensationModel: typeof compensationModel;
@@ -120,6 +123,7 @@ export const toEmployeeResponse = (employee: ShopEmployeeListItem) => {
     active: employee.active,
     status,
     compensationModel,
+    publicBookingVisible: employee.publicBookingVisible ?? true,
     label: name,
     value: employee.uid,
     // TODO: kpi/shiftsCompleted/salary/absent are hardcoded placeholders for FE compatibility.

@@ -23,6 +23,17 @@ export type AdminAttendanceItem = {
   mainAssigneeUserId: string;
   bookingStatus: AdminAttendanceStatus;
   source: 'online_booking' | 'manual_booking' | 'walk_in';
+  staffSelectionType?: 'specific' | 'any';
+  requestedEmployeeUserId?: string;
+  requestedEmployeeName?: string;
+  conflictEmployeeUserId?: string;
+  conflictEmployeeName?: string;
+  proposedAssigneeUserId?: string;
+  proposedAssigneeName?: string;
+  proposedAssigneeWorkerType?: 'main' | 'assistant';
+  updatedByUserId?: string;
+  updatedByRole?: 'customer' | 'owner' | 'manager' | 'employee';
+  updatedByName?: string;
   totalAmount: number;
   addOns?: Array<{
     id: string;
@@ -32,8 +43,11 @@ export type AdminAttendanceItem = {
   }>;
   services: Array<{
     id: string;
+    sourceServiceId?: string;
     name: string;
-    amount: string;
+    amount: string | number;
+    durationMin?: number;
+    durationMax?: number;
     employees: Array<{
       employeeId: string;
       employeeName: string;
@@ -51,6 +65,8 @@ type AttendanceCalendarResponse = {
   }>;
 };
 
+type RawAdminAttendanceItem = AttendanceCalendarResponse['items'][number];
+
 const resolveAttendanceMinutes = (minutes: unknown, dateTime: unknown): number => {
   if (typeof minutes === 'number' && Number.isFinite(minutes)) return minutes;
   if (typeof dateTime !== 'string') throw new Error('Attendance time is missing');
@@ -61,6 +77,17 @@ const resolveAttendanceMinutes = (minutes: unknown, dateTime: unknown): number =
   return Number(match[1]) * 60 + Number(match[2]);
 };
 
+const normalizeAdminAttendanceItem = (item: RawAdminAttendanceItem): AdminAttendanceItem => ({
+  ...item,
+  startTime: resolveAttendanceMinutes(item.startTime, item.date),
+  endTime: resolveAttendanceMinutes(item.endTime, item.endDate),
+  bookingStatus: item.bookingStatus === 'requested'
+    ? 'pending_approval'
+    : item.bookingStatus === 'processing'
+      ? 'needs_owner_action'
+      : item.bookingStatus,
+});
+
 export const fetchAdminAttendanceCalendar = async (
   storeId: string,
   fromWorkDate: string,
@@ -69,7 +96,26 @@ export const fetchAdminAttendanceCalendar = async (
   const inclusiveDays = Math.floor(
     (Date.parse(`${toWorkDate}T00:00:00Z`) - Date.parse(`${fromWorkDate}T00:00:00Z`)) / 86_400_000,
   ) + 1;
-  const view = inclusiveDays === 1 ? 'day' : 'week';
+  const [fromYear, fromMonth, fromDay] = fromWorkDate.split('-').map(Number);
+  const monthLastDay = new Date(Date.UTC(fromYear, fromMonth, 0)).getUTCDate();
+  const isFullMonth = fromDay === 1 &&
+    toWorkDate === `${fromYear}-${String(fromMonth).padStart(2, '0')}-${String(monthLastDay).padStart(2, '0')}`;
+  if (inclusiveDays !== 1 && inclusiveDays !== 7 && !isFullMonth) {
+    const ranges: Array<[string, string]> = [];
+    let cursor = new Date(`${fromWorkDate}T00:00:00.000Z`);
+    const finalDate = new Date(`${toWorkDate}T00:00:00.000Z`);
+    while (cursor <= finalDate) {
+      const remainingDays = Math.floor((finalDate.getTime() - cursor.getTime()) / 86_400_000) + 1;
+      const chunkDays = remainingDays >= 7 ? 7 : 1;
+      const chunkEnd = new Date(cursor);
+      chunkEnd.setUTCDate(chunkEnd.getUTCDate() + chunkDays - 1);
+      ranges.push([cursor.toISOString().slice(0, 10), chunkEnd.toISOString().slice(0, 10)]);
+      cursor = new Date(chunkEnd);
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    return (await Promise.all(ranges.map(([from, to]) => fetchAdminAttendanceCalendar(storeId, from, to)))).flat();
+  }
+  const view = inclusiveDays === 1 ? 'day' : isFullMonth ? 'month' : 'week';
   const response = await authenticatedHrmFetch(
     `/api/v1/stores/${encodeURIComponent(storeId)}/attendances/calendar?view=${view}&fromWorkDate=${encodeURIComponent(fromWorkDate)}&toWorkDate=${encodeURIComponent(toWorkDate)}`,
   );
@@ -77,16 +123,21 @@ export const fetchAdminAttendanceCalendar = async (
     throw new Error(`Could not load attendance calendar (${response.status})`);
   }
   const data = await response.json() as AttendanceCalendarResponse;
-  return data.items.map((item) => ({
-    ...item,
-    startTime: resolveAttendanceMinutes(item.startTime, item.date),
-    endTime: resolveAttendanceMinutes(item.endTime, item.endDate),
-    bookingStatus: item.bookingStatus === 'requested'
-      ? 'pending_approval'
-      : item.bookingStatus === 'processing'
-        ? 'needs_owner_action'
-        : item.bookingStatus,
-  }));
+  return data.items.map(normalizeAdminAttendanceItem);
+};
+
+export const searchAdminAttendances = async (
+  storeId: string,
+  query: string,
+): Promise<AdminAttendanceItem[]> => {
+  const response = await authenticatedHrmFetch(
+    `/api/v1/stores/${encodeURIComponent(storeId)}/attendances/search?q=${encodeURIComponent(query.trim())}`,
+  );
+  if (!response.ok) {
+    throw new Error(`Could not search attendance (${response.status})`);
+  }
+  const data = await response.json() as AttendanceCalendarResponse;
+  return data.items.map(normalizeAdminAttendanceItem);
 };
 
 export const updateAdminAttendanceStatus = async (
@@ -128,6 +179,7 @@ export type AdminCreateBookingPayload = {
     employeeUserId: string;
   }>;
   source: 'manual_booking' | 'walk_in';
+  quickBooking?: boolean;
   notes?: string;
 };
 
@@ -178,7 +230,7 @@ export type AdminCustomer = {
   blocked: boolean;
   blockedReason?: string;
   lastBookingAt?: number;
-  counters: {
+  counters?: {
     total: number;
     pending: number;
     confirmed: number;
@@ -195,8 +247,53 @@ export const fetchAdminCustomers = async (storeId: string): Promise<AdminCustome
   if (!response.ok) {
     throw new Error(`Could not load customers (${response.status})`);
   }
-  const data = await response.json() as { items: AdminCustomer[] };
-  return data.items;
+  const data = await response.json() as { items?: unknown };
+  if (!Array.isArray(data.items)) {
+    throw new Error('Customer list response is invalid');
+  }
+  return data.items as AdminCustomer[];
+};
+
+export type AdminCustomerAttendanceSummary = {
+  total: number;
+  pending_approval: number;
+  confirmed: number;
+  completed: number;
+  cancelled: number;
+  no_show: number;
+};
+
+export type AdminCustomerAttendanceHistoryItem = {
+  id: string;
+  attendanceCode?: string;
+  workDate: string;
+  startTime: number;
+  endTime: number;
+  status: 'open' | 'closed';
+  bookingStatus?: AdminAttendanceStatus;
+  services: Array<{ id: string; name: string }>;
+};
+
+export const fetchAdminCustomerDetail = async (storeId: string, customerId: string): Promise<AdminCustomer> => {
+  const response = await authenticatedHrmFetch(`/api/v1/stores/${encodeURIComponent(storeId)}/customers/${encodeURIComponent(customerId)}`);
+  if (!response.ok) throw new Error(`Could not load customer (${response.status})`);
+  return (await response.json() as { item: AdminCustomer }).item;
+};
+
+export const fetchAdminCustomerAttendanceSummary = async (
+  storeId: string, customerId: string, startDate: string, endDate: string,
+): Promise<AdminCustomerAttendanceSummary> => {
+  const response = await authenticatedHrmFetch(`/api/v1/stores/${encodeURIComponent(storeId)}/customers/${encodeURIComponent(customerId)}/attendance-summary?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
+  if (!response.ok) throw new Error(`Could not load customer summary (${response.status})`);
+  return (await response.json() as { summary: AdminCustomerAttendanceSummary }).summary;
+};
+
+export const fetchAdminCustomerAttendanceHistory = async (
+  storeId: string, customerId: string, startDate: string, endDate: string,
+): Promise<AdminCustomerAttendanceHistoryItem[]> => {
+  const response = await authenticatedHrmFetch(`/api/v1/stores/${encodeURIComponent(storeId)}/customers/${encodeURIComponent(customerId)}/attendances?pageSize=50&startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`);
+  if (!response.ok) throw new Error(`Could not load customer history (${response.status})`);
+  return (await response.json() as { items: AdminCustomerAttendanceHistoryItem[] }).items;
 };
 
 export const setAdminCustomerBlocked = async (
@@ -228,6 +325,7 @@ export type AdminEmployee = {
   status: string;
   workerType?: 'main' | 'assistant';
   serviceIds?: string[];
+  publicBookingVisible?: boolean;
   compensationModel?: 'commission' | 'hourly' | 'fixed';
   ownerCommissionRate?: number;
   hourlyRate?: number;
@@ -241,7 +339,29 @@ export type AdminLeaveRequest = {
   startDate: string;
   endDate: string;
   allDay: boolean;
+  startTime?: string;
+  endTime?: string;
   reason: string;
+};
+
+export type AdminLeaveConflict = {
+  attendanceId: string;
+  attendanceCode?: string;
+  bookingId?: string;
+  workDate: string;
+  startTime: number;
+  endTime: number;
+  customerName: string;
+  services: string[];
+  staffSelectionType: 'specific' | 'any';
+  resolution: 'auto_reassign' | 'manual_action';
+};
+
+export type AdminLeavePreview = {
+  conflictCount: number;
+  automaticCount: number;
+  manualCount: number;
+  conflicts: AdminLeaveConflict[];
 };
 
 export const fetchAdminEmployees = async (storeId: string): Promise<AdminEmployee[]> => {
@@ -251,6 +371,42 @@ export const fetchAdminEmployees = async (storeId: string): Promise<AdminEmploye
   if (!response.ok) throw new Error(`Could not load employees (${response.status})`);
   const data = await response.json() as { items: AdminEmployee[] };
   return data.items;
+};
+
+export type AdminEmployeeAttendanceDay = {
+  workDate: string;
+  worked: boolean;
+  attendanceCount: number;
+  totalRevenue: number;
+};
+
+export type AdminEmployeeAttendanceDaysPage = {
+  items: AdminEmployeeAttendanceDay[];
+  meta: {
+    storeId: string;
+    employeeUserId: string;
+    pageSize: number;
+    fromWorkDate: string;
+    toWorkDate: string;
+    hasMore: boolean;
+    nextCursor?: string;
+    totalAttendanceCount: number;
+    workedDayCount: number;
+    totalRevenue: number;
+  };
+};
+
+export const fetchAdminEmployeeAttendanceDays = async (
+  storeId: string,
+  employeeId: string,
+  before?: string,
+): Promise<AdminEmployeeAttendanceDaysPage> => {
+  const query = before ? `?before=${encodeURIComponent(before)}` : '';
+  const response = await authenticatedHrmFetch(
+    `/api/v1/stores/${encodeURIComponent(storeId)}/employees/${encodeURIComponent(employeeId)}/attendance-days${query}`,
+  );
+  if (!response.ok) throw new Error(`Could not load employee attendance days (${response.status})`);
+  return await response.json() as AdminEmployeeAttendanceDaysPage;
 };
 
 export const fetchEmployeeLeave = async (
@@ -268,7 +424,7 @@ export const fetchEmployeeLeave = async (
 export const createEmployeeLeave = async (
   storeId: string,
   employeeId: string,
-  payload: Pick<AdminLeaveRequest, 'startDate' | 'endDate' | 'allDay' | 'reason'>,
+  payload: Pick<AdminLeaveRequest, 'startDate' | 'endDate' | 'allDay' | 'reason' | 'startTime' | 'endTime'>,
 ): Promise<void> => {
   const response = await authenticatedHrmFetch(
     `/api/v1/stores/${encodeURIComponent(storeId)}/employees/${encodeURIComponent(employeeId)}/leave-requests`,
@@ -281,6 +437,22 @@ export const createEmployeeLeave = async (
     const error = await response.json().catch(() => undefined) as { message?: string } | undefined;
     throw new Error(error?.message || `Could not create leave (${response.status})`);
   }
+};
+
+export const previewEmployeeLeave = async (
+  storeId: string,
+  employeeId: string,
+  payload: Pick<AdminLeaveRequest, 'startDate' | 'endDate' | 'allDay' | 'reason' | 'startTime' | 'endTime'>,
+): Promise<AdminLeavePreview> => {
+  const response = await authenticatedHrmFetch(
+    `/api/v1/stores/${encodeURIComponent(storeId)}/employees/${encodeURIComponent(employeeId)}/leave-requests/preview`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => undefined) as { message?: string } | undefined;
+    throw new Error(error?.message || `Could not preview leave (${response.status})`);
+  }
+  return await response.json() as AdminLeavePreview;
 };
 
 export const deleteEmployeeLeave = async (
@@ -297,6 +469,7 @@ export const deleteEmployeeLeave = async (
 
 export type AdminServiceInput = {
   name: string;
+  displayName?: string;
   description?: string;
   category: 'nail' | 'pedicure' | 'manicure' | 'design' | 'other';
   groupService?: string;
@@ -304,6 +477,7 @@ export type AdminServiceInput = {
   duration: number;
   preferredWorkerType?: 'main' | 'assistant';
   bookingKind?: 'main' | 'add_on';
+  availableForBooking?: boolean;
 };
 
 const serviceMutation = async (
@@ -344,6 +518,7 @@ export type AdminEmployeeInput = {
   hourlyRate?: number;
   fixedSalary?: number;
   serviceIds?: string[];
+  publicBookingVisible?: boolean;
 };
 
 export const createAdminEmployee = async (
@@ -368,14 +543,20 @@ export const updateAdminEmployee = async (
   employeeId: string,
   payload: {
     active?: boolean;
+    name?: string;
     workerType?: 'main' | 'assistant';
+    publicBookingVisible?: boolean;
     serviceIds?: string[];
   },
 ): Promise<void> => {
   const employeeBase = `/api/v1/stores/${encodeURIComponent(storeId)}/employees/${encodeURIComponent(employeeId)}`;
   const updates: Array<{ path: string; body: object }> = [];
-  if (payload.workerType !== undefined) {
-    updates.push({ path: employeeBase, body: { workerType: payload.workerType } });
+  if (payload.name !== undefined || payload.workerType !== undefined || payload.publicBookingVisible !== undefined) {
+    updates.push({ path: employeeBase, body: {
+      ...(payload.name !== undefined && { name: payload.name }),
+      ...(payload.workerType !== undefined && { workerType: payload.workerType }),
+      ...(payload.publicBookingVisible !== undefined && { publicBookingVisible: payload.publicBookingVisible }),
+    } });
   }
   if (payload.active !== undefined) {
     updates.push({ path: `${employeeBase}/employment-status`, body: { active: payload.active } });
@@ -413,6 +594,7 @@ export const createCardCheckout = async (): Promise<string> => {
 export type AdminStore = {
   id: string;
   name: string;
+  phone?: string;
   status: 'active' | 'disabled';
   addressText?: string;
   openTime?: string;

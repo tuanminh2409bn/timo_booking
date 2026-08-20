@@ -16,6 +16,7 @@ export const toShopServiceListItem = (service: ShopServiceType) => ({
   id: service.id,
   ...(service.serviceCode !== undefined && { serviceCode: service.serviceCode }),
   name: service.name,
+  ...(service.displayName !== undefined && { displayName: service.displayName }),
   category: service.category,
   ...(service.description !== undefined && { description: service.description }),
   groupService: service.groupService ?? SERVICE_CATEGORY_LABELS[service.category],
@@ -25,6 +26,7 @@ export const toShopServiceListItem = (service: ShopServiceType) => ({
   ...(service.updatedAt !== undefined && { updatedAt: service.updatedAt }),
   preferredWorkerType: service.preferredWorkerType ?? "main",
   bookingKind: service.bookingKind ?? "main",
+  availableForBooking: service.availableForBooking ?? true,
 });
 
 export const toShopServiceGroupItem = (

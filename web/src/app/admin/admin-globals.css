@@ -1,6 +1,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * The public Booking site intentionally scales the root to 14px on narrow
+ * screens. HRM keeps a 16px root, and all of its Tailwind dimensions are based
+ * on that value. Restore the HRM scale only while an admin screen is mounted so
+ * the landing/customer experience remains unchanged.
+ */
+@media (max-width: 768px) {
+  html:has(.admin-root) {
+    font-size: 16px;
+  }
+}
+
 .admin-root {
   /* Shadcn UI Light Mode Variables */
   --background: 0 0% 100%;
@@ -33,6 +45,10 @@
 
   --radius: 0.75rem;
 
+  --hrm-motion-fast: 160ms;
+  --hrm-motion-page: 140ms;
+  --hrm-motion-ease-out: cubic-bezier(0.16, 0.84, 0.3, 1);
+
   font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -53,4 +69,92 @@
   background-color: #f7f7f7;
   color: #111827;
   font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+/* Tailwind's composed translate utility is incomplete in this Next bundle
+ * because --tw-translate-y has no initial value. Keep the floating menu
+ * centered with an explicit transform, matching the HRM implementation. */
+.booking-admin-bottom-nav {
+  transform: translateX(-50%);
+}
+
+/* Tailwind's translate variables are not initialized inside the scoped admin
+ * reset. Use a deterministic transform so every employee editor is centered
+ * vertically on mobile and on larger screens, matching the HRM dialogs. */
+.booking-admin-centered-dialog-panel {
+  top: 50%;
+  right: 1rem;
+  left: 1rem;
+  transform: translateY(-50%);
+}
+
+@media (min-width: 640px) {
+  .booking-admin-centered-dialog-panel {
+    right: auto;
+    left: 50%;
+    width: calc(100% - 2rem);
+    max-width: 28rem;
+    transform: translate(-50%, -50%);
+  }
+}
+
+.admin-page-transition {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Route changes use one short opacity-only animation. Avoid transforms and
+ * exit/layout animations because fixed dialogs and the mobile navigation must
+ * never inherit an intermediate containing block or stale page position. */
+.admin-page-fade {
+  animation: admin-page-fade-in var(--hrm-motion-page) ease-out;
+}
+
+@keyframes admin-page-fade-in {
+  from { opacity: 0.94; }
+  to { opacity: 1; }
+}
+
+.booking-admin-bottom-nav > a {
+  position: relative;
+  isolation: isolate;
+}
+
+.booking-admin-nav-content {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.125rem;
+}
+
+/* A native dialog rendered inside the route content must sit above the fixed
+ * mobile navigation. The short page fade no longer keeps a stacking context
+ * after it ends; while a dialog is open, raise its route layer explicitly. */
+.admin-page-transition:has(dialog[open]) {
+  position: relative;
+  z-index: 102;
+}
+
+.admin-root:has(dialog[open]) .booking-admin-bottom-nav {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .admin-page-transition,
+  .booking-admin-bottom-nav,
+  .booking-admin-bottom-nav *,
+  .admin-root [role='dialog'],
+  .admin-root [role='dialog'] * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .admin-page-fade {
+    animation: none !important;
+  }
 }

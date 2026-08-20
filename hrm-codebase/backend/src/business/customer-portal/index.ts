@@ -375,6 +375,7 @@ router.post(
           updatedBy: phoneKey(session.phone),
           updatedByUserId: phoneKey(session.phone),
           updatedByRole: "customer",
+          updatedByName: String(booking["customerName"] ?? "").trim() || "Customer",
           updatedAt: timestamp,
         },
       );

@@ -4,14 +4,13 @@
   justify-content: center;
   min-height: calc(100vh - var(--header-height) - 120px);
   padding: var(--space-xl) var(--space-md);
-  animation: fadeIn 0.5s ease-out;
 }
 
 .successCard {
   background: var(--color-surface);
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--color-border);
-  box-shadow: var(--shadow-xl);
+  border-radius: var(--hrm-radius-feature);
+  border: 1px solid var(--hrm-border);
+  box-shadow: var(--hrm-shadow-header);
   padding: var(--space-3xl) var(--space-2xl);
   max-width: 520px;
   width: 100%;
@@ -29,7 +28,7 @@
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: var(--color-success);
+  background: var(--hrm-blue-700);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -55,8 +54,8 @@
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: #FFF7ED;
-  border: 3px solid #EA580C;
+  background: var(--hrm-blue-50);
+  border: 3px solid var(--hrm-blue-700);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -66,7 +65,7 @@
 .checkIconRequest {
   width: 48px;
   height: 48px;
-  stroke: #EA580C;
+  stroke: var(--hrm-blue-700);
   stroke-width: 2.5;
   fill: none;
   stroke-linecap: round;
@@ -138,6 +137,15 @@
   font-size: var(--font-size-sm);
   color: var(--color-text-secondary);
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.detailLabel svg,
+.serviceMetaChip svg {
+  color: var(--hrm-blue-700);
+  flex: 0 0 auto;
 }
 
 .detailValue {
@@ -233,8 +241,8 @@
   gap: var(--space-xs);
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-pill);
-  background: var(--color-success-bg);
-  color: var(--color-success-text);
+  background: var(--hrm-blue-50);
+  color: var(--hrm-blue-700);
   font-size: var(--font-size-xs);
   font-weight: 500;
   margin-bottom: var(--space-xl);
@@ -251,7 +259,8 @@
 .actionButton {
   flex: 1;
   padding: 14px var(--space-lg);
-  border-radius: var(--radius-pill);
+  min-height: 44px;
+  border-radius: var(--hrm-radius-control);
   font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;

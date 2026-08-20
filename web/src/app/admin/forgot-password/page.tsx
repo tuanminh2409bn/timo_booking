@@ -4,6 +4,8 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { getFirebaseAppCheckToken, HRM_API_BASE_URL } from '@/lib/firebase/config';
 import { useI18n } from '@/lib/i18n';
+import { Mail } from 'lucide-react';
+import { HrmButton, HrmInput } from '@/components/hrm-ui';
 
 const post = async <T,>(path: string, body: unknown): Promise<T> => {
   const appCheckToken = await getFirebaseAppCheckToken();
@@ -57,9 +59,9 @@ export default function ForgotPasswordPage() {
   });
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-gray-50 p-4">
-      <section className="w-full max-w-md rounded-[28px] border border-gray-100 bg-white p-6 shadow-xl sm:p-8">
-        <h1 className="text-2xl font-bold text-gray-950">
+    <main className="relative flex min-h-dvh items-center justify-center bg-[#fbfaf7] bg-[url('/assets/images/hrm-auth-bg.svg')] bg-cover bg-center p-4">
+      <section className="w-full max-w-[420px]">
+        <h1 className="pt-5 text-center text-2xl font-bold text-slate-950 sm:pt-12">
           {locale === 'vi' ? 'Đặt lại mật khẩu' : locale === 'de' ? 'Passwort zurücksetzen' : 'Reset password'}
         </h1>
         <p className="mt-2 text-sm text-gray-500">
@@ -72,26 +74,26 @@ export default function ForgotPasswordPage() {
 
         {step === 'email' && (
           <div className="mt-6 space-y-4">
-            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" className="w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-blue-500" />
-            <button disabled={busy || !email.trim()} onClick={() => void requestOtp()} className="w-full rounded-xl bg-blue-600 py-3 font-bold text-white disabled:opacity-50">
+            <div className="relative"><Mail className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" /><HrmInput type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="Email" className="h-14 min-h-14 rounded-[1.25rem] pl-12 text-base" /></div>
+            <HrmButton disabled={busy || !email.trim()} onClick={() => void requestOtp()} className="min-h-14 w-full rounded-[1.25rem] text-base font-semibold">
               {locale === 'vi' ? 'Gửi mã OTP' : 'Send OTP'}
-            </button>
+            </HrmButton>
           </div>
         )}
         {step === 'otp' && (
           <div className="mt-6 space-y-4">
-            <input inputMode="numeric" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))} placeholder="000000" className="w-full rounded-xl border border-gray-200 px-4 py-3 text-center text-2xl font-bold tracking-[0.4em] outline-none focus:border-blue-500" />
-            <button disabled={busy || otp.length !== 6} onClick={() => void verifyOtp()} className="w-full rounded-xl bg-blue-600 py-3 font-bold text-white disabled:opacity-50">
+            <HrmInput inputMode="numeric" maxLength={6} value={otp} onChange={(event) => setOtp(event.target.value.replace(/\D/g, ''))} placeholder="000000" className="h-14 min-h-14 rounded-[1.25rem] text-center text-2xl font-bold tracking-[0.4em]" />
+            <HrmButton disabled={busy || otp.length !== 6} onClick={() => void verifyOtp()} className="min-h-14 w-full rounded-[1.25rem] text-base font-semibold">
               {locale === 'vi' ? 'Xác nhận mã' : 'Verify code'}
-            </button>
+            </HrmButton>
           </div>
         )}
         {step === 'password' && (
           <div className="mt-6 space-y-4">
-            <input type="password" minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={locale === 'vi' ? 'Mật khẩu mới' : 'New password'} className="w-full rounded-xl border border-gray-200 px-4 py-3 outline-none focus:border-blue-500" />
-            <button disabled={busy || password.length < 6} onClick={() => void reset()} className="w-full rounded-xl bg-blue-600 py-3 font-bold text-white disabled:opacity-50">
+            <HrmInput type="password" minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={locale === 'vi' ? 'Mật khẩu mới' : 'New password'} className="h-14 min-h-14 rounded-[1.25rem] text-base" />
+            <HrmButton disabled={busy || password.length < 6} onClick={() => void reset()} className="min-h-14 w-full rounded-[1.25rem] text-base font-semibold">
               {locale === 'vi' ? 'Đổi mật khẩu' : 'Change password'}
-            </button>
+            </HrmButton>
           </div>
         )}
         {step === 'done' && (
@@ -100,7 +102,7 @@ export default function ForgotPasswordPage() {
           </div>
         )}
 
-        <Link href="/admin/login" className="mt-6 block text-center text-sm font-semibold text-blue-600">
+        <Link href="/admin/login" className="mt-6 block min-h-14 rounded-[1.25rem] bg-white py-4 text-center text-base font-semibold text-slate-700">
           {locale === 'vi' ? 'Quay lại đăng nhập' : 'Back to sign in'}
         </Link>
       </section>

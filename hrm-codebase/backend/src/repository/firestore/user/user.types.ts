@@ -125,6 +125,8 @@ export type StoreScopedUserFields = {
   hourlyRate?: number | undefined;
   weeklyWorkingHours?: EmployeeWeeklyWorkingHours | undefined;
   serviceIds?: string[] | undefined;
+  /** Whether this employee may be shown and auto-assigned on public Booking. */
+  publicBookingVisible?: boolean | undefined;
 };
 
 export type ManagerUserType = BaseUserType &

@@ -171,7 +171,7 @@ export interface SelectedServiceItem {
 }
 
 // ===== BOOKING CONSTANTS (Spec V1) =====
-export const MAX_MAIN_SERVICES = 2;              // Spec V1: tối đa 2 dịch vụ chính
+export const MAX_MAIN_SERVICES = 3;              // PDF 12_08: hỗ trợ booking có 3 dịch vụ chính
 export const CUSTOMER_CANCEL_CUTOFF_HOURS = 12;  // Spec V1: hủy lịch confirmed trước 12 giờ
 
 // ===== BOOKING STATE =====

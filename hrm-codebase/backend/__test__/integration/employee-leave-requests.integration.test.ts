@@ -69,6 +69,105 @@ describe("integration: employee leave-requests", () => {
     });
   });
 
+  it("preview giữ lịch ở thợ cũ, trả mã CC và đánh dấu cần xử lý", async () => {
+    const attendance = state.attendances.get("attendance-1");
+    expect(attendance).toBeDefined();
+    state.attendances.set("attendance-1", {
+      ...attendance!,
+      attendanceCode: "CC-75",
+      staffSelectionType: "any",
+    });
+
+    const previewRes = await withRequestDefaults(
+      request(app)
+        .post(`${BASE}/preview`)
+        .set("Authorization", ownerAuth())
+        .send({
+          startDate: "2026-05-05",
+          endDate: "2026-05-05",
+          allDay: false,
+          startTime: "09:00",
+          endTime: "12:00",
+          reason: "Nghỉ buổi sáng",
+        }),
+    );
+
+    expect(previewRes.status).toBe(200);
+    expect(previewRes.body).toMatchObject({
+      conflictCount: 1,
+      automaticCount: 0,
+      manualCount: 1,
+      conflicts: [{
+        attendanceId: "attendance-1",
+        attendanceCode: "CC-75",
+        resolution: "manual_action",
+      }],
+    });
+  });
+
+  it("tạo nghỉ một phần không tự chuyển lịch sang thợ khác hoặc cột Request", async () => {
+    const attendance = state.attendances.get("attendance-1");
+    expect(attendance).toBeDefined();
+    state.attendances.set("attendance-1", {
+      ...attendance!,
+      attendanceCode: "CC-76",
+      bookingStatus: "confirmed",
+      staffSelectionType: "any",
+    });
+
+    const createRes = await withRequestDefaults(
+      request(app)
+        .post(BASE)
+        .set("Authorization", ownerAuth())
+        .send({
+          startDate: "2026-05-05",
+          endDate: "2026-05-05",
+          allDay: false,
+          startTime: "09:00",
+          endTime: "12:00",
+          reason: "Nghỉ buổi sáng",
+        }),
+    );
+
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.conflictResolution).toEqual({ reassigned: 0, manual: 1 });
+    expect(state.attendances.get("attendance-1")).toMatchObject({
+      attendanceCode: "CC-76",
+      employeeUserId: "staff-1",
+      bookingStatus: "processing",
+      conflictEmployeeUserId: "staff-1",
+      conflictEmployeeName: "Staff One",
+    });
+
+    const reassignRes = await withRequestDefaults(
+      request(app)
+        .patch("/api/v1/stores/branch-1/attendances/attendance-1/reassign")
+        .set("Authorization", ownerAuth())
+        .send({ employeeUserId: "staff-lead-1" }),
+    );
+    expect(reassignRes.status, JSON.stringify(reassignRes.body)).toBe(200);
+    expect(reassignRes.body.pendingConfirmation).toBe(true);
+    expect(state.attendances.get("attendance-1")).toMatchObject({
+      employeeUserId: "staff-1",
+      bookingStatus: "processing",
+      proposedAssigneeUserId: "staff-lead-1",
+    });
+
+    const approveRes = await withRequestDefaults(
+      request(app)
+        .patch("/api/v1/stores/branch-1/attendances/attendance-1/status")
+        .set("Authorization", ownerAuth())
+        .send({ status: "confirmed" }),
+    );
+    expect(approveRes.status, JSON.stringify(approveRes.body)).toBe(200);
+    expect(state.attendances.get("attendance-1")).toMatchObject({
+      employeeUserId: "staff-lead-1",
+      mainAssigneeUserId: "staff-lead-1",
+      bookingStatus: "confirmed",
+    });
+    expect(state.attendances.get("attendance-1")).not.toHaveProperty("proposedAssigneeUserId");
+  });
+
   it("phân trang cursor theo createdAt desc", async () => {
     seedLeave("lv-e", 1000);
     seedLeave("lv-d", 2000);

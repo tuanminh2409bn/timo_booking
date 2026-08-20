@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Plus, Search, ShieldCheck, UserRound, X } from 'lucide-react';
 import { useAuth } from '@/lib/authContext';
 import { useI18n } from '@/lib/i18n';
+import { useRouter } from 'next/navigation';
+import { HrmButton, HrmCard, HrmIconButton, HrmInput, HrmPageHeader } from '@/components/hrm-ui';
 import {
   fetchPlatformAccounts,
   createPlatformOwner,
@@ -14,6 +16,7 @@ import {
 export default function PlatformAccountsPage() {
   const { user } = useAuth();
   const { locale } = useI18n();
+  const router = useRouter();
   const [items, setItems] = useState<PlatformAccount[]>([]);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState(false);
@@ -60,20 +63,22 @@ export default function PlatformAccountsPage() {
   };
 
   return (
-    <section className="space-y-5">
-      <header className="flex items-start justify-between gap-4">
-        <div><h1 className="text-2xl font-bold">{locale === 'vi' ? 'Tài khoản hệ thống' : 'Platform accounts'}</h1>
-        <p className="mt-1 text-sm text-gray-500">{items.length} accounts in the current Firebase</p></div>
-        <button onClick={() => setOpen(true)} className="inline-flex h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-bold text-white"><Plus className="h-4 w-4" />{locale === 'vi' ? 'Tạo chủ tiệm' : 'Create owner'}</button>
-      </header>
-      <label className="flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-4 py-3">
-        <Search className="h-5 w-5 text-gray-400" />
+    <section className="mx-auto max-w-2xl space-y-4">
+      <HrmPageHeader
+        className="-mx-4 -mt-4 md:mx-0 md:mt-0 md:rounded-xl"
+        title={locale === 'vi' ? 'Tài khoản hệ thống' : 'Platform accounts'}
+        onBack={() => router.push('/admin/dashboard/')}
+        right={<HrmIconButton aria-label={locale === 'vi' ? 'Tạo chủ tiệm' : 'Create owner'} onClick={() => setOpen(true)}><Plus className="h-5 w-5" /></HrmIconButton>}
+      />
+      <p className="text-sm text-slate-500">{items.length} accounts in the current Firebase</p>
+      <label className="flex h-10 items-center gap-3 rounded-full border border-slate-200 bg-white px-4">
+        <Search className="h-4 w-4 text-slate-400" />
         <input value={query} onChange={(event) => setQuery(event.target.value)} className="flex-1 bg-transparent text-sm outline-none" placeholder="Search accounts" />
       </label>
       <div className="grid gap-3">
         {filtered.map((account) => (
-          <article key={account.uid} className="flex items-center gap-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-            <div className={`flex h-11 w-11 items-center justify-center rounded-full ${account.role === 'admin' ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+          <HrmCard key={account.uid} className="flex items-center gap-3 p-4">
+            <div className={`flex h-11 w-11 items-center justify-center rounded-full ${account.role === 'admin' ? 'bg-red-50 text-red-600' : 'bg-[var(--hrm-blue-50)] text-[var(--hrm-blue-700)]'}`}>
               {account.role === 'admin' ? <ShieldCheck className="h-5 w-5" /> : <UserRound className="h-5 w-5" />}
             </div>
             <div className="min-w-0 flex-1">
@@ -85,23 +90,23 @@ export default function PlatformAccountsPage() {
                 {account.active ? 'active' : 'disabled'}
               </button>
             )}
-          </article>
+          </HrmCard>
         ))}
       </div>
       {open && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center sm:p-4">
-          <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-[28px] bg-white p-5 sm:max-w-lg sm:rounded-[28px]">
-            <div className="mb-5 flex items-center justify-between"><h2 className="text-lg font-bold">{locale === 'vi' ? 'Tạo tài khoản chủ tiệm' : 'Create owner account'}</h2><button onClick={() => setOpen(false)} className="rounded-full bg-gray-100 p-2"><X className="h-4 w-4" /></button></div>
+        <div className="fixed inset-0 z-[130] flex min-h-dvh w-full items-center justify-center bg-black/45 px-4 py-6 backdrop-blur-sm">
+          <section role="dialog" aria-modal="true" className="relative max-h-[calc(100dvh-3rem)] w-full max-w-lg overflow-y-auto rounded-3xl border border-[var(--hrm-border)] bg-white p-5 shadow-[0_24px_64px_rgba(15,23,42,0.22)]">
+            <div className="mb-5 flex items-center justify-between"><h2 className="text-lg font-bold">{locale === 'vi' ? 'Tạo tài khoản chủ tiệm' : 'Create owner account'}</h2><button onClick={() => setOpen(false)} className="flex h-9 w-9 items-center justify-center rounded-full text-slate-900 hover:bg-slate-100"><X className="h-5 w-5" /></button></div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder={locale === 'vi' ? 'Họ tên *' : 'Name *'} className="rounded-xl border border-gray-200 px-4 py-3" />
-              <input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="Email *" className="rounded-xl border border-gray-200 px-4 py-3" />
-              <input type="password" minLength={6} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} placeholder={locale === 'vi' ? 'Mật khẩu *' : 'Password *'} className="rounded-xl border border-gray-200 px-4 py-3" />
-              <input value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder={locale === 'vi' ? 'Điện thoại' : 'Phone'} className="rounded-xl border border-gray-200 px-4 py-3" />
-              <input value={form.salonName} onChange={(event) => setForm({ ...form, salonName: event.target.value })} placeholder={locale === 'vi' ? 'Tên tiệm *' : 'Salon name *'} className="rounded-xl border border-gray-200 px-4 py-3 sm:col-span-2" />
-              <input value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} placeholder={locale === 'vi' ? 'Địa chỉ' : 'Address'} className="rounded-xl border border-gray-200 px-4 py-3 sm:col-span-2" />
+              <HrmInput value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder={locale === 'vi' ? 'Họ tên *' : 'Name *'} />
+              <HrmInput type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} placeholder="Email *" />
+              <HrmInput type="password" minLength={6} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} placeholder={locale === 'vi' ? 'Mật khẩu *' : 'Password *'} />
+              <HrmInput value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} placeholder={locale === 'vi' ? 'Điện thoại' : 'Phone'} />
+              <HrmInput value={form.salonName} onChange={(event) => setForm({ ...form, salonName: event.target.value })} placeholder={locale === 'vi' ? 'Tên tiệm *' : 'Salon name *'} className="sm:col-span-2" />
+              <HrmInput value={form.address} onChange={(event) => setForm({ ...form, address: event.target.value })} placeholder={locale === 'vi' ? 'Địa chỉ' : 'Address'} className="sm:col-span-2" />
             </div>
-            <button disabled={busy || !form.name.trim() || !form.email.trim() || form.password.length < 6 || !form.salonName.trim()} onClick={() => void createOwner()} className="mt-5 w-full rounded-xl bg-blue-600 py-3 font-bold text-white disabled:opacity-50">{busy ? '...' : (locale === 'vi' ? 'Tạo chủ tiệm' : 'Create owner')}</button>
-          </div>
+            <HrmButton disabled={busy || !form.name.trim() || !form.email.trim() || form.password.length < 6 || !form.salonName.trim()} onClick={() => void createOwner()} className="mt-5 min-h-11 w-full rounded-xl font-bold">{busy ? '...' : (locale === 'vi' ? 'Tạo chủ tiệm' : 'Create owner')}</HrmButton>
+          </section>
         </div>
       )}
     </section>

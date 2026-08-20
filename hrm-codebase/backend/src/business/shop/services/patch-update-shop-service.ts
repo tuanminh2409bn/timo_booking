@@ -112,6 +112,9 @@ export const updateShopService = async (req: Request, res: Response) => {
       serviceId,
       {
         ...(normalizedPayload.name !== undefined && { name: normalizedPayload.name }),
+        ...(normalizedPayload.displayName !== undefined && {
+          displayName: normalizedPayload.displayName,
+        }),
         ...(normalizedPayload.description !== undefined && {
           description: normalizedPayload.description,
         }),
@@ -131,6 +134,9 @@ export const updateShopService = async (req: Request, res: Response) => {
         }),
         ...(normalizedPayload.bookingKind !== undefined && {
           bookingKind: normalizedPayload.bookingKind,
+        }),
+        ...(normalizedPayload.availableForBooking !== undefined && {
+          availableForBooking: normalizedPayload.availableForBooking,
         }),
         updatedByUserId: authContext.uid,
       },
@@ -155,6 +161,9 @@ export const updateShopService = async (req: Request, res: Response) => {
         storeId: store.id,
         storeName: store.name,
         ...(normalizedPayload.name !== undefined && { name: normalizedPayload.name }),
+        ...(normalizedPayload.displayName !== undefined && {
+          displayName: normalizedPayload.displayName,
+        }),
         ...(normalizedPayload.groupService !== undefined && {
           groupService: normalizedPayload.groupService,
         }),
@@ -171,6 +180,9 @@ export const updateShopService = async (req: Request, res: Response) => {
         }),
         ...(normalizedPayload.bookingKind !== undefined && {
           bookingKind: normalizedPayload.bookingKind,
+        }),
+        ...(normalizedPayload.availableForBooking !== undefined && {
+          availableForBooking: normalizedPayload.availableForBooking,
         }),
       },
     });

@@ -85,6 +85,7 @@ export const createShopServiceSchema = z
   .object({
     storeId: z.string().trim().min(1).optional(),
     name: z.string().trim().min(1).max(100),
+    displayName: z.string().trim().max(40).optional(),
     description: z.string().trim().max(500).optional(),
     price: moneyInputSchema.optional(),
     amount: moneyInputSchema.optional(),
@@ -92,6 +93,7 @@ export const createShopServiceSchema = z
     groupService: z.string().trim().min(1).max(100).optional(),
     preferredWorkerType: z.enum(["main", "assistant"]).optional(),
     bookingKind: z.enum(["main", "add_on"]).optional().default("main"),
+    availableForBooking: z.boolean().optional().default(true),
     durationMin: durationInputSchema.optional(),
     durationMax: durationInputSchema.optional(),
     duration: durationInputSchema.optional(),
@@ -140,6 +142,7 @@ export const createShopServiceSchema = z
 export const updateShopServiceSchema = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
+    displayName: z.string().trim().max(40).optional(),
     description: z.string().trim().max(500).optional(),
     price: moneyInputSchema.optional(),
     amount: moneyInputSchema.optional(),
@@ -147,6 +150,7 @@ export const updateShopServiceSchema = z
     groupService: z.string().trim().min(1).max(100).optional(),
     preferredWorkerType: z.enum(["main", "assistant"]).optional(),
     bookingKind: z.enum(["main", "add_on"]).optional(),
+    availableForBooking: z.boolean().optional(),
     durationMin: durationInputSchema.optional(),
     durationMax: durationInputSchema.optional(),
     duration: durationInputSchema.optional(),
@@ -160,6 +164,7 @@ export type UpdateShopServiceInput = z.infer<typeof updateShopServiceSchema>;
 
 export type NormalizedShopServicePayload = {
   name?: string;
+  displayName?: string;
   description?: string;
   groupService?: string;
   price?: number;
@@ -168,6 +173,7 @@ export type NormalizedShopServicePayload = {
   durationMax?: number;
   preferredWorkerType?: "main" | "assistant";
   bookingKind?: "main" | "add_on";
+  availableForBooking?: boolean;
 };
 
 export const isValidShopServiceDurationRange = (
@@ -211,6 +217,7 @@ export const normalizeShopServicePayload = (
 
   return {
     ...(payload.name !== undefined && { name: payload.name }),
+    ...(payload.displayName !== undefined && { displayName: payload.displayName }),
     ...(payload.description !== undefined && { description: payload.description }),
     ...(groupService !== undefined && { groupService }),
     ...(price !== undefined && { price }),
@@ -221,5 +228,8 @@ export const normalizeShopServicePayload = (
       preferredWorkerType: payload.preferredWorkerType,
     }),
     ...(payload.bookingKind !== undefined && { bookingKind: payload.bookingKind }),
+    ...(payload.availableForBooking !== undefined && {
+      availableForBooking: payload.availableForBooking,
+    }),
   };
 };

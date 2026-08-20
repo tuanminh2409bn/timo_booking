@@ -9,6 +9,7 @@ import { getAttendanceList } from "./get-attendance-list.js";
 import { getAttendanceFormOptions } from "./get-attendance-form-options.js";
 import { getAttendanceCalendar } from "./get-attendance-calendar.js";
 import { getAttendanceDetail } from "./get-attendance-detail.js";
+import { searchAttendances } from "./get-attendance-search.js";
 import { createAttendance } from "./post-create-attendance.js";
 import { backfillAttendance } from "./post-backfill-attendance.js";
 import { updateAttendance } from "./patch-update-attendance.js";
@@ -72,6 +73,11 @@ attendanceRouter.get(
       getAttendanceCalendar,
     ),
   ),
+);
+attendanceRouter.get(
+  "/api/v1/stores/:storeId/attendances/search",
+  readRateLimit,
+  handleErrorFunction(searchAttendances),
 );
 attendanceRouter.get(
   "/api/v1/stores/:storeId/attendances/:attendanceId",

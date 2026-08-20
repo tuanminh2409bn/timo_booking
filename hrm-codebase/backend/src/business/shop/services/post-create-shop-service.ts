@@ -93,6 +93,9 @@ export const createShopService = async (req: Request, res: Response) => {
       {
         storeId: store.id,
         name: createServiceParseResult.data.name,
+        ...(normalizedPayload.displayName !== undefined && {
+          displayName: normalizedPayload.displayName,
+        }),
         ...(normalizedPayload.description !== undefined && {
           description: normalizedPayload.description,
         }),
@@ -104,6 +107,13 @@ export const createShopService = async (req: Request, res: Response) => {
         }),
         durationMin: normalizedPayload.durationMin,
         durationMax: normalizedPayload.durationMax,
+        ...(normalizedPayload.preferredWorkerType !== undefined && {
+          preferredWorkerType: normalizedPayload.preferredWorkerType,
+        }),
+        ...(normalizedPayload.bookingKind !== undefined && {
+          bookingKind: normalizedPayload.bookingKind,
+        }),
+        availableForBooking: normalizedPayload.availableForBooking ?? true,
         createdByUserId: authContext.uid,
         updatedByUserId: authContext.uid,
       },
@@ -121,6 +131,9 @@ export const createShopService = async (req: Request, res: Response) => {
       },
       metadata: {
         name: createServiceParseResult.data.name,
+        ...(normalizedPayload.displayName !== undefined && {
+          displayName: normalizedPayload.displayName,
+        }),
         storeId: store.id,
         storeName: store.name,
         ...(normalizedPayload.groupService !== undefined && {

@@ -258,18 +258,14 @@ export const getAttendanceCalendar = async (req: Request, res: Response) => {
     });
   };
 
-  // Manager thấy lịch của cả store (như owner); employee chỉ thấy lịch của chính mình.
-  // employee → chỉ lấy chính họ; owner/manager → toàn bộ nhân viên active của store.
+  // Employees need their own schedule plus unclaimed store Requests and
+  // leave-conflict bookings, so their read must start from the store range.
   const attendanceCalendarReadOptions: {
     employeeUserId?: string;
     skipCache: boolean;
   } = {
     skipCache: true,
   };
-
-  if (authContext.role === "employee") {
-    attendanceCalendarReadOptions.employeeUserId = authContext.uid;
-  }
 
   const [employees, attendances, employeeWorkDayClosings] = await Promise.all([
     loadCalendarEmployees(),
@@ -290,14 +286,23 @@ export const getAttendanceCalendar = async (req: Request, res: Response) => {
       : Promise.resolve([]),
   ]);
 
-  // owner/manager thấy cả store; employee chỉ giữ attendance của mình
-  // (mình tạo / là thợ chính / là thợ trong 1 service).
+  // Owner/manager see the store. Employees see their assigned appointments,
+  // every still-unclaimed Request, and every unclaimed leave conflict. Once a
+  // colleague claims an item it is no longer broadcast to the other staff.
   let attendancesWithinCallerScope = attendances;
 
   if (authContext.role === "employee") {
-    attendancesWithinCallerScope = attendances.filter((attendance) =>
-      isAttendanceAssignedToUser(attendance, authContext.uid),
-    );
+    attendancesWithinCallerScope = attendances.filter((attendance) => {
+      if (isAttendanceAssignedToUser(attendance, authContext.uid)) return true;
+      const assignedEmployeeUserId = attendance.mainAssigneeUserId ?? attendance.employeeUserId;
+      const isUnclaimedRequest =
+        attendance.bookingStatus === "requested" && assignedEmployeeUserId === undefined;
+      const isUnclaimedLeaveConflict =
+        attendance.bookingStatus === "processing" &&
+        attendance.proposedAssigneeUserId === undefined;
+      const isClaimedByCaller = attendance.proposedAssigneeUserId === authContext.uid;
+      return isUnclaimedRequest || isUnclaimedLeaveConflict || isClaimedByCaller;
+    });
   }
   const bookingIds = [...new Set(
     attendancesWithinCallerScope.flatMap((attendance) =>

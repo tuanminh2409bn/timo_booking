@@ -1,9 +1,10 @@
 .page {
-  animation: fadeInUp 0.4s ease-out;
+  max-width: 900px;
+  margin: 0 auto;
 }
 
 .pageTitle {
-  font-size: var(--font-size-2xl);
+  font-size: 20px;
   font-weight: 700;
   color: var(--color-text-primary);
   margin-bottom: var(--space-xl);
@@ -12,11 +13,11 @@
 /* 🧾 Inline Booking Summary Card */
 .summaryCard {
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--hrm-border);
+  border-radius: var(--hrm-radius-card);
   padding: var(--space-lg);
   margin-bottom: var(--space-xl);
-  box-shadow: var(--shadow-xs);
+  box-shadow: var(--hrm-shadow-card);
 }
 
 .summaryTitle {
@@ -155,6 +156,19 @@
   color: var(--color-text-primary);
 }
 
+.summaryFooterLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--hrm-muted);
+}
+
+.summaryMetaChip svg,
+.summaryFooterLabel svg {
+  color: var(--hrm-blue-700);
+  flex: 0 0 auto;
+}
+
 /* Client tabs */
 .clientTabs {
   display: flex;
@@ -164,7 +178,8 @@
 
 .clientTab {
   padding: 10px 24px;
-  border-radius: var(--radius-pill);
+  min-height: 40px;
+  border-radius: var(--hrm-radius-control);
   font-size: var(--font-size-sm);
   font-weight: 600;
   cursor: pointer;
@@ -188,8 +203,8 @@
 /* Form */
 .formCard {
   background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border);
+  border-radius: var(--hrm-radius-card);
+  border: 1px solid var(--hrm-border);
   padding: var(--space-xl);
 }
 
@@ -221,9 +236,10 @@
 }
 
 .input {
-  padding: 12px var(--space-md);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
+  min-height: 44px;
+  padding: 11px 16px;
+  border-radius: var(--hrm-radius-control);
+  border: 1px solid var(--hrm-control-border);
   background: var(--color-surface);
   font-size: var(--font-size-base);
   color: var(--color-text-primary);
@@ -237,14 +253,14 @@
 }
 
 .input:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.08);
+  border-color: var(--hrm-blue-400);
+  box-shadow: 0 0 0 3px var(--hrm-blue-100);
 }
 
 .textarea {
   padding: 12px var(--space-md);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
+  border-radius: var(--hrm-radius-control);
+  border: 1px solid var(--hrm-control-border);
   background: var(--color-surface);
   font-size: var(--font-size-base);
   color: var(--color-text-primary);
@@ -261,8 +277,8 @@
 }
 
 .textarea:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.08);
+  border-color: var(--hrm-blue-400);
+  box-shadow: 0 0 0 3px var(--hrm-blue-100);
 }
 
 /* Confirm button section */
@@ -275,18 +291,22 @@
 }
 
 .confirmButton {
+  -webkit-appearance: none;
+  appearance: none;
   max-width: 380px;
   width: 100%;
   padding: 14px var(--space-lg);
-  border-radius: var(--radius-pill);
+  min-height: 48px;
+  border-radius: var(--hrm-radius-control);
   font-size: var(--font-size-base);
   font-weight: 700;
   border: none;
   cursor: pointer;
   transition: all var(--transition-base);
   background: var(--color-primary);
+  background-color: var(--color-primary);
   color: var(--color-text-inverse);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 4px 12px rgba(15, 98, 254, 0.16);
 }
 
 .confirmButton:hover:not(:disabled) {
@@ -296,6 +316,8 @@
 }
 
 .confirmButton:disabled {
+  background-color: var(--color-primary);
+  color: var(--color-text-inverse);
   opacity: 0.5;
   cursor: not-allowed;
   transform: none !important;
@@ -308,14 +330,14 @@
 
 /* Request mode button (orange) */
 .confirmButtonRequest {
-  background: linear-gradient(135deg, #EA580C 0%, #C2410C 100%) !important;
+  background: var(--hrm-blue-700) !important;
   color: white !important;
-  box-shadow: 0 4px 12px rgba(234, 88, 12, 0.2);
+  box-shadow: 0 4px 12px rgba(15, 98, 254, 0.18);
 }
 
 .confirmButtonRequest:hover:not(:disabled) {
-  background: linear-gradient(135deg, #C2410C 0%, #9A3412 100%) !important;
-  box-shadow: 0 6px 16px rgba(234, 88, 12, 0.3);
+  background: var(--hrm-blue-800) !important;
+  box-shadow: 0 6px 16px rgba(15, 98, 254, 0.22);
 }
 
 /* Request note card (premium info block) */
@@ -327,18 +349,18 @@
   width: 100%;
   padding: var(--space-md);
   border-radius: var(--radius-md);
-  background: #FFF7ED;
-  border: 1px solid #FFEDD5;
-  color: #9A3412;
+  background: var(--hrm-blue-50);
+  border: 1px solid var(--hrm-blue-100);
+  color: var(--hrm-blue-900);
   font-size: var(--font-size-sm);
   line-height: 1.6;
-  box-shadow: 0 2px 8px rgba(234, 88, 12, 0.03);
+  box-shadow: none;
   animation: scaleIn 0.3s ease-out;
 }
 
 .requestNoteIcon {
   flex-shrink: 0;
-  color: #EA580C;
+  color: var(--hrm-blue-700);
   margin-top: 2px;
 }
 
@@ -353,6 +375,21 @@
   color: var(--color-text-tertiary);
   margin-top: 0;
   max-width: 480px;
+}
+
+.submitError {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 8px 16px;
+  border: 1px solid #fecdd3;
+  border-radius: var(--hrm-radius-control);
+  background: #fff1f2;
+  color: var(--hrm-danger);
+  font-size: 14px;
+  text-align: center;
 }
 
 @media (max-width: 768px) {

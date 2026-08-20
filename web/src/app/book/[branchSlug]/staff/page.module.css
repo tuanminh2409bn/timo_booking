@@ -1,5 +1,4 @@
 .page {
-  animation: fadeInUp 0.4s ease-out;
   display: flex;
   flex-direction: column;
   gap: var(--space-xl);
@@ -9,26 +8,26 @@
 }
 
 .pageTitle {
-  font-size: var(--font-size-2xl);
+  font-size: 20px;
   font-weight: 700;
-  color: var(--color-text-primary);
+  color: var(--hrm-text);
   margin-bottom: 0;
 }
 
 /* Unified Section Card */
 .sectionCard {
   background: var(--color-surface);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border);
+  border-radius: var(--hrm-radius-card);
+  border: 1px solid var(--hrm-border);
   padding: var(--space-lg);
-  box-shadow: var(--shadow-xs);
+  box-shadow: var(--hrm-shadow-card);
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
 }
 
 .sectionTitle {
-  font-size: var(--font-size-lg);
+  font-size: 15px;
   font-weight: 700;
   color: var(--color-text-primary);
   border-bottom: 1px solid var(--color-border-light);
@@ -260,7 +259,7 @@
 
 .searchInput:focus {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.08);
+  box-shadow: 0 0 0 3px var(--hrm-blue-100);
 }
 
 .categories {
@@ -323,8 +322,8 @@
   gap: 4px;
   padding: 4px 12px;
   border-radius: var(--radius-pill);
-  background: var(--color-success-bg);
-  color: var(--color-success-text);
+  background: var(--hrm-blue-50);
+  color: var(--hrm-blue-700);
   font-size: var(--font-size-xs);
   font-weight: 600;
   white-space: nowrap;
@@ -342,8 +341,8 @@
   gap: 4px;
   padding: 4px 12px;
   border-radius: var(--radius-pill);
-  background: #fff3e0;
-  color: #e65100;
+  background: var(--hrm-blue-50);
+  color: var(--hrm-blue-700);
   font-size: var(--font-size-xs);
   font-weight: 600;
   white-space: nowrap;
@@ -500,14 +499,14 @@
 }
 
 .extraButtonSelected {
-  border-color: #16a34a !important;
-  color: #16a34a !important;
-  background: #f0fdf4 !important;
+  border-color: var(--hrm-blue-700) !important;
+  color: var(--hrm-blue-700) !important;
+  background: var(--hrm-blue-50) !important;
 }
 
 .extraButtonSelected:hover {
-  background: #dcfce7 !important;
-  border-color: #15803d !important;
+  background: var(--hrm-blue-100) !important;
+  border-color: var(--hrm-blue-800) !important;
 }
 
 .addonDisabled {
@@ -559,7 +558,7 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: #000;
+  background: var(--hrm-blue-700);
   color: #fff;
   display: flex;
   align-items: center;
@@ -573,7 +572,8 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: linear-gradient(135deg, #E5E7EB 0%, #D1D5DB 100%);
+  background: var(--hrm-blue-50);
+  color: var(--hrm-blue-700);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -607,7 +607,7 @@
 }
 
 .ratingStar {
-  color: #FBBF24;
+  color: var(--hrm-blue-700);
 }
 
 .radioWrapper {
@@ -660,7 +660,8 @@
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  border-radius: var(--radius-sm);
+  min-height: 40px;
+  border-radius: var(--hrm-radius-control);
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   font-size: var(--font-size-sm);
@@ -682,10 +683,10 @@
   right: 0;
   z-index: var(--z-dropdown);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: var(--hrm-radius-card);
   padding: var(--space-md);
   background: var(--color-surface);
-  box-shadow: var(--shadow-lg);
+  box-shadow: var(--hrm-shadow-header);
   margin-top: 8px;
   animation: scaleIn var(--transition-fast) ease-out;
   width: 320px;
@@ -710,8 +711,8 @@
 }
 
 .calendarNavButton {
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   border: 1px solid var(--color-border);
   background: var(--color-surface);
@@ -820,10 +821,10 @@
 }
 
 .weekNavBtn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--hrm-border);
   background: var(--color-surface);
   cursor: pointer;
   display: flex;
@@ -834,6 +835,7 @@
   font-size: 20px;
   flex-shrink: 0;
   margin-top: 0;
+  box-shadow: var(--hrm-shadow-header);
 }
 
 .weekNavBtn:hover:not(:disabled) {
@@ -865,7 +867,7 @@
   gap: 12px;
   align-items: center;
   text-align: center;
-  background: #fff;
+  background: var(--hrm-surface);
   border-radius: var(--radius-md);
 }
 
@@ -902,7 +904,8 @@
 .slotGridButton {
   width: 100%;
   padding: 12px var(--space-xs);
-  border-radius: var(--radius-sm);
+  min-height: 44px;
+  border-radius: var(--hrm-radius-control);
   border: none;
   background: var(--color-primary-light);
   font-size: 14px;
@@ -924,9 +927,9 @@
 }
 
 .slotRequest {
-  border: 1px dashed #EA580C;
-  color: #EA580C;
-  background: #FFF7ED;
+  border: 1px dashed var(--hrm-blue-700);
+  color: var(--hrm-blue-700);
+  background: var(--hrm-blue-50);
   padding: 11px var(--space-xs);
   font-size: 14px;
   font-weight: 600;
@@ -934,12 +937,12 @@
 }
 
 .slotRequest:hover:not(:disabled) {
-  border-color: #C2410C;
-  background: #FFEDD5;
+  border-color: var(--hrm-blue-800);
+  background: var(--hrm-blue-100);
 }
 
 .slotRequestSelected {
-  background: #EA580C !important;
+  background: var(--hrm-blue-700) !important;
   border: none !important;
   color: white !important;
   padding: 12px var(--space-xs) !important;
@@ -1048,8 +1051,8 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  border: 1.5px dashed #EA580C;
-  background: #FFF7ED;
+  border: 1.5px dashed var(--hrm-blue-700);
+  background: var(--hrm-blue-50);
 }
 
 .legendDotBooked {
@@ -1061,6 +1064,27 @@
 
 /* Responsive media queries */
 @media (max-width: 768px) {
+  .page {
+    width: calc(100% + 16px);
+    margin-right: -8px;
+    margin-left: -8px;
+    gap: 12px;
+  }
+
+  .pageTitle {
+    padding: 0 8px;
+  }
+
+  .sectionCard {
+    padding: 10px;
+    border-radius: 14px;
+  }
+
+  .weekGridContainer {
+    position: relative;
+    gap: 0;
+  }
+
   .staffGrid {
     grid-template-columns: 1fr;
     gap: var(--space-sm);
@@ -1092,6 +1116,8 @@
   }
 
   .columnsGridWrapper {
+    width: 100%;
+    flex: 0 0 100%;
     overflow-x: auto;
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -1103,14 +1129,25 @@
   }
 
   .columnsGrid {
-    grid-template-columns: repeat(7, 105px); /* Swipable week grid columns on mobile */
+    grid-template-columns: repeat(7, 96px); /* Swipable week grid columns on mobile */
     width: max-content;
     gap: 12px;
   }
 
   .weekNavBtn {
+    position: absolute;
+    top: 4px;
+    z-index: 3;
+    width: 32px;
+    height: 32px;
     margin-top: 0;
+    border-color: rgba(208, 226, 255, 0.9);
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: 0 3px 10px rgba(15, 98, 254, 0.12);
   }
+
+  .weekGridContainer > .weekNavBtn:first-child { left: 2px; }
+  .weekGridContainer > .weekNavBtn:last-child { right: 2px; }
 
   .categoryHeader {
     padding: var(--space-md);
@@ -1147,9 +1184,9 @@
   justify-content: space-between;
   margin-bottom: var(--space-md);
   padding: 10px 14px;
-  background: linear-gradient(135deg, rgba(124, 58, 237, 0.06), rgba(236, 72, 153, 0.06));
+  background: var(--hrm-blue-50);
   border-radius: var(--radius-sm);
-  border-left: 3px solid #7C3AED;
+  border-left: 3px solid var(--hrm-blue-700);
 }
 
 .perServiceStaffServiceName {
@@ -1161,7 +1198,7 @@
 .perServiceStaffDuration {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
-  background: rgba(124, 58, 237, 0.1);
+  background: var(--hrm-blue-100);
   padding: 2px 8px;
   border-radius: 12px;
 }
