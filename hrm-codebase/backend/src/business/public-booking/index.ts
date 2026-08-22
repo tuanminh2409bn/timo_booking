@@ -33,6 +33,10 @@ import {
   BookingSlotConflictError,
   releaseBookingSlotReservations,
 } from "../booking/slot-reservations.js";
+import {
+  planSmartAnyStaffBooking,
+  type SmartBookingBusyInterval,
+} from "./smart-booking-scheduler.js";
 
 // ---------------------------------------------------------------------------
 // Rate Limits
@@ -1044,99 +1048,91 @@ router.post(
         payload.bookingMode !== "request" &&
         serviceSegments.some((segment) => segment.staffSelectionType === "any")
       ) {
-        const loadByEmployee = new Map<string, number>();
-        const busyIntervalsByEmployee = new Map<string, Array<{ start: number; end: number }>>();
-        for (const attendance of activeAttendances) {
-          const employeeUserId = attendance["mainAssigneeUserId"] ?? attendance["employeeUserId"];
-          if (typeof employeeUserId === "string") {
-            loadByEmployee.set(employeeUserId, (loadByEmployee.get(employeeUserId) ?? 0) + 1);
-            const intervals = busyIntervalsByEmployee.get(employeeUserId) ?? [];
-            intervals.push({
-              start: Number(attendance["startTime"] ?? 0),
-              end: Number(attendance["endTime"] ?? 0),
-            });
-            busyIntervalsByEmployee.set(employeeUserId, intervals);
-          }
-        }
-        const gapScore = (employeeUserId: string, segmentStart: number, segmentEnd: number) => {
-          const intervals = (busyIntervalsByEmployee.get(employeeUserId) ?? [])
-            .slice()
-            .sort((left, right) => left.start - right.start);
-          const previousEnd = intervals.filter((item) => item.end <= segmentStart).at(-1)?.end;
-          const nextStart = intervals.find((item) => item.start >= segmentEnd)?.start;
-          if (previousEnd === undefined && nextStart === undefined) return 1_440;
-          return (previousEnd === undefined ? 720 : segmentStart - previousEnd) +
-            (nextStart === undefined ? 720 : nextStart - segmentEnd);
-        };
+        const busyIntervals: SmartBookingBusyInterval[] = activeAttendances.flatMap(
+          (attendance, attendanceIndex) => {
+            const employeeUserId =
+              attendance["mainAssigneeUserId"] ?? attendance["employeeUserId"];
+            if (typeof employeeUserId !== "string") return [];
 
-        for (const segment of serviceSegments.filter(
-          (candidate) => candidate.staffSelectionType === "any",
-        )) {
-          const sourceServiceId = segment.service.sourceServiceId;
-          const catalogService = catalogServiceMap.get(sourceServiceId);
-          const preferredWorkerType = catalogService
-            ? resolvePreferredWorkerType(catalogService)
-            : "main";
-          const eligibleEmployees = allStoreEmployees
-            .filter((employee) => {
-              if (!catalogService || !canEmployeePerformBookingService(employee, catalogService)) {
-                return false;
-              }
-              if (isEmployeeOnLeave(employee.uid, segment.startTime, segment.endTime)) {
-                return false;
-              }
-              if (!isEmployeeWorkingDuring(
+            return [{
+              employeeUserId,
+              startTime: Number(attendance["startTime"] ?? 0),
+              endTime: Number(attendance["endTime"] ?? 0),
+              bookingKey:
+                typeof attendance["bookingId"] === "string"
+                  ? attendance["bookingId"]
+                  : typeof attendance["id"] === "string"
+                    ? attendance["id"]
+                    : `attendance-${attendanceIndex}`,
+            }];
+          },
+        );
+        const plan = planSmartAnyStaffBooking({
+          startTime: startMinutes,
+          segments: serviceSegments.map((segment) => {
+            const catalogService = catalogServiceMap.get(segment.service.sourceServiceId);
+            return {
+              segmentId: segment.service.id,
+              sourceServiceId: segment.service.sourceServiceId,
+              durationMinutes: Math.max(
+                segment.service.durationMax ?? segment.service.durationMin ?? 1,
+                1,
+              ),
+              preferredWorkerType: catalogService
+                ? resolvePreferredWorkerType(catalogService)
+                : "main",
+              ...(segment.staffSelectionType === "specific" &&
+                segment.requestedEmployeeUserId !== undefined && {
+                  fixedEmployeeUserId: segment.requestedEmployeeUserId,
+                }),
+            };
+          }),
+          employees: allStoreEmployees.map((employee) => ({
+            employeeUserId: employee.uid,
+            workerType: resolveEmployeeWorkerType(employee),
+            ...(employee.serviceIds !== undefined && { serviceIds: employee.serviceIds }),
+          })),
+          busyIntervals,
+          allowServiceReordering: serviceSegments.every(
+            (segment) => segment.staffSelectionType === "any",
+          ),
+          isEmployeeAvailable: (employeeUserId, segmentStart, segmentEnd) => {
+            const employee = storeEmployeeMap.get(employeeUserId);
+            return employee !== undefined &&
+              !isEmployeeOnLeave(employeeUserId, segmentStart, segmentEnd) &&
+              isEmployeeWorkingDuring(
                 employee,
                 payload.appointmentDate,
-                segment.startTime,
-                segment.endTime,
-              )) {
-                return false;
-              }
-              const overlapsExisting = activeAttendances.some((attendance) => {
-                const assignedEmployeeId = attendance["mainAssigneeUserId"] ?? attendance["employeeUserId"];
-                return assignedEmployeeId === employee.uid &&
-                  Number(attendance["startTime"] ?? 0) < segment.endTime &&
-                  Number(attendance["endTime"] ?? 0) > segment.startTime;
-              });
-              const overlapsThisBooking = serviceSegments.some((otherSegment) =>
-                otherSegment !== segment &&
-                otherSegment.service.employees[0]?.employeeUserId === employee.uid &&
-                otherSegment.startTime < segment.endTime &&
-                otherSegment.endTime > segment.startTime,
+                segmentStart,
+                segmentEnd,
               );
-              return !overlapsExisting && !overlapsThisBooking;
-            })
-            .sort((left, right) => {
-              const leftType = resolveEmployeeWorkerType(left);
-              const rightType = resolveEmployeeWorkerType(right);
-              const typeDifference = Number(rightType === preferredWorkerType) - Number(leftType === preferredWorkerType);
-              if (typeDifference !== 0) return typeDifference;
-              // 19/08 acceptance rule: spread appointments across the whole
-              // day before trying to optimise the visual gap around the slot.
-              const loadDifference = (loadByEmployee.get(left.uid) ?? 0) - (loadByEmployee.get(right.uid) ?? 0);
-              if (loadDifference !== 0) return loadDifference;
-              const gapDifference = gapScore(left.uid, segment.startTime, segment.endTime) -
-                gapScore(right.uid, segment.startTime, segment.endTime);
-              if (gapDifference !== 0) return gapDifference;
-              return left.uid.localeCompare(right.uid);
-            });
-          const employee = eligibleEmployees[0];
-          if (employee) {
-            const employeeName = employee.name?.trim() || employee.displayName?.trim() || employee.email;
-            const workerType = resolveEmployeeWorkerType(employee);
-            segment.service.employees = [{
-              employeeUserId: employee.uid,
-              employeeName,
-              percentage: 100,
-              shareAmount: segment.service.price,
-              workerType,
-            }];
-            loadByEmployee.set(employee.uid, (loadByEmployee.get(employee.uid) ?? 0) + 1);
-            const intervals = busyIntervalsByEmployee.get(employee.uid) ?? [];
-            intervals.push({ start: segment.startTime, end: segment.endTime });
-            busyIntervalsByEmployee.set(employee.uid, intervals);
-          }
+          },
+        });
+
+        if (plan !== undefined) {
+          const segmentById = new Map<string, (typeof serviceSegments)[number]>(
+            serviceSegments.map((segment) => [segment.service.id, segment]),
+          );
+          const plannedSegments = plan.flatMap((assignment) => {
+            const segment = segmentById.get(assignment.segmentId);
+            const employee = storeEmployeeMap.get(assignment.employeeUserId);
+            if (!segment || !employee) return [];
+
+            segment.startTime = assignment.startTime;
+            segment.endTime = assignment.endTime;
+            if (segment.staffSelectionType === "any") {
+              segment.service.employees = [{
+                employeeUserId: employee.uid,
+                employeeName:
+                  employee.name?.trim() || employee.displayName?.trim() || employee.email,
+                percentage: 100,
+                shareAmount: segment.service.price,
+                workerType: resolveEmployeeWorkerType(employee),
+              }];
+            }
+            return [segment];
+          });
+          serviceSegments.splice(0, serviceSegments.length, ...plannedSegments);
         }
       }
 

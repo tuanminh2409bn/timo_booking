@@ -427,6 +427,144 @@ describe("backend API integration: attendance and settlement", () => {
     expect(getAttendanceOrThrow(attendanceId).services[0]?.sourceServiceId).toBeUndefined();
   });
 
+  it("lets only the owner purge Booking-linked data and preserves standalone HRM data", async () => {
+    const bookingId = "booking-purge-1";
+    const attendanceId = "booking-purge-attendance-1";
+    const reservationId = "20990624_staff1_660";
+    const standaloneHrmAttendanceId = "standalone-hrm-attendance";
+    const seedAttendance = getAttendanceOrThrow("attendance-1");
+
+    state.attendances.set(attendanceId, {
+      ...seedAttendance,
+      id: attendanceId,
+      bookingId,
+      ownerId: "shop-1",
+      storeId: "branch-1",
+      workDate: "2099-06-24",
+      storeWorkDateKey: "branch-1__2099-06-24",
+      source: "online_booking",
+      createdBy: "booking_system",
+      createdByType: "customer",
+    });
+    state.attendances.set(standaloneHrmAttendanceId, {
+      ...seedAttendance,
+      id: standaloneHrmAttendanceId,
+      bookingId: "hrm-only-record",
+      ownerId: "shop-1",
+      storeId: "branch-1",
+      workDate: "2099-06-24",
+      storeWorkDateKey: "branch-1__2099-06-24",
+      source: "hrm",
+      createdBy: "owner-1",
+      createdByType: "owner",
+    });
+    state.bookings.set(`branch-1__${bookingId}`, {
+      id: bookingId,
+      ownerId: "shop-1",
+      storeId: "branch-1",
+      workDate: "2099-06-24",
+      attendanceIds: [attendanceId],
+      slotReservationIds: [reservationId],
+    });
+    state.slotReservations.set(`branch-1__${reservationId}`, {
+      id: reservationId,
+      ownerId: "shop-1",
+      storeId: "branch-1",
+      bookingId,
+      workDate: "2099-06-24",
+    });
+
+    const preservedCounts = {
+      users: state.users.size,
+      services: state.services.size,
+      leaveRequests: state.leaveRequests.size,
+      customers: state.customers.size,
+      workDaySettlements: state.workDaySettlements.size,
+    };
+
+    const managerPreview = await withRequestDefaults(
+      request(app)
+        .get("/api/v1/stores/branch-1/bookings/purge-preview")
+        .set("Authorization", ownerSessionHeader({
+          uid: "manager-1",
+          role: "manager",
+          storeId: "branch-1",
+        })),
+    );
+    expect(managerPreview.status).toBe(403);
+
+    const preview = await withRequestDefaults(
+      request(app)
+        .get("/api/v1/stores/branch-1/bookings/purge-preview")
+        .set("Authorization", ownerSessionHeader()),
+    );
+    expect(preview.status, JSON.stringify(preview.body)).toBe(200);
+    expect(preview.body).toMatchObject({
+      storeId: "branch-1",
+      bookingCount: 1,
+      attendanceSegmentCount: 1,
+      slotReservationCount: 1,
+      workDateCount: 1,
+    });
+
+    const missingConfirmation = await withRequestDefaults(
+      request(app)
+        .delete("/api/v1/stores/branch-1/bookings")
+        .set("Authorization", ownerSessionHeader())
+        .send({ confirmation: "DELETE" }),
+    );
+    expect(missingConfirmation.status).toBe(400);
+    expect(state.bookings.has(`branch-1__${bookingId}`)).toBe(true);
+
+    const deleteResponse = await withRequestDefaults(
+      request(app)
+        .delete("/api/v1/stores/branch-1/bookings")
+        .set("Authorization", ownerSessionHeader())
+        .send({ confirmation: "DELETE_ALL_BOOKING_DATA" }),
+    );
+    expect(deleteResponse.status, JSON.stringify(deleteResponse.body)).toBe(200);
+    expect(deleteResponse.body).toMatchObject({
+      deleted: true,
+      bookingCount: 1,
+      attendanceSegmentCount: 1,
+      slotReservationCount: 1,
+    });
+
+    expect(state.bookings.has(`branch-1__${bookingId}`)).toBe(false);
+    expect(state.attendances.has(attendanceId)).toBe(false);
+    expect(state.slotReservations.has(`branch-1__${reservationId}`)).toBe(false);
+    expect(state.attendances.has(standaloneHrmAttendanceId)).toBe(true);
+    expect({
+      users: state.users.size,
+      services: state.services.size,
+      leaveRequests: state.leaveRequests.size,
+      customers: state.customers.size,
+      workDaySettlements: state.workDaySettlements.size,
+    }).toEqual(preservedCounts);
+    expect(state.auditLogs).toContainEqual(expect.objectContaining({
+      eventType: "attendance_deleted",
+      entityType: "store",
+      storeId: "branch-1",
+      metadata: expect.objectContaining({
+        bookingBulkPurge: true,
+        hrmStandaloneAttendancePreserved: true,
+      }),
+    }));
+
+    const idempotentDelete = await withRequestDefaults(
+      request(app)
+        .delete("/api/v1/stores/branch-1/bookings")
+        .set("Authorization", ownerSessionHeader())
+        .send({ confirmation: "DELETE_ALL_BOOKING_DATA" }),
+    );
+    expect(idempotentDelete.status).toBe(200);
+    expect(idempotentDelete.body).toMatchObject({
+      bookingCount: 0,
+      attendanceSegmentCount: 0,
+      slotReservationCount: 0,
+    });
+  });
+
   it("rejects catalog-free services unless the request is an owner quick booking", async () => {
     const missingQuickFlagResponse = await withRequestDefaults(
       request(app)
@@ -2330,6 +2468,140 @@ describe("backend API integration: attendance and settlement", () => {
       getAttendanceOrThrow(getCreatedAttendanceId(response.body)!).mainAssigneeUserId,
     );
     expect(new Set(assignedEmployees)).toEqual(new Set(["staff-1", "staff-lead-1"]));
+  });
+
+  it("schedules simultaneous Any-staff customer bookings as coherent specialty-aware lanes", async () => {
+    const employeeTemplate = state.users.get("staff-lead-1");
+    const serviceTemplate = state.services.get("service-1");
+    if (!employeeTemplate || !serviceTemplate) {
+      throw new Error("smart booking fixtures missing");
+    }
+
+    for (const employeeUserId of ["staff-1", "staff-lead-1"]) {
+      const employee = state.users.get(employeeUserId);
+      if (!employee) throw new Error(`${employeeUserId} fixture missing`);
+      state.users.set(employeeUserId, { ...employee, serviceIds: ["service-1"] });
+    }
+    for (const [employeeUserId, workerType] of [
+      ["smart-main-1", "main"],
+      ["smart-main-2", "main"],
+      ["smart-main-3", "main"],
+      ["smart-assistant-1", "assistant"],
+    ] as const) {
+      state.users.set(employeeUserId, {
+        ...employeeTemplate,
+        uid: employeeUserId,
+        email: `${employeeUserId}@example.com`,
+        name: employeeUserId,
+        workerType,
+        serviceIds: ["smart-hand", "smart-pedi"],
+      });
+    }
+    state.services.set("smart-hand", {
+      ...serviceTemplate,
+      id: "smart-hand",
+      name: "Hand service",
+      category: "nail",
+      preferredWorkerType: "main",
+      durationMin: 45,
+      durationMax: 45,
+    });
+    state.services.set("smart-pedi", {
+      ...serviceTemplate,
+      id: "smart-pedi",
+      name: "Basic Pedicure",
+      category: "pedicure",
+      preferredWorkerType: "assistant",
+      durationMin: 45,
+      durationMax: 45,
+    });
+
+    const responses = [];
+    for (const [index, bookingCode] of ["CC-103", "CC-104", "CC-105", "CC-106"].entries()) {
+      const response = await withRequestDefaults(
+        request(app)
+          .post("/api/v1/public/stores/branch-1/bookings")
+          .send({
+            storeId: "branch-1",
+            customerName: bookingCode,
+            customerPhone: `+4912345678${index}`,
+            appointmentDate: "2026-08-22",
+            startTime: "09:00",
+            endTime: "10:30",
+            staffSelectionType: "any",
+            services: [
+              {
+                sourceServiceId: "smart-hand",
+                name: "Hand service",
+                category: "nail",
+                durationMinutes: 45,
+                price: 50,
+              },
+              {
+                sourceServiceId: "smart-pedi",
+                name: "Basic Pedicure",
+                category: "pedicure",
+                durationMinutes: 45,
+                price: 40,
+              },
+            ],
+          }),
+      );
+      expect(response.status, JSON.stringify(response.body)).toBe(201);
+      responses.push(response);
+    }
+
+    const readScheduledServices = (bookingId: string) =>
+      Array.from(state.attendances.values())
+        .filter((attendance) => attendance.bookingId === bookingId)
+        .sort((left, right) => left.startTime - right.startTime)
+        .flatMap((attendance) => {
+          let cursor = attendance.startTime;
+          return attendance.services.map((service) => {
+            const startTime = cursor;
+            cursor += Math.max(service.durationMax ?? service.durationMin ?? 1, 1);
+            return {
+              sourceServiceId: service.sourceServiceId,
+              employeeUserId: attendance.mainAssigneeUserId,
+              startTime,
+              endTime: cursor,
+            };
+          });
+        });
+    const scheduled = responses.map((response) =>
+      readScheduledServices(String(response.body.meta.bookingId)),
+    );
+
+    expect(scheduled[0]).toEqual([
+      expect.objectContaining({
+        sourceServiceId: "smart-hand",
+        employeeUserId: "smart-main-1",
+        startTime: 540,
+      }),
+      expect.objectContaining({
+        sourceServiceId: "smart-pedi",
+        employeeUserId: "smart-assistant-1",
+        startTime: 585,
+      }),
+    ]);
+    expect(scheduled[1]).toEqual([
+      expect.objectContaining({
+        sourceServiceId: "smart-pedi",
+        employeeUserId: "smart-assistant-1",
+        startTime: 540,
+      }),
+      expect.objectContaining({
+        sourceServiceId: "smart-hand",
+        employeeUserId: "smart-main-1",
+        startTime: 585,
+      }),
+    ]);
+    expect(new Set(scheduled[2]?.map((service) => service.employeeUserId))).toEqual(
+      new Set(["smart-main-2"]),
+    );
+    expect(new Set(scheduled[3]?.map((service) => service.employeeUserId))).toEqual(
+      new Set(["smart-main-3"]),
+    );
   });
 
   it("returns the persisted worker type in the public staff catalog", async () => {

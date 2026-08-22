@@ -837,14 +837,14 @@
   transform: translateY(-1px);
   z-index: 5;
 }
-.calBlockService { padding-right: 29px; font-size: 11px; font-weight: 600; color: #1A56DB; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calBlockService { padding-right: 48px; font-size: 11px; font-weight: 600; color: #1A56DB; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .calBlockTime { font-size: 10px; color: #6B7280; margin-top: 1px; }
 .calBlockCustomer { font-size: 10px; color: #9CA3AF; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .calBlockGroupCode {
   position: absolute;
   top: 3px;
   right: 4px;
-  max-width: 27px;
+  max-width: 46px;
   overflow: hidden;
   padding: 1px 3px;
   border: 1px solid;
@@ -1668,6 +1668,18 @@
   background: #EFF6FF !important;
 }
 
+.bookingPurgeTopBtn {
+  width: 44px !important;
+  height: 44px !important;
+  flex: 0 0 44px;
+  border: 0 !important;
+  border-radius: 9999px !important;
+  background: #fff !important;
+  color: #dc2626 !important;
+  box-shadow: var(--hrm-shadow-nav, 0 12px 28px -18px rgba(15, 23, 42, 0.4)) !important;
+}
+.bookingPurgeTopBtn:hover { background: #fef2f2 !important; }
+
 /* ── Walk-in Booking Modal ── */
 .modalOverlay {
   position: fixed;
@@ -1695,6 +1707,187 @@
   box-shadow: 0 24px 70px -28px rgba(15,23,42,0.5);
   z-index: 1001;
   animation: scaleInModal 0.25s ease;
+}
+
+.bookingPurgeModal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  z-index: 1002;
+  display: flex;
+  width: calc(100vw - 2rem);
+  max-width: 31rem;
+  max-height: min(88dvh, 44rem);
+  transform: translate(-50%, -50%);
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 1.75rem;
+  background: #fff;
+  box-shadow: 0 30px 80px -32px rgba(15, 23, 42, 0.65);
+  animation: scaleInModal 0.2s ease;
+}
+.bookingPurgeHeader {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #f1f5f9;
+}
+.bookingPurgeHeader h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+.bookingPurgeHeader p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+.bookingPurgeIcon,
+.bookingPurgeClose {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 9999px;
+}
+.bookingPurgeIcon { background: #fef2f2; color: #dc2626; }
+.bookingPurgeClose { background: #f8fafc; color: #475569; cursor: pointer; }
+.bookingPurgeClose:disabled { cursor: not-allowed; opacity: 0.5; }
+.bookingPurgeBody {
+  overflow-y: auto;
+  padding: 20px;
+}
+.bookingPurgeLoading {
+  margin: 0;
+  padding: 28px 0;
+  color: #64748b;
+  text-align: center;
+}
+.bookingPurgeStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.bookingPurgeStats > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 14px 8px;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+.bookingPurgeStats strong { color: #0f172a; font-size: 22px; line-height: 1; }
+.bookingPurgeStats span { color: #64748b; font-size: 11px; text-align: center; }
+.bookingPurgeWarning {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #fecaca;
+  border-radius: 16px;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+.bookingPurgeWarning > svg { flex: 0 0 auto; margin-top: 1px; }
+.bookingPurgeWarning p { display: flex; margin: 0; flex-direction: column; gap: 4px; }
+.bookingPurgeWarning strong { font-size: 13px; }
+.bookingPurgeWarning span { color: #7f1d1d; font-size: 12px; line-height: 1.5; }
+.bookingPurgeConfirmField {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+.bookingPurgeConfirmField input {
+  width: 100%;
+  height: 48px;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  outline: none;
+  padding: 0 14px;
+  background: #fff;
+  color: #0f172a;
+  font-size: 16px;
+  font-weight: 700;
+}
+.bookingPurgeConfirmField input:focus { border-color: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12); }
+.bookingPurgeError {
+  margin: 14px 0 0;
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 600;
+}
+.bookingPurgeSuccess {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 12px;
+  color: #166534;
+  text-align: center;
+}
+.bookingPurgeSuccess > svg {
+  width: 48px;
+  height: 48px;
+  padding: 12px;
+  border-radius: 9999px;
+  background: #dcfce7;
+}
+.bookingPurgeSuccess strong { color: #14532d; font-size: 16px; }
+.bookingPurgeSuccess span { color: #64748b; font-size: 12px; }
+.bookingPurgeFooter {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr);
+  gap: 10px;
+  padding: 14px 20px calc(14px + env(safe-area-inset-bottom));
+  border-top: 1px solid #f1f5f9;
+  background: #fff;
+}
+.bookingPurgeCancel,
+.bookingPurgeDelete {
+  min-height: 48px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.bookingPurgeCancel { border: 1px solid #e2e8f0; background: #fff; color: #334155; }
+.bookingPurgeDelete { border: 0; background: #dc2626; color: #fff; }
+.bookingPurgeDelete:disabled { cursor: not-allowed; background: #fecaca; color: #991b1b; opacity: 0.65; }
+.bookingPurgeCancel:disabled { cursor: not-allowed; opacity: 0.5; }
+.bookingPurgeFooter > :only-child { grid-column: 1 / -1; }
+
+@media (max-width: 767px) {
+  .bookingPurgeModal {
+    top: auto;
+    bottom: 0;
+    width: 100%;
+    max-width: none;
+    max-height: min(88dvh, 46rem);
+    transform: none;
+    border-radius: 1.75rem 1.75rem 0 0;
+    animation: bookingPurgeSlideUp 0.2s ease;
+  }
+  .bookingPurgeHeader { padding: 16px; }
+  .bookingPurgeBody { padding: 16px; }
+  .bookingPurgeFooter { padding-right: 16px; padding-left: 16px; }
+}
+
+@keyframes bookingPurgeSlideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes fadeInOverlay {

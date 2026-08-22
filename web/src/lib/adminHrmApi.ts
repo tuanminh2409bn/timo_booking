@@ -203,6 +203,50 @@ export const createAdminBooking = async (
   }
 };
 
+export type BookingPurgePreview = {
+  storeId: string;
+  bookingCount: number;
+  attendanceSegmentCount: number;
+  slotReservationCount: number;
+  workDateCount: number;
+  workDates: string[];
+  preservedData: string[];
+};
+
+export const fetchBookingPurgePreview = async (
+  storeId: string,
+): Promise<BookingPurgePreview> => {
+  const response = await authenticatedHrmFetch(
+    `/api/v1/stores/${encodeURIComponent(storeId)}/bookings/purge-preview`,
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => undefined) as
+      | { message?: string }
+      | undefined;
+    throw new Error(error?.message || `Could not inspect Booking data (${response.status})`);
+  }
+  return response.json() as Promise<BookingPurgePreview>;
+};
+
+export const deleteAllAdminBookingData = async (
+  storeId: string,
+): Promise<BookingPurgePreview & { deleted: true }> => {
+  const response = await authenticatedHrmFetch(
+    `/api/v1/stores/${encodeURIComponent(storeId)}/bookings`,
+    {
+      method: 'DELETE',
+      body: JSON.stringify({ confirmation: 'DELETE_ALL_BOOKING_DATA' }),
+    },
+  );
+  if (!response.ok) {
+    const error = await response.json().catch(() => undefined) as
+      | { message?: string }
+      | undefined;
+    throw new Error(error?.message || `Could not delete Booking data (${response.status})`);
+  }
+  return response.json() as Promise<BookingPurgePreview & { deleted: true }>;
+};
+
 export const reassignAdminAttendance = async (
   storeId: string,
   attendanceId: string,

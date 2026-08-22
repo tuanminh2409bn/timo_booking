@@ -556,24 +556,51 @@ vi.mock("../../src/repository/firestore/index.js", () => ({
             });
           },
           collection: (subcollectionName: string) => {
+            const listSubcollectionDocuments = () => {
+              if (subcollectionName === "attendances") {
+                return Array.from(state.attendances.values())
+                  .filter((item) => item.storeId === storeId)
+                  .map((item) => ({ id: item.id, data: clone(item) as Record<string, unknown> }));
+              }
+              if (subcollectionName === "employee_leave_requests") {
+                return Array.from(state.leaveRequests.values())
+                  .filter((item) => item.storeId === storeId)
+                  .map((item) => ({ id: item.id, data: clone(item) as Record<string, unknown> }));
+              }
+              if (subcollectionName === "bookings" || subcollectionName === "booking_slot_reservations") {
+                const source = subcollectionName === "bookings" ? state.bookings : state.slotReservations;
+                const keyPrefix = `${storeId}__`;
+                return Array.from(source.entries())
+                  .filter(([key]) => key.startsWith(keyPrefix))
+                  .map(([key, item]) => ({
+                    id: key.slice(keyPrefix.length),
+                    data: clone(item),
+                  }));
+              }
+              return [];
+            };
             const queryDocuments = (fieldPath: string, operator: string, value: unknown) => {
-              const source = subcollectionName === "attendances"
-                ? Array.from(state.attendances.values()).filter((item) => item.storeId === storeId)
-                : subcollectionName === "employee_leave_requests"
-                  ? Array.from(state.leaveRequests.values()).filter((item) => item.storeId === storeId)
-                  : [];
-              return source.filter((item) => {
-                const fieldValue = (item as unknown as Record<string, unknown>)[fieldPath];
+              return listSubcollectionDocuments().filter((item) => {
+                const fieldValue = item.data[fieldPath];
                 if (operator === "==") return fieldValue === value;
                 if (operator === "<=") return typeof fieldValue === "string" && typeof value === "string" && fieldValue <= value;
+                if (operator === "in") return Array.isArray(value) && value.includes(fieldValue);
                 return false;
               }).map((item) => ({
                 id: item.id,
                 exists: true,
-                data: () => clone(item),
+                data: () => clone(item.data),
               }));
             };
             return {
+              get: () => Promise.resolve({
+                empty: listSubcollectionDocuments().length === 0,
+                docs: listSubcollectionDocuments().map((item) => ({
+                  id: item.id,
+                  exists: true,
+                  data: () => clone(item.data),
+                })),
+              }),
               where: (fieldPath: string, operator: string, value: unknown) => ({
                 get: () => Promise.resolve({ docs: queryDocuments(fieldPath, operator, value) }),
               }),

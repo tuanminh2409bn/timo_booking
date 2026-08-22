@@ -6,17 +6,20 @@ import { useAuth } from '@/lib/authContext';
 import { useI18n } from '@/lib/i18n';
 import { getGermanDateObject, getGermanTodayString } from '@/lib/timeUtils';
 import styles from './page.module.css';
-import { List, Calendar, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, Copy, Euro, Pencil, Phone, Plus, Scissors, Search, Timer, TriangleAlert, UserRound, X } from 'lucide-react';
+import { List, Calendar, CalendarDays, Check, ChevronLeft, ChevronRight, ClipboardList, Clock, Copy, Euro, Pencil, Phone, Plus, Scissors, Search, Timer, Trash2, TriangleAlert, UserRound, X } from 'lucide-react';
 import { Button } from '@/components/admin/ui/button';
 import { useServiceTranslation } from '@/lib/i18n/serviceTranslations';
 import {
   fetchAdminAttendanceCalendar,
   fetchAdminEmployees,
   createAdminBooking,
+  deleteAllAdminBookingData,
+  fetchBookingPurgePreview,
   reassignAdminAttendance,
   searchAdminAttendances,
   updateAdminAttendanceStatus,
   type AdminAttendanceItem,
+  type BookingPurgePreview,
 } from '@/lib/adminHrmApi';
 import {
   fetchHrmAvailability,
@@ -203,6 +206,33 @@ function matchesSourceFilter(booking: FirestoreBooking, sourceFilter: SourceFilt
   return booking.source === 'manual_booking' || booking.source === 'walk_in';
 }
 
+function isClaimableUnassignedBooking(booking: FirestoreBooking): boolean {
+  const hasNoAssignedStaff = !booking.staffId || booking.staffId === 'any';
+  return (
+    (booking.status === 'pending_approval' && hasNoAssignedStaff) ||
+    (booking.status === 'needs_owner_action' && !booking.proposedStaffId)
+  );
+}
+
+function getPeakConcurrentBookingCount(bookings: FirestoreBooking[]): number {
+  const events = bookings.flatMap((booking) => {
+    const { hours, minutes } = parseTime(booking.startTime);
+    const startMinutes = hours * 60 + minutes;
+    return [
+      { time: startMinutes, delta: 1 },
+      { time: startMinutes + booking.totalDurationMinutes, delta: -1 },
+    ];
+  }).sort((left, right) => left.time - right.time || left.delta - right.delta);
+
+  let concurrentBookings = 0;
+  let peakConcurrentBookings = 0;
+  events.forEach((event) => {
+    concurrentBookings += event.delta;
+    peakConcurrentBookings = Math.max(peakConcurrentBookings, concurrentBookings);
+  });
+  return peakConcurrentBookings;
+}
+
 function getBookingDisplayCode(booking: FirestoreBooking): string {
   const explicitCode = booking.bookingCode?.trim();
   if (explicitCode) return explicitCode;
@@ -214,12 +244,6 @@ function getBookingDisplayCode(booking: FirestoreBooking): string {
 function getBookingGroupKey(booking: FirestoreBooking): string {
   const bookingId = booking.bookingId?.trim();
   return bookingId ? `booking:${bookingId}` : `attendance:${booking.id}`;
-}
-
-function getBookingGroupShortCode(booking: FirestoreBooking): string {
-  const rawId = booking.bookingId?.trim() || booking.id;
-  const compactId = rawId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase();
-  return compactId || 'BK';
 }
 
 const DEFAULT_CALENDAR_START_HOUR = 8;
@@ -509,6 +533,13 @@ export default function BookingsManagementPage() {
   const [newBookingNotes, setNewBookingNotes] = useState('');
   const [newBookingServices, setNewBookingServices] = useState<{categoryId: string; categoryName: string; serviceId: string; serviceName: string; duration: number; price: number}[]>([]);
   const [newBookingCreating, setNewBookingCreating] = useState(false);
+  const [showBookingPurgeModal, setShowBookingPurgeModal] = useState(false);
+  const [bookingPurgePreview, setBookingPurgePreview] = useState<BookingPurgePreview | null>(null);
+  const [bookingPurgeLoading, setBookingPurgeLoading] = useState(false);
+  const [bookingPurgeDeleting, setBookingPurgeDeleting] = useState(false);
+  const [bookingPurgeError, setBookingPurgeError] = useState('');
+  const [bookingPurgeConfirmation, setBookingPurgeConfirmation] = useState('');
+  const [bookingPurgeDeletedCount, setBookingPurgeDeletedCount] = useState<number | null>(null);
   // Quick 2-tap booking popup state
   const [quickBookPopup, setQuickBookPopup] = useState<{
     staffId: string;
@@ -520,6 +551,7 @@ export default function BookingsManagementPage() {
   const [allCategories, setAllCategories] = useState<Array<{ id: string; name: string }>>([]);
   const [allServices, setAllServices] = useState<Array<HrmService & { categoryId: string }>>([]);
   const isManagerOrOwner = user?.role !== 'staff';
+  const isOwner = user?.role === 'owner';
   const normalizedSearchQuery = searchQuery.trim();
   const isGlobalSearchActive = normalizedSearchQuery.length >= 2;
 
@@ -565,6 +597,62 @@ export default function BookingsManagementPage() {
     const items = await fetchAdminAttendanceCalendar(storeId, fromDate, toDate);
     setBookings(mapAttendanceItemsToBookings(items, locale, allServices));
   }, [activeBranch, allServices, futureIssuesMode, locale, selectedDate, staffCalendarScope, user, weekStart]);
+
+  const bookingPurgePhrase = locale === 'vi'
+    ? 'XÓA TẤT CẢ'
+    : locale === 'de'
+      ? 'ALLE LÖSCHEN'
+      : 'DELETE ALL';
+
+  const openBookingPurgeModal = async () => {
+    if (!isOwner) return;
+    const storeId = activeBranch || user?.assignedBranches?.[0];
+    if (!storeId) return;
+
+    setShowBookingPurgeModal(true);
+    setBookingPurgePreview(null);
+    setBookingPurgeConfirmation('');
+    setBookingPurgeDeletedCount(null);
+    setBookingPurgeError('');
+    setBookingPurgeLoading(true);
+    try {
+      setBookingPurgePreview(await fetchBookingPurgePreview(storeId));
+    } catch (error: unknown) {
+      setBookingPurgeError(error instanceof Error ? error.message : 'Could not inspect Booking data');
+    } finally {
+      setBookingPurgeLoading(false);
+    }
+  };
+
+  const handleDeleteAllBookingData = async () => {
+    if (!isOwner || bookingPurgeConfirmation.trim() !== bookingPurgePhrase) return;
+    const storeId = activeBranch || user?.assignedBranches?.[0];
+    if (!storeId) return;
+
+    setBookingPurgeDeleting(true);
+    setBookingPurgeError('');
+    try {
+      const result = await deleteAllAdminBookingData(storeId);
+      setBookingPurgeDeletedCount(result.bookingCount);
+      setBookingPurgePreview({
+        ...result,
+        bookingCount: 0,
+        attendanceSegmentCount: 0,
+        slotReservationCount: 0,
+        workDateCount: 0,
+        workDates: [],
+      });
+      setBookingPurgeConfirmation('');
+      setBookings([]);
+      setSearchBookings([]);
+      setPopover(null);
+      setPopoverAnchorEl(null);
+    } catch (error: unknown) {
+      setBookingPurgeError(error instanceof Error ? error.message : 'Could not delete Booking data');
+    } finally {
+      setBookingPurgeDeleting(false);
+    }
+  };
 
   // Canonical attendance sync from the HRM backend.
   useEffect(() => {
@@ -834,11 +922,7 @@ export default function BookingsManagementPage() {
   const bookingsForRole = useMemo(() => bookings.filter(b => {
     if (user?.role === 'staff') {
       const isOwnBooking = b.staffId === user.staffId || b.proposedStaffId === user.staffId;
-      const isUnassignedRequest =
-        b.status === 'pending_approval' && (!b.staffId || b.staffId === 'any');
-      const isUnclaimedLeaveConflict =
-        b.status === 'needs_owner_action' && !b.proposedStaffId;
-      return isOwnBooking || isUnassignedRequest || isUnclaimedLeaveConflict;
+      return isOwnBooking || isClaimableUnassignedBooking(b);
     }
     return true;
   }), [bookings, user]);
@@ -1399,23 +1483,21 @@ export default function BookingsManagementPage() {
   const staffColumnsForDate = useMemo(() => {
     const dayBookings = bookingsByDate[selectedDate] || [];
 
-    // Employees see their own column plus a store Request column. Unassigned
-    // Requests and leave conflicts remain visible until one employee claims
-    // them; a claimed item remains visible to the claiming employee.
+    // Employees see their own column plus a permanent, wider Unassigned
+    // column. Once an employee claims an item it moves to their own column and
+    // disappears from Unassigned for every colleague.
     if (!isManagerOrOwner) {
       const currentStaff = realStaffList.find((staff) => staff.id === user?.staffId);
       if (!user?.staffId) return [];
 
       const ownBookings = dayBookings.filter((booking) =>
-        booking.originatedAsRequest !== true &&
-        booking.status !== 'pending_approval' &&
-        booking.status !== 'needs_owner_action' &&
-        booking.staffId === user.staffId,
+        !isClaimableUnassignedBooking(booking) &&
+        (booking.staffId === user.staffId || booking.proposedStaffId === user.staffId),
       );
-      const requestBookings = dayBookings.filter((booking) =>
-        booking.originatedAsRequest === true ||
-        booking.status === 'pending_approval' ||
-        booking.status === 'needs_owner_action',
+      const unassignedBookings = dayBookings.filter(isClaimableUnassignedBooking);
+      const unassignedColumnSpan = Math.max(
+        2,
+        Math.min(3, getPeakConcurrentBookingCount(unassignedBookings)),
       );
       const columns: Array<{
         id: string;
@@ -1435,16 +1517,14 @@ export default function BookingsManagementPage() {
         columnType: 'staff',
         span: 1,
       }];
-      if (requestBookings.length > 0) {
-        columns.push({
-          id: '__request__',
-          name: locale === 'vi' ? 'Yêu cầu' : locale === 'de' ? 'Anfragen' : 'Requests',
-          bookings: requestBookings,
-          isInactive: false,
-          columnType: 'request',
-          span: 1,
-        });
-      }
+      columns.push({
+        id: '__unassigned__',
+        name: locale === 'vi' ? 'Chưa gán' : locale === 'de' ? 'Nicht zugewiesen' : 'Unassigned',
+        bookings: unassignedBookings,
+        isInactive: false,
+        columnType: 'request',
+        span: unassignedColumnSpan,
+      });
       return columns;
     }
 
@@ -1512,17 +1592,7 @@ export default function BookingsManagementPage() {
 
     // Permanent workflow columns from the mockup. They remain visible even
     // when empty so the owner always knows where requests and disruptions go.
-    const requestEvents = requestColumnBookings.flatMap((booking) => {
-      const start = parseTime(booking.startTime);
-      const startMinutes = start.hours * 60 + start.minutes;
-      return [{ time: startMinutes, delta: 1 }, { time: startMinutes + booking.totalDurationMinutes, delta: -1 }];
-    }).sort((left, right) => left.time - right.time || left.delta - right.delta);
-    let concurrentRequests = 0;
-    let peakConcurrentRequests = 0;
-    requestEvents.forEach((event) => {
-      concurrentRequests += event.delta;
-      peakConcurrentRequests = Math.max(peakConcurrentRequests, concurrentRequests);
-    });
+    const peakConcurrentRequests = getPeakConcurrentBookingCount(requestColumnBookings);
     staffColumns.push({
       id: '__request__',
       name: locale === 'vi' ? 'Yêu cầu' : locale === 'de' ? 'Anfragen' : 'Requests',
@@ -1668,7 +1738,7 @@ export default function BookingsManagementPage() {
           borderLeftColor: visibleIdentity.accent,
         }}
         data-booking-group={bookingGroupKey}
-        title={`${booking.customerName} · ${getBookingGroupShortCode(booking)} · ${getServiceName(booking)}`}
+        title={`${booking.customerName} · ${getBookingDisplayCode(booking)} · ${getServiceName(booking)}`}
         onMouseEnter={() => setHoveredBookingGroupKey(bookingGroupKey)}
         onMouseLeave={() => setHoveredBookingGroupKey(null)}
         onFocus={() => setHoveredBookingGroupKey(bookingGroupKey)}
@@ -1681,9 +1751,11 @@ export default function BookingsManagementPage() {
         <span
           className={styles.calBlockGroupCode}
           style={{ color: visibleIdentity.text, borderColor: visibleIdentity.outline }}
-          aria-label={locale === 'vi' ? `Nhóm ${getBookingGroupShortCode(booking)}` : `Group ${getBookingGroupShortCode(booking)}`}
+          aria-label={locale === 'vi'
+            ? `Mã đặt lịch ${getBookingDisplayCode(booking)}`
+            : `Booking ID ${getBookingDisplayCode(booking)}`}
         >
-          {getBookingGroupShortCode(booking)}
+          {getBookingDisplayCode(booking)}
         </span>
         <span className={`${styles.calBlockStatusDot} ${styles[`calBlockStatusDot_${booking.status}`]}`} aria-hidden="true" />
         <div className={styles.calBlockService} style={booking.status === 'cancelled' ? undefined : { color: visibleIdentity.text }}>{getServiceName(booking)}</div>
@@ -1973,6 +2045,7 @@ export default function BookingsManagementPage() {
             ) : (
               cols.map((col) => {
                 const isRequestCol = col.columnType === 'request';
+                const isUnassignedCol = col.id === '__unassigned__';
                 const isSpecialCol = isRequestCol;
                 const displayName = isSpecialCol ? col.name : getStaffNameDisplay(col.id, col.name);
                 const isInactive = 'isInactive' in col && col.isInactive;
@@ -1980,7 +2053,9 @@ export default function BookingsManagementPage() {
                   <div key={col.id} style={{ '--calendar-column-span': col.span, flexGrow: col.span } as React.CSSProperties} className={`${styles.calDayCol} ${styles.calHeaderCell} ${isRequestCol ? styles.calHeaderCellRequest : ''} ${isInactive ? styles.calHeaderCellInactive : ''}`}>
                     <span className={styles.calStaffName}>{displayName}</span>
                     <span className={styles.calStaffSubtitle}>
-                      {isRequestCol
+                      {isUnassignedCol
+                        ? (locale === 'vi' ? 'tự nhận lịch' : locale === 'de' ? 'zur Übernahme' : 'claim a booking')
+                        : isRequestCol
                         ? (locale === 'vi' ? 'chờ duyệt' : locale === 'de' ? 'wartend' : 'pending')
                         : isInactive
                         ? (locale === 'vi' ? '🔴 Nghỉ làm' : locale === 'de' ? '🔴 Inaktiv' : '🔴 Inactive')
@@ -2129,6 +2204,18 @@ export default function BookingsManagementPage() {
           {isManagerOrOwner && (
             <Button variant="outline" className={styles.walkInTopBtn} onClick={() => openNewBookingModal('', '', '09:00')}>
               + {locale === 'vi' ? 'Khách lẻ' : 'Walk-in'}
+            </Button>
+          )}
+          {isOwner && (
+            <Button
+              variant="outline"
+              size="icon"
+              className={styles.bookingPurgeTopBtn}
+              onClick={() => void openBookingPurgeModal()}
+              aria-label={locale === 'vi' ? 'Xóa toàn bộ dữ liệu Booking' : 'Delete all Booking data'}
+              title={locale === 'vi' ? 'Xóa toàn bộ dữ liệu Booking' : 'Delete all Booking data'}
+            >
+              <Trash2 className="h-5 w-5" />
             </Button>
           )}
           {viewMode === 'list' ? (
@@ -2358,7 +2445,7 @@ export default function BookingsManagementPage() {
                       <span className={styles.bookingGroupHeading}>
                         <strong>{firstBooking.customerName || (locale === 'vi' ? 'Khách vãng lai' : 'Walk-in')}</strong>
                         <span>
-                          #{getBookingGroupShortCode(firstBooking)} · {serviceCountLabel} · {firstBooking.startTime}–{groupEndLabel}
+                          {getBookingDisplayCode(firstBooking)} · {serviceCountLabel} · {firstBooking.startTime}–{groupEndLabel}
                         </span>
                       </span>
                       <span className={styles.bookingGroupCount} style={{ color: identity.text, borderColor: identity.outline }}>
@@ -2641,6 +2728,98 @@ export default function BookingsManagementPage() {
         </>
       )}
 
+      {/* Owner-only Booking data cleanup. This deliberately excludes HRM-only records. */}
+      {isOwner && showBookingPurgeModal && (
+        <>
+          <div className={styles.modalOverlay} onClick={() => !bookingPurgeDeleting && setShowBookingPurgeModal(false)} />
+          <section
+            className={styles.bookingPurgeModal}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="booking-purge-title"
+          >
+            <header className={styles.bookingPurgeHeader}>
+              <span className={styles.bookingPurgeIcon}><Trash2 className="h-5 w-5" /></span>
+              <div>
+                <h3 id="booking-purge-title">
+                  {locale === 'vi' ? 'Xóa toàn bộ lịch Booking' : locale === 'de' ? 'Alle Booking-Termine löschen' : 'Delete all Booking data'}
+                </h3>
+                <p>{locale === 'vi' ? 'Chỉ áp dụng cho cửa hàng đang chọn' : 'Only for the currently selected store'}</p>
+              </div>
+              <button
+                type="button"
+                className={styles.bookingPurgeClose}
+                onClick={() => setShowBookingPurgeModal(false)}
+                disabled={bookingPurgeDeleting}
+                aria-label={locale === 'vi' ? 'Đóng' : 'Close'}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+
+            <div className={styles.bookingPurgeBody}>
+              {bookingPurgeLoading ? (
+                <p className={styles.bookingPurgeLoading}>{locale === 'vi' ? 'Đang kiểm tra dữ liệu…' : 'Inspecting data…'}</p>
+              ) : bookingPurgeDeletedCount !== null ? (
+                <div className={styles.bookingPurgeSuccess}>
+                  <Check className="h-6 w-6" />
+                  <strong>{locale === 'vi' ? `Đã xóa ${bookingPurgeDeletedCount} booking.` : `Deleted ${bookingPurgeDeletedCount} bookings.`}</strong>
+                  <span>{locale === 'vi' ? 'Dữ liệu HRM độc lập được giữ nguyên.' : 'Standalone HRM data was preserved.'}</span>
+                </div>
+              ) : bookingPurgePreview ? (
+                <>
+                  <div className={styles.bookingPurgeStats}>
+                    <div><strong>{bookingPurgePreview.bookingCount}</strong><span>Booking</span></div>
+                    <div><strong>{bookingPurgePreview.attendanceSegmentCount}</strong><span>{locale === 'vi' ? 'đoạn lịch' : 'segments'}</span></div>
+                    <div><strong>{bookingPurgePreview.workDateCount}</strong><span>{locale === 'vi' ? 'ngày' : 'dates'}</span></div>
+                  </div>
+                  <div className={styles.bookingPurgeWarning}>
+                    <TriangleAlert className="h-5 w-5" />
+                    <p>
+                      <strong>{locale === 'vi' ? 'Thao tác này không thể hoàn tác.' : 'This cannot be undone.'}</strong>
+                      <span>{locale === 'vi'
+                        ? 'Booking gốc, các đoạn lịch do Booking tạo và khóa khung giờ sẽ bị xóa. Chấm công HRM độc lập, nhân viên, dịch vụ, nghỉ phép, chốt ngày và khách hàng được giữ nguyên.'
+                        : 'Booking records, linked Booking segments and slot locks will be deleted. Standalone HRM attendance and HRM configuration remain unchanged.'}</span>
+                    </p>
+                  </div>
+                  {bookingPurgePreview.bookingCount > 0 && (
+                    <label className={styles.bookingPurgeConfirmField}>
+                      <span>{locale === 'vi' ? `Nhập “${bookingPurgePhrase}” để xác nhận` : `Type “${bookingPurgePhrase}” to confirm`}</span>
+                      <input
+                        type="text"
+                        value={bookingPurgeConfirmation}
+                        onChange={(event) => setBookingPurgeConfirmation(event.target.value)}
+                        autoComplete="off"
+                        spellCheck={false}
+                        disabled={bookingPurgeDeleting}
+                      />
+                    </label>
+                  )}
+                </>
+              ) : null}
+
+              {bookingPurgeError && <p className={styles.bookingPurgeError}>{bookingPurgeError}</p>}
+            </div>
+
+            <footer className={styles.bookingPurgeFooter}>
+              <button type="button" className={styles.bookingPurgeCancel} onClick={() => setShowBookingPurgeModal(false)} disabled={bookingPurgeDeleting}>
+                {bookingPurgeDeletedCount !== null ? (locale === 'vi' ? 'Đóng' : 'Close') : (locale === 'vi' ? 'Hủy' : 'Cancel')}
+              </button>
+              {bookingPurgeDeletedCount === null && bookingPurgePreview && bookingPurgePreview.bookingCount > 0 && (
+                <button
+                  type="button"
+                  className={styles.bookingPurgeDelete}
+                  onClick={() => void handleDeleteAllBookingData()}
+                  disabled={bookingPurgeDeleting || bookingPurgeConfirmation.trim() !== bookingPurgePhrase}
+                >
+                  {bookingPurgeDeleting ? (locale === 'vi' ? 'Đang xóa…' : 'Deleting…') : (locale === 'vi' ? 'Xóa sạch dữ liệu Booking' : 'Delete Booking data')}
+                </button>
+              )}
+            </footer>
+          </section>
+        </>
+      )}
+
       {/* Popover */}
       {popover && (
         <>
@@ -2662,9 +2841,7 @@ export default function BookingsManagementPage() {
               </button>
               <span className={styles.calPopoverHeroIcon}><Scissors className="h-5 w-5" /></span>
               <span className={styles.calPopoverCode}>
-                {popoverBookingGroup.length > 1
-                  ? `#${getBookingGroupShortCode(popover.booking)} · ${getBookingDisplayCode(popover.booking)}`
-                  : getBookingDisplayCode(popover.booking)}
+                {getBookingDisplayCode(popover.booking)}
               </span>
               <h4 id="booking-detail-title" className={styles.calPopoverTitle}>{popoverBookingGroup.map(getFullServicesDisplay).join(' + ')}</h4>
               <p className={styles.calPopoverHeroMeta}>
@@ -2852,10 +3029,7 @@ export default function BookingsManagementPage() {
                   )}
                 </div>
               )}
-              {user?.role === 'staff' && (
-                (popover.booking.status === 'pending_approval' && (!popover.booking.staffId || popover.booking.staffId === 'any')) ||
-                (popover.booking.status === 'needs_owner_action' && !popover.booking.proposedStaffId)
-              ) && (
+              {user?.role === 'staff' && isClaimableUnassignedBooking(popover.booking) && (
                 <div className={`${styles.calPopoverActions} ${styles.calPopoverActionsOne}`}>
                   <button
                     type="button"
