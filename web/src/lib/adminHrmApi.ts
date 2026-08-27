@@ -762,6 +762,34 @@ export const fetchPlatformStores = async (): Promise<PlatformStore[]> => {
   return ((await response.json()) as { items: PlatformStore[] }).items;
 };
 
+export const createPlatformStore = async (payload: {
+  ownerUserId: string;
+  name: string;
+  bookingSlug: string;
+  phone?: string;
+  address?: { line1?: string; city?: string; zipCode?: string; country?: string };
+  openTime: string;
+  closeTime: string;
+  bookingWindowDays: number;
+  minimumNoticeHours: number;
+  cancellationNoticeHours: number;
+  slotIntervalMinutes: number;
+  publicStaffSelection: boolean;
+}): Promise<void> => {
+  const response = await authenticatedHrmFetch('/api/v1/admin/stores', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...payload,
+      status: 'active',
+      timezone: 'Europe/Berlin',
+    }),
+  });
+  if (!response.ok) {
+    const error = await response.json().catch(() => undefined) as { message?: string } | undefined;
+    throw new Error(error?.message || `Could not create platform store (${response.status})`);
+  }
+};
+
 export const updatePlatformStore = async (
   storeId: string,
   status: 'active' | 'disabled',

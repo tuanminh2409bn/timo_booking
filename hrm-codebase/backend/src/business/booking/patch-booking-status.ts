@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 import { canAccessStore } from "../../helpers/role-access.js";
+import { writeShopAuditLog } from "../../helpers/shop-audit-log.js";
 import { verifyAuthorizationHeader } from "../../modules/verify-auth-header.js";
 import { firestoreAuth, firestoreRepository } from "../../repository/firestore/index.js";
 import type { ShopAttendanceBookingStatus, ShopAttendanceType } from "../../repository/firestore/shop/shop.types.js";
@@ -72,13 +73,18 @@ export const updateBookingStatus = async (request: Request, response: Response) 
   const employeeIsMain =
     authContext.role === "employee" &&
     (attendance.mainAssigneeUserId ?? attendance.employeeUserId) === authContext.uid;
+  const employeeMayManageRequest =
+    authContext.role === "employee" && attendance.originatedAsRequest === true;
   if (
     authContext.role === "employee" &&
-    (!employeeIsMain || !["completed", "no_show", "cancelled"].includes(requestedStatus))
+    !(
+      (employeeIsMain && ["completed", "no_show", "cancelled"].includes(requestedStatus)) ||
+      (employeeMayManageRequest && ["confirmed", "cancelled"].includes(requestedStatus))
+    )
   ) {
     return response.status(403).json({
       type: "/attendance/forbidden-status-transition",
-      message: "Employee may only complete, cancel, or mark no-show for their own attendance",
+      message: "Employee may only manage a visible Request or their own attendance",
     });
   }
   if (
@@ -119,20 +125,6 @@ export const updateBookingStatus = async (request: Request, response: Response) 
 
   const actor = await firestoreRepository.user.getUser(authContext.uid).catch(() => undefined);
   const actorName = actor?.name?.trim() || actor?.displayName?.trim() || actor?.email;
-
-  if (
-    requestedStatus === "confirmed" &&
-    groupedAttendances.some((item) =>
-      item.bookingStatus === "processing"
-        ? !item.proposedAssigneeUserId
-        : !(item.mainAssigneeUserId ?? item.employeeUserId),
-    )
-  ) {
-    return response.status(409).json({
-      type: "/attendance/unassigned-booking-segment",
-      message: "Assign an employee to every booking segment before approval",
-    });
-  }
 
   for (const item of groupedAttendances) {
     const shouldCommitReplacement =
@@ -218,6 +210,24 @@ export const updateBookingStatus = async (request: Request, response: Response) 
     }
   }
   await synchronizeWorkDaySettlement(authContext.ownerId, storeId, attendance.workDate);
+
+  await writeShopAuditLog({
+    ownerId: authContext.ownerId,
+    eventType: "attendance_updated",
+    entityType: "attendance",
+    entityId: attendanceId,
+    storeId,
+    workDate: attendance.workDate,
+    actor: { uid: authContext.uid, role: authContext.role },
+    metadata: {
+      bookingId: attendance.bookingId,
+      bookingStatus,
+      requestedStatus,
+      reason: parsed.data.reason,
+      actorName,
+      affectedAttendanceIds: groupedAttendances.map((item) => item.id),
+    },
+  });
 
   return response.status(200).json({
     id: attendanceId,

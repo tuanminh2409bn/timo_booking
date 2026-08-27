@@ -90,6 +90,7 @@ type StaffAbsence = {
 };
 type FilterStatus =
   | 'all'
+  | 'request'
   | 'pending_approval'
   | 'confirmed'
   | 'cancelled'
@@ -128,6 +129,21 @@ function getBookingGroupIdentity(index: number): BookingGroupIdentity {
   // additional cool pastel identity instead of cycling back to purple/blue,
   // otherwise unrelated customer bookings can appear to be one group.
   const hue = 185 + ((index * 47) % 146);
+  return {
+    accent: `hsl(${hue} 72% 43%)`,
+    background: `hsl(${hue} 82% 96%)`,
+    outline: `hsl(${hue} 72% 84%)`,
+    text: `hsl(${hue} 72% 35%)`,
+  };
+}
+
+function getStableBookingGroupIdentity(groupKey: string): BookingGroupIdentity {
+  let hash = 2166136261;
+  for (let index = 0; index < groupKey.length; index += 1) {
+    hash ^= groupKey.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  const hue = 185 + ((hash >>> 0) % 146);
   return {
     accent: `hsl(${hue} 72% 43%)`,
     background: `hsl(${hue} 82% 96%)`,
@@ -209,8 +225,11 @@ function matchesSourceFilter(booking: FirestoreBooking, sourceFilter: SourceFilt
 function isClaimableUnassignedBooking(booking: FirestoreBooking): boolean {
   const hasNoAssignedStaff = !booking.staffId || booking.staffId === 'any';
   return (
+    (booking.originatedAsRequest === true && hasNoAssignedStaff &&
+      !['cancelled', 'no_show', 'completed'].includes(booking.status)) ||
     (booking.status === 'pending_approval' && hasNoAssignedStaff) ||
-    (booking.status === 'needs_owner_action' && !booking.proposedStaffId)
+    (booking.status === 'needs_owner_action' &&
+      booking.staffSelectionType !== 'specific' && !booking.proposedStaffId)
   );
 }
 
@@ -564,7 +583,7 @@ export default function BookingsManagementPage() {
       const requestedDate = searchParams.get('date');
       if (/^\d{4}-\d{2}-\d{2}$/.test(requestedDate ?? '')) setSelectedDate(requestedDate as string);
       const requestedStatus = searchParams.get('status');
-      if (['all', 'pending_approval', 'confirmed', 'cancelled', 'needs_owner_action'].includes(requestedStatus ?? '')) {
+      if (['all', 'request', 'pending_approval', 'confirmed', 'cancelled', 'needs_owner_action'].includes(requestedStatus ?? '')) {
         setFilter(requestedStatus as FilterStatus);
       }
       const requestedSource = searchParams.get('source');
@@ -770,6 +789,9 @@ export default function BookingsManagementPage() {
     if (!user) return false;
     const storeId = activeBranch || user.assignedBranches?.[0];
     if (!storeId) return false;
+    if (!window.confirm(locale === 'vi'
+      ? 'Xác nhận phê duyệt booking này? Booking vẫn được giữ trong cột Yêu cầu.'
+      : 'Approve this booking? It will remain in the Request column.')) return false;
     try {
       const attendanceId = bookings.find((booking) => booking.id === id)?.attendanceId ?? id;
       await updateAdminAttendanceStatus(storeId, attendanceId, 'confirmed');
@@ -782,10 +804,13 @@ export default function BookingsManagementPage() {
     }
   };
 
-  const handleReject = async (id: string) => {
-    if (!user) return;
+  const handleReject = async (id: string): Promise<boolean> => {
+    if (!user) return false;
     const storeId = activeBranch || user.assignedBranches?.[0];
-    if (!storeId) return;
+    if (!storeId) return false;
+    if (!window.confirm(locale === 'vi'
+      ? 'Xác nhận hủy booking này?'
+      : 'Cancel this booking?')) return false;
     try {
       const targetBooking = bookings.find((booking) => booking.id === id);
       const attendanceId = targetBooking?.attendanceId ?? id;
@@ -798,24 +823,33 @@ export default function BookingsManagementPage() {
             : booking,
         ),
       );
+      return true;
     } catch (error: unknown) {
       console.error(error);
+      window.alert(error instanceof Error ? error.message : 'Could not cancel booking');
+      return false;
     }
   };
 
   const handleLifecycleStatus = async (
     id: string,
     status: 'completed' | 'no_show',
-  ) => {
-    if (!user) return;
+  ): Promise<boolean> => {
+    if (!user) return false;
     const storeId = activeBranch || user.assignedBranches?.[0];
-    if (!storeId) return;
+    if (!storeId) return false;
+    const confirmationText = status === 'completed'
+      ? (locale === 'vi' ? 'Xác nhận hoàn thành dịch vụ này?' : 'Mark this service completed?')
+      : (locale === 'vi' ? 'Xác nhận khách không đến?' : 'Mark this customer as no-show?');
+    if (!window.confirm(confirmationText)) return false;
     try {
       const attendanceId = bookings.find((booking) => booking.id === id)?.attendanceId ?? id;
       await updateAdminAttendanceStatus(storeId, attendanceId, status);
       await refreshCanonicalCalendar();
+      return true;
     } catch (error: unknown) {
       window.alert(error instanceof Error ? error.message : 'Could not update booking');
+      return false;
     }
   };
 
@@ -826,6 +860,15 @@ export default function BookingsManagementPage() {
     // Find the booking being reassigned
     const booking = bookings.find(b => b.id === bookingId);
     if (!booking) return;
+
+    const reassignmentMessage = booking.staffSelectionType === 'specific'
+      ? (locale === 'vi'
+        ? `Khách đã chọn đích danh ${booking.requestedStaffName || booking.staffName || 'một thợ'}. Hãy gọi cho khách trước khi đổi sang ${staffName}. Bạn xác nhận đã trao đổi và muốn tiếp tục?`
+        : `The customer selected ${booking.requestedStaffName || booking.staffName || 'a specific employee'}. Call the customer before changing to ${staffName}. Continue?`)
+      : (locale === 'vi'
+        ? `Xác nhận gán dịch vụ này cho ${staffName}?`
+        : `Assign this service to ${staffName}?`);
+    if (!window.confirm(reassignmentMessage)) return;
 
     // 1. Check if staff is on leave on the booking date
     const absences = staffAbsences[staffId] || [];
@@ -905,6 +948,9 @@ export default function BookingsManagementPage() {
     if (!user?.staffId) return;
     const branchId = activeBranch || user.assignedBranches?.[0];
     if (!branchId) return;
+    if (!window.confirm(locale === 'vi'
+      ? `Nhận dịch vụ “${getServiceName(booking)}” cho mình? Booking sẽ tự động được xác nhận.`
+      : `Claim “${getServiceName(booking)}”? The booking will be confirmed automatically.`)) return;
     try {
       await reassignAdminAttendance(branchId, booking.attendanceId, user.staffId);
       await refreshCanonicalCalendar();
@@ -922,7 +968,12 @@ export default function BookingsManagementPage() {
   const bookingsForRole = useMemo(() => bookings.filter(b => {
     if (user?.role === 'staff') {
       const isOwnBooking = b.staffId === user.staffId || b.proposedStaffId === user.staffId;
-      return isOwnBooking || isClaimableUnassignedBooking(b);
+      const isSharedRequest = b.originatedAsRequest === true &&
+        !['cancelled', 'no_show'].includes(b.status);
+      const isSharedAnyStaffLeaveConflict = b.status === 'needs_owner_action' &&
+        b.staffSelectionType !== 'specific';
+      return isOwnBooking || isSharedRequest || isSharedAnyStaffLeaveConflict ||
+        isClaimableUnassignedBooking(b);
     }
     return true;
   }), [bookings, user]);
@@ -955,7 +1006,9 @@ export default function BookingsManagementPage() {
 
     // Filter by status
     if (filter !== 'all') {
-      list = list.filter(b => b.status === filter);
+      list = filter === 'request'
+        ? list.filter((booking) => booking.originatedAsRequest === true)
+        : list.filter(b => b.status === filter);
     }
 
     // Sort by start time ascending
@@ -971,9 +1024,7 @@ export default function BookingsManagementPage() {
       ))
       .forEach((booking) => {
         const groupKey = getBookingGroupKey(booking);
-        if (!identities.has(groupKey)) {
-          identities.set(groupKey, getBookingGroupIdentity(identities.size));
-        }
+        if (!identities.has(groupKey)) identities.set(groupKey, getStableBookingGroupIdentity(groupKey));
       });
     return identities;
   }, [bookingsForRole, isGlobalSearchActive, searchBookings]);
@@ -1016,7 +1067,9 @@ export default function BookingsManagementPage() {
   );
   const dayRequestCount = useMemo(
     () => bookingsForRole.filter(
-      (booking) => booking.appointmentDate === selectedDate && booking.status === 'pending_approval',
+      (booking) => booking.appointmentDate === selectedDate &&
+        booking.originatedAsRequest === true &&
+        !['cancelled', 'no_show', 'completed'].includes(booking.status),
     ).length,
     [bookingsForRole, selectedDate],
   );
@@ -1037,7 +1090,7 @@ export default function BookingsManagementPage() {
     isManagerOrOwner && (dayRequestCount > 0 || dayNeedsActionCount > 0) ? (
       <div className={styles.attentionSummaryRow}>
         {dayRequestCount > 0 && (
-          <button type="button" className={styles.attentionSummaryButton} onClick={() => applyDayStatusFilter('pending_approval')}>
+          <button type="button" className={styles.attentionSummaryButton} onClick={() => applyDayStatusFilter('request')}>
             <span className={styles.attentionSummaryCount}>{dayRequestCount}</span>
             <span>{locale === 'vi' ? 'Yêu cầu' : 'Requests'}</span>
           </button>
@@ -1075,15 +1128,6 @@ export default function BookingsManagementPage() {
       durationMinutes: Math.max(endMinutes - startMinutes, 1),
     };
   }, [popoverBookingGroup]);
-  const popoverHasUnassignedSegments = useMemo(
-    () => popoverBookingGroup.some((segment) =>
-      segment.status === 'needs_owner_action'
-        ? !segment.proposedStaffId
-        : !segment.staffId || segment.staffId === 'any',
-    ),
-    [popoverBookingGroup],
-  );
-
   const handleCopyBookingCode = useCallback(async (booking: FirestoreBooking) => {
     const bookingCode = getBookingDisplayCode(booking);
     try {
@@ -1289,6 +1333,9 @@ export default function BookingsManagementPage() {
     const resolvedBranchId = activeBranch || user.assignedBranches?.[0] || '';
     if (!resolvedBranchId) return;
     const { staffId, timeStr } = quickBookPopup;
+    if (!window.confirm(locale === 'vi'
+      ? `Tạo lịch nhanh ${durationMinutes} phút lúc ${timeStr}?`
+      : `Create a ${durationMinutes}-minute quick booking at ${timeStr}?`)) return;
     setQuickBookPopup(null);
 
     const svcName = durationMinutes === 60
@@ -1332,6 +1379,10 @@ export default function BookingsManagementPage() {
         : 'Staff may only record walk-ins for today or a past day.');
       return;
     }
+
+    if (!window.confirm(locale === 'vi'
+      ? `Xác nhận tạo lịch ${newBookingTime} ngày ${selectedDate} với ${newBookingServices.length} dịch vụ?`
+      : `Create this booking at ${newBookingTime} on ${selectedDate}?`)) return;
 
     // --- Validation 1: Staff service compatibility ---
     if (newBookingStaffId) {
@@ -1484,17 +1535,21 @@ export default function BookingsManagementPage() {
     const dayBookings = bookingsByDate[selectedDate] || [];
 
     // Employees see their own column plus a permanent, wider Unassigned
-    // column. Once an employee claims an item it moves to their own column and
-    // disappears from Unassigned for every colleague.
+    // workflow column. Request-origin segments stay yellow after assignment or
+    // approval; the third line shows who claimed each segment.
     if (!isManagerOrOwner) {
       const currentStaff = realStaffList.find((staff) => staff.id === user?.staffId);
       if (!user?.staffId) return [];
 
       const ownBookings = dayBookings.filter((booking) =>
-        !isClaimableUnassignedBooking(booking) &&
+        booking.originatedAsRequest !== true &&
+        !(booking.status === 'needs_owner_action' && booking.staffSelectionType !== 'specific') &&
         (booking.staffId === user.staffId || booking.proposedStaffId === user.staffId),
       );
-      const unassignedBookings = dayBookings.filter(isClaimableUnassignedBooking);
+      const unassignedBookings = dayBookings.filter((booking) =>
+        booking.originatedAsRequest === true ||
+        (booking.status === 'needs_owner_action' && booking.staffSelectionType !== 'specific'),
+      );
       const unassignedColumnSpan = Math.max(
         2,
         Math.min(3, getPeakConcurrentBookingCount(unassignedBookings)),
@@ -1698,7 +1753,7 @@ export default function BookingsManagementPage() {
   const renderCalBookingBlock = (booking: FirestoreBooking, leftPercent = 0, widthPercent = 100) => {
     const { hours: startH, minutes: startM } = parseTime(booking.startTime);
     const topOffset = (startH - calendarStartHour) * HOUR_HEIGHT + (startM / 60) * HOUR_HEIGHT;
-    const height = Math.max((booking.totalDurationMinutes / 60) * HOUR_HEIGHT, 28);
+    const height = Math.max((booking.totalDurationMinutes / 60) * HOUR_HEIGHT, 46);
     const endTime = formatEndTime(booking.startTime, booking.totalDurationMinutes);
     const hasLeaveConflict = Boolean(booking.conflictStaffId);
     const isSpecificLeaveConflict = hasLeaveConflict && booking.staffSelectionType === 'specific';
@@ -1760,30 +1815,20 @@ export default function BookingsManagementPage() {
         <span className={`${styles.calBlockStatusDot} ${styles[`calBlockStatusDot_${booking.status}`]}`} aria-hidden="true" />
         <div className={styles.calBlockService} style={booking.status === 'cancelled' ? undefined : { color: visibleIdentity.text }}>{getServiceName(booking)}</div>
         <div className={styles.calBlockTime}>{booking.startTime}–{endTime}</div>
-        {(height > 48 || (
-          height >= 40 &&
-          (
-            booking.status === 'pending_approval' ||
-            booking.status === 'needs_owner_action' ||
-            booking.originatedAsRequest === true
-          )
-        )) && (
-          user?.role !== 'staff' ||
-          booking.status === 'pending_approval' ||
-          booking.status === 'needs_owner_action' ||
-          booking.originatedAsRequest === true
-        ) && (
+        {height >= 44 && (
           <div className={styles.calBlockCustomer}>
             {hasLeaveConflict
               ? `${locale === 'vi' ? 'Thợ gốc' : 'Original'}: ${booking.requestedStaffName || booking.conflictStaffName || getStaffNameDisplay(booking.staffId, booking.staffName)}`
               : booking.originatedAsRequest === true && booking.staffId && booking.staffId !== 'any'
               ? `${locale === 'vi' ? 'Thợ' : 'Staff'}: ${getStaffNameDisplay(booking.staffId, booking.staffName)}`
+              : booking.originatedAsRequest === true
+                ? (locale === 'vi' ? 'Chưa có thợ nhận' : 'Unassigned')
               : booking.status === 'needs_owner_action' && booking.proposedStaffName
                 ? `${locale === 'vi' ? 'Thợ thay' : 'Replacement'}: ${booking.proposedStaffName}`
                 : booking.status === 'needs_owner_action' && (booking.requestedStaffName || booking.conflictStaffName)
                   ? `${locale === 'vi' ? 'Thợ gốc' : 'Original'}: ${booking.requestedStaffName || booking.conflictStaffName}`
                   : user?.role === 'staff'
-                    ? ''
+                    ? getStaffNameDisplay(booking.staffId, booking.staffName)
                     : booking.customerName}
           </div>
         )}
@@ -2900,13 +2945,7 @@ export default function BookingsManagementPage() {
                           const newStaffId = e.target.value;
                           const newStaff = realStaffList.find(s => s.id === newStaffId);
                           const newStaffName = newStaff ? newStaff.name : (newStaffId === 'any' ? (t.admin.bookings.anyStaff || 'Bất kỳ ai') : '');
-                          handleReassignStaff(popover.booking.id, newStaffId, newStaffName);
-                          setPopover(prev => prev ? {
-                            ...prev,
-                            booking: prev.booking.status === 'needs_owner_action'
-                              ? { ...prev.booking, proposedStaffId: newStaffId, proposedStaffName: newStaffName }
-                              : { ...prev.booking, staffId: newStaffId, staffName: newStaffName },
-                          } : null);
+                          void handleReassignStaff(popover.booking.id, newStaffId, newStaffName);
                         }}
                       >
                         <option value="any">{t.admin.bookings.anyStaff || 'Bất kỳ ai'}</option>
@@ -2944,6 +2983,20 @@ export default function BookingsManagementPage() {
                     </span>
                   </div>
                 )}
+
+                <div className={styles.calPopoverDetailRow}>
+                  <span className={styles.calPopoverDetailIcon}><ClipboardList className="h-4 w-4" /></span>
+                  <span className={styles.calPopoverDetailText}>
+                    <span className={styles.calPopoverLabel}>{locale === 'vi' ? 'Cách khách đặt' : 'Customer staff choice'}</span>
+                    <strong className={styles.calPopoverValue}>
+                      {popover.booking.staffSelectionType === 'specific'
+                        ? (locale === 'vi'
+                          ? `Chọn đích danh: ${popover.booking.requestedStaffName || popover.booking.staffName || '—'}`
+                          : `Specific employee: ${popover.booking.requestedStaffName || popover.booking.staffName || '—'}`)
+                        : (locale === 'vi' ? 'Thợ bất kỳ' : 'Any available employee')}
+                    </strong>
+                  </span>
+                </div>
 
                 {user?.role !== 'staff' && (
                   <div className={styles.calPopoverDetailRow}>
@@ -2992,23 +3045,21 @@ export default function BookingsManagementPage() {
                 <>
                   {(popover.booking.status === 'pending_approval' || popover.booking.status === 'needs_owner_action') && (
                     <div className={`${styles.calPopoverActions} ${styles.calPopoverActionsTwo}`}>
-                      <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionDanger}`} onClick={() => { handleReject(popover.booking.id); setPopover(null); setPopoverAnchorEl(null); }}>{t.admin.bookings.btnReject}</button>
+                      <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionDanger}`} onClick={() => { void handleReject(popover.booking.id).then((cancelled) => { if (cancelled) { setPopover(null); setPopoverAnchorEl(null); } }); }}>{t.admin.bookings.btnReject}</button>
                       <button
                         type="button"
                         className={`${styles.calPopoverAction} ${styles.calPopoverActionPrimary}`}
-                        disabled={popoverHasUnassignedSegments}
-                        title={popoverHasUnassignedSegments ? (locale === 'vi' ? 'Cần phân công đủ thợ trước khi duyệt' : 'Assign every segment before approval') : undefined}
                         onClick={() => { void handleApprove(popover.booking.id).then((approved) => { if (approved) { setPopover(null); setPopoverAnchorEl(null); } }); }}
                       >{t.admin.bookings.btnApprove}</button>
                     </div>
                   )}
                   {popover.booking.status === 'confirmed' && (
                     <div className={`${styles.calPopoverActions} ${popover.booking.appointmentDate === getGermanTodayString() ? '' : styles.calPopoverActionsTwo}`}>
-                      <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionDanger}`} onClick={() => { handleReject(popover.booking.id); setPopover(null); setPopoverAnchorEl(null); }}>{t.admin.bookings.btnCancel}</button>
+                      <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionDanger}`} onClick={() => { void handleReject(popover.booking.id).then((cancelled) => { if (cancelled) { setPopover(null); setPopoverAnchorEl(null); } }); }}>{t.admin.bookings.btnCancel}</button>
                       {popover.booking.appointmentDate === getGermanTodayString() && (
-                        <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionNeutral}`} onClick={() => { void handleLifecycleStatus(popover.booking.id, 'no_show'); setPopover(null); }}>{locale === 'vi' ? 'Không đến' : 'No-show'}</button>
+                        <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionNeutral}`} onClick={() => { void handleLifecycleStatus(popover.booking.id, 'no_show').then((updated) => { if (updated) setPopover(null); }); }}>{locale === 'vi' ? 'Không đến' : 'No-show'}</button>
                       )}
-                      <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionPrimary}`} onClick={() => { void handleLifecycleStatus(popover.booking.id, 'completed'); setPopover(null); }} title={locale === 'vi' ? 'Đóng ca dịch vụ và ghi nhận hoàn thành' : 'Close the service attendance as completed'}>{locale === 'vi' ? 'Hoàn thành dịch vụ' : 'Complete service'}</button>
+                      <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionPrimary}`} onClick={() => { void handleLifecycleStatus(popover.booking.id, 'completed').then((updated) => { if (updated) setPopover(null); }); }} title={locale === 'vi' ? 'Đóng ca dịch vụ và ghi nhận hoàn thành' : 'Close the service attendance as completed'}>{locale === 'vi' ? 'Hoàn thành dịch vụ' : 'Complete service'}</button>
                     </div>
                   )}
                 </>
@@ -3018,13 +3069,13 @@ export default function BookingsManagementPage() {
                   <button
                     type="button"
                     className={`${styles.calPopoverAction} ${styles.calPopoverActionDanger}`}
-                    onClick={() => { void handleReject(popover.booking.id); setPopover(null); setPopoverAnchorEl(null); }}
+                    onClick={() => { void handleReject(popover.booking.id).then((cancelled) => { if (cancelled) { setPopover(null); setPopoverAnchorEl(null); } }); }}
                   >{t.admin.bookings.btnCancel}</button>
                   {popover.booking.appointmentDate === getGermanTodayString() && (
                     <button
                       type="button"
                       className={`${styles.calPopoverAction} ${styles.calPopoverActionNeutral}`}
-                      onClick={() => { void handleLifecycleStatus(popover.booking.id, 'no_show'); setPopover(null); setPopoverAnchorEl(null); }}
+                      onClick={() => { void handleLifecycleStatus(popover.booking.id, 'no_show').then((updated) => { if (updated) { setPopover(null); setPopoverAnchorEl(null); } }); }}
                     >{locale === 'vi' ? 'Không đến' : 'No-show'}</button>
                   )}
                 </div>
@@ -3036,6 +3087,12 @@ export default function BookingsManagementPage() {
                     className={`${styles.calPopoverAction} ${styles.calPopoverActionPrimary}`}
                     onClick={() => { void handleClaimBooking(popover.booking); }}
                   >{locale === 'vi' ? 'Nhận lịch này' : locale === 'de' ? 'Termin übernehmen' : 'Claim booking'}</button>
+                </div>
+              )}
+              {user?.role === 'staff' && popover.booking.originatedAsRequest === true && popover.booking.status === 'pending_approval' && (
+                <div className={`${styles.calPopoverActions} ${styles.calPopoverActionsTwo}`}>
+                  <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionDanger}`} onClick={() => { void handleReject(popover.booking.id).then((cancelled) => { if (cancelled) setPopover(null); }); }}>{t.admin.bookings.btnReject}</button>
+                  <button type="button" className={`${styles.calPopoverAction} ${styles.calPopoverActionPrimary}`} onClick={() => { void handleApprove(popover.booking.id).then((approved) => { if (approved) setPopover(null); }); }}>{t.admin.bookings.btnApprove}</button>
                 </div>
               )}
             </div>

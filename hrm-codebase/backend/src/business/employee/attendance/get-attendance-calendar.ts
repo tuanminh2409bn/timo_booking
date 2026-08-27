@@ -286,22 +286,25 @@ export const getAttendanceCalendar = async (req: Request, res: Response) => {
       : Promise.resolve([]),
   ]);
 
-  // Owner/manager see the store. Employees see their assigned appointments,
-  // every still-unclaimed Request, and every unclaimed leave conflict. Once a
-  // colleague claims an item it is no longer broadcast to the other staff.
+  // Owner/manager see the store. Employees see their own appointments and the
+  // shared yellow workflow column. A Request remains in that shared column
+  // after approval/assignment so every employee can see which segment is still
+  // free and who already claimed another segment from the same booking.
   let attendancesWithinCallerScope = attendances;
 
   if (authContext.role === "employee") {
     attendancesWithinCallerScope = attendances.filter((attendance) => {
       if (isAttendanceAssignedToUser(attendance, authContext.uid)) return true;
       const assignedEmployeeUserId = attendance.mainAssigneeUserId ?? attendance.employeeUserId;
-      const isUnclaimedRequest =
-        attendance.bookingStatus === "requested" && assignedEmployeeUserId === undefined;
-      const isUnclaimedLeaveConflict =
+      const isVisibleRequest =
+        attendance.originatedAsRequest === true &&
+        !["cancelled", "no_show"].includes(attendance.bookingStatus ?? "");
+      const isAnyStaffLeaveConflict =
         attendance.bookingStatus === "processing" &&
-        attendance.proposedAssigneeUserId === undefined;
+        attendance.staffSelectionType !== "specific";
       const isClaimedByCaller = attendance.proposedAssigneeUserId === authContext.uid;
-      return isUnclaimedRequest || isUnclaimedLeaveConflict || isClaimedByCaller;
+      return isVisibleRequest || isAnyStaffLeaveConflict || isClaimedByCaller ||
+        (attendance.bookingStatus === "requested" && assignedEmployeeUserId === undefined);
     });
   }
   const bookingIds = [...new Set(

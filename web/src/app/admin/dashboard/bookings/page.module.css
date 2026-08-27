@@ -839,7 +839,7 @@
 }
 .calBlockService { padding-right: 48px; font-size: 11px; font-weight: 600; color: #1A56DB; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .calBlockTime { font-size: 10px; color: #6B7280; margin-top: 1px; }
-.calBlockCustomer { font-size: 10px; color: #9CA3AF; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.calBlockCustomer { font-size: 10px; font-weight: 750; color: #475569; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .calBlockGroupCode {
   position: absolute;
   top: 3px;

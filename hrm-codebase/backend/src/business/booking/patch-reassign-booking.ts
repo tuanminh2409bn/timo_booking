@@ -2,8 +2,10 @@ import type { Request, Response } from "express";
 import type { DocumentReference } from "firebase-admin/firestore";
 import { z } from "zod";
 import { canAccessStore } from "../../helpers/role-access.js";
+import { writeShopAuditLog } from "../../helpers/shop-audit-log.js";
 import { verifyAuthorizationHeader } from "../../modules/verify-auth-header.js";
 import { firestoreAuth, firestoreRepository } from "../../repository/firestore/index.js";
+import type { ShopAttendanceType } from "../../repository/firestore/shop/shop.types.js";
 import { synchronizeWorkDaySettlement } from "../employee/work-days/work-day-settlement-sync.js";
 import { leaveOverlapsAttendance } from "../employee/leave-requests/leave-request-shared.js";
 import {
@@ -65,7 +67,8 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
       message: "Attendance cannot be reassigned after day close",
     });
   }
-  const isRequestAssignment = attendance.bookingStatus === "requested";
+  const isRequestAssignment =
+    attendance.bookingStatus === "requested" || attendance.originatedAsRequest === true;
   const isLeaveConflictAssignment = attendance.bookingStatus === "processing";
   if (isEmployeeClaim && !isRequestAssignment && !isLeaveConflictAssignment) {
     return response.status(403).json({
@@ -172,6 +175,10 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
   let bookingReference: DocumentReference | undefined;
   let previousSegments: SlotReservationSegment[] = [];
   let nextReservationIds: string[] | undefined;
+  let groupedRequestDocuments: Array<{
+    id: string;
+    data: ShopAttendanceType;
+  }> = [];
   if (attendance.bookingId) {
     bookingReference = firestoreAuth
       .collection("stores")
@@ -188,6 +195,12 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
         .get(),
     ]);
     const previousReservationIds = getBookingSlotReservationIds(bookingDocument.data() ?? {});
+    groupedRequestDocuments = groupedSnapshot.docs.flatMap((document) => {
+      const data = document.data() as ShopAttendanceType;
+      return data.ownerId === authContext.ownerId
+        ? [{ id: document.id, data: { ...data, id: document.id } }]
+        : [];
+    });
     previousSegments = groupedSnapshot.docs.flatMap((document) => {
       const value = document.data();
       const employeeUserId = value["mainAssigneeUserId"] ?? value["employeeUserId"];
@@ -256,8 +269,10 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
       shareAmount: attendance.subtotalAmount,
     }],
     services,
-    // A Request stays pending until the owner explicitly approves the booking.
-    bookingStatus: isRequestAssignment ? "requested" as const : "confirmed" as const,
+    // Owner assignment keeps a Request pending. Employee self-claim confirms
+    // the booking immediately, while all segments remain in the Request column.
+    bookingStatus:
+      isRequestAssignment && !isEmployeeClaim ? "requested" as const : "confirmed" as const,
     ...(isRequestAssignment && { originatedAsRequest: true }),
   };
   const deferredLeaveAssignment = {
@@ -281,10 +296,29 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
     attendance,
     isLeaveConflictAssignment ? undefined : { deleteFields: ["assistantAssigneeUserId"] },
     );
+    if (isEmployeeClaim && isRequestAssignment) {
+      await Promise.all(groupedRequestDocuments
+        .filter((document) => document.id !== attendanceId)
+        .map((document) => firestoreRepository.shop.attendance.updateShopAttendance(
+          authContext.ownerId,
+          storeId,
+          document.id,
+          {
+            bookingStatus: "confirmed",
+            originatedAsRequest: true,
+            updatedBy: authContext.uid,
+            updatedByUserId: authContext.uid,
+            updatedByRole: authContext.role,
+          },
+          document.data,
+        )));
+    }
     if (bookingReference && nextReservationIds) {
       await bookingReference.update({
         slotReservationIds: nextReservationIds,
-        ...(isRequestAssignment && { bookingStatus: "requested" }),
+        ...(isRequestAssignment && {
+          bookingStatus: isEmployeeClaim ? "confirmed" : "requested",
+        }),
         ...(isRequestAssignment && { originatedAsRequest: true }),
         ...(isLeaveConflictAssignment && {
           bookingStatus: "processing",
@@ -312,6 +346,25 @@ export const reassignBookingAttendance = async (request: Request, response: Resp
     throw error;
   }
   await synchronizeWorkDaySettlement(authContext.ownerId, storeId, attendance.workDate);
+
+  await writeShopAuditLog({
+    ownerId: authContext.ownerId,
+    eventType: "attendance_updated",
+    entityType: "attendance",
+    entityId: attendanceId,
+    storeId,
+    workDate: attendance.workDate,
+    actor: { uid: authContext.uid, role: authContext.role },
+    metadata: {
+      bookingId: attendance.bookingId,
+      action: isEmployeeClaim ? "employee_claimed_booking_segment" : "booking_reassigned",
+      employeeUserId: employee.uid,
+      employeeName,
+      originatedAsRequest: isRequestAssignment,
+      autoConfirmed: isEmployeeClaim && isRequestAssignment,
+      leaveConflict: isLeaveConflictAssignment,
+    },
+  });
 
   return response.status(200).json({
     id: attendance.id,

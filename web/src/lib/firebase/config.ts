@@ -22,6 +22,15 @@ const firebaseConfig = {
 // HRM uses a named Firestore database, not the default one
 const FIRESTORE_DATABASE_ID = process.env.NEXT_PUBLIC_FIRESTORE_DATABASE_ID || 'timmo-hrm-prod';
 
+// Firebase App Check site keys are public client configuration, like the
+// Firebase web API key. Keep the production key as a fallback so clean
+// release builds (for example a rollback built from git without an ignored
+// .env file) cannot silently ship without App Check and make every protected
+// API appear to have no data.
+const FIREBASE_APP_CHECK_SITE_KEY =
+  process.env.NEXT_PUBLIC_FIREBASE_APP_CHECK_SITE_KEY ||
+  '6LfLnGUtAAAAAAqg4WAC8rESC9dI5yCflpa8T4QT';
+
 // HRM Backend API base URL for public booking endpoints
 export const HRM_API_BASE_URL = process.env.NEXT_PUBLIC_HRM_API_BASE_URL || '';
 
@@ -57,7 +66,7 @@ if (typeof window !== 'undefined') {
     debugGlobal.FIREBASE_APPCHECK_DEBUG_TOKEN = configuredDebugToken || true;
   }
 
-  const siteKey = process.env.NEXT_PUBLIC_FIREBASE_APP_CHECK_SITE_KEY?.trim();
+  const siteKey = FIREBASE_APP_CHECK_SITE_KEY.trim();
   if (siteKey) {
     appCheck = initializeAppCheck(app, {
       provider: new ReCaptchaEnterpriseProvider(siteKey),

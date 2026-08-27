@@ -52,6 +52,7 @@ export const searchAttendances = async (request: Request, response: Response) =>
   }
 
   const needle = normalizeSearchText(parsed.data.q);
+  const compactNeedle = needle.replace(/[^a-z0-9]/g, "");
   const allAttendances = await firestoreRepository.shop.attendance.listShopAttendanceByStoreDateRange(
     authContext.ownerId,
     storeId,
@@ -60,24 +61,33 @@ export const searchAttendances = async (request: Request, response: Response) =>
     { skipCache: true },
   );
   const scopedAttendances = authContext.role === "employee"
-    ? allAttendances.filter((attendance) => isAttendanceAssignedToUser(attendance, authContext.uid))
+    ? allAttendances.filter((attendance) =>
+        isAttendanceAssignedToUser(attendance, authContext.uid) ||
+        attendance.originatedAsRequest === true ||
+        (attendance.bookingStatus === "processing" && attendance.staffSelectionType !== "specific"),
+      )
     : allAttendances;
-  const matches = scopedAttendances.filter((attendance) => normalizeSearchText([
-    attendance.attendanceCode,
-    attendance.bookingId,
-    attendance.customerName,
-    attendance.customerPhone,
-    attendance.note,
-    ...attendance.services.flatMap((service) => [
-      service.name,
-      service.displayName,
-      service.serviceCode,
-      ...(service.employees ?? []).flatMap((employee) => [
-        employee.employeeName,
-        employee.employeeUserId,
+  const matches = scopedAttendances.filter((attendance) => {
+    const haystack = normalizeSearchText([
+      attendance.attendanceCode,
+      attendance.bookingId,
+      attendance.customerName,
+      attendance.customerPhone,
+      attendance.note,
+      ...attendance.services.flatMap((service) => [
+        service.name,
+        service.displayName,
+        service.serviceCode,
+        ...(service.employees ?? []).flatMap((employee) => [
+          employee.employeeName,
+          employee.employeeUserId,
+        ]),
       ]),
-    ]),
-  ].join(" ")).includes(needle));
+    ].join(" "));
+    return haystack.includes(needle) ||
+      (compactNeedle.length > 0 &&
+        haystack.replace(/[^a-z0-9]/g, "").includes(compactNeedle));
+  });
 
   matches.sort((left, right) => (
     left.workDate === right.workDate

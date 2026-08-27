@@ -347,16 +347,10 @@
 }
 
 .staffPickerGrid {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
   gap: var(--space-sm);
-  overflow-x: auto;
   padding-bottom: 4px;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-
-.staffPickerGrid::-webkit-scrollbar {
-  display: none;
 }
 
 .staffPickerCard {
@@ -370,8 +364,7 @@
   background: var(--color-surface);
   cursor: pointer;
   transition: all 0.2s ease;
-  min-width: 80px;
-  flex-shrink: 0;
+  min-width: 0;
   position: relative;
 }
 
@@ -434,10 +427,21 @@
   color: var(--color-text-primary);
   text-align: center;
   line-height: 1.2;
-  max-width: 80px;
+  width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 420px) {
+  .inlineStaffPicker {
+    padding-right: var(--space-md);
+    padding-left: var(--space-md);
+  }
+
+  .staffPickerGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 
 /* ═══════════════════════════════════════ */
