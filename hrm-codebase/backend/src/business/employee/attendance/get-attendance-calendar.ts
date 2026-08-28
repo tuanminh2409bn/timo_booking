@@ -299,11 +299,13 @@ export const getAttendanceCalendar = async (req: Request, res: Response) => {
       const isVisibleRequest =
         attendance.originatedAsRequest === true &&
         !["cancelled", "no_show"].includes(attendance.bookingStatus ?? "");
-      const isAnyStaffLeaveConflict =
-        attendance.bookingStatus === "processing" &&
-        attendance.staffSelectionType !== "specific";
+      // A sick-worker booking is a shared replacement workflow regardless of
+      // whether the customer originally selected a specific employee. Every
+      // employee can see it, while the reassign endpoint still only permits an
+      // employee to claim the segment for themself.
+      const isVisibleLeaveConflict = attendance.bookingStatus === "processing";
       const isClaimedByCaller = attendance.proposedAssigneeUserId === authContext.uid;
-      return isVisibleRequest || isAnyStaffLeaveConflict || isClaimedByCaller ||
+      return isVisibleRequest || isVisibleLeaveConflict || isClaimedByCaller ||
         (attendance.bookingStatus === "requested" && assignedEmployeeUserId === undefined);
     });
   }

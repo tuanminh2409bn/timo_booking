@@ -64,7 +64,7 @@ export const searchAttendances = async (request: Request, response: Response) =>
     ? allAttendances.filter((attendance) =>
         isAttendanceAssignedToUser(attendance, authContext.uid) ||
         attendance.originatedAsRequest === true ||
-        (attendance.bookingStatus === "processing" && attendance.staffSelectionType !== "specific"),
+        attendance.bookingStatus === "processing",
       )
     : allAttendances;
   const matches = scopedAttendances.filter((attendance) => {
